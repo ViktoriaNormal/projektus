@@ -151,6 +151,16 @@ export default function Root() {
               <UserAvatar user={{ fullName: user?.full_name || '', avatarUrl: user?.avatar_url }} size="sm" />
               <span className="hidden md:block font-medium">{user?.full_name}</span>
             </Link>
+
+            <button
+              onClick={() => {
+                clearAuth();
+              }}
+              className="p-2 hover:bg-red-50 text-slate-500 hover:text-red-600 rounded-lg transition-colors"
+              title="Выйти"
+            >
+              <LogOut size={20} />
+            </button>
           </div>
         </div>
       </header>
