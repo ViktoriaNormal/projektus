@@ -25,7 +25,7 @@ import { useAuth } from "../contexts/AuthContext";
 
 export default function Root() {
   const location = useLocation();
-  const { user, isAuthenticated, isLoading, isAdmin, clearAuth } = useAuth();
+  const { user, isAuthenticated, isLoading, isAdmin, hasPermission, clearAuth } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
 
@@ -58,10 +58,10 @@ export default function Root() {
   ];
 
   const adminItems = [
-    { path: "/admin/users", icon: Users, label: "Пользователи" },
-    { path: "/admin/roles", icon: Shield, label: "Роли" },
-    { path: "/admin/password-policy", icon: Key, label: "Политика паролей" },
-    { path: "/admin/project-templates", icon: Settings, label: "Шаблоны проектов" },
+    { path: "/admin/users", icon: Users, label: "Пользователи", permission: "system.users.manage" },
+    { path: "/admin/roles", icon: Shield, label: "Системные роли", permission: "system.roles.manage" },
+    { path: "/admin/password-policy", icon: Key, label: "Политика паролей", permission: "system.password_policy.manage" },
+    { path: "/admin/project-templates", icon: Settings, label: "Шаблоны проектов", permission: "system.project_templates.manage" },
   ];
 
   const unreadCount = notifications.filter((n) => !n.read).length;
@@ -194,7 +194,7 @@ export default function Root() {
               <div className="px-3 mb-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">
                 Администрирование
               </div>
-              {adminItems.map((item) => (
+              {adminItems.filter((item) => hasPermission(item.permission)).map((item) => (
                 <Link
                   key={item.path}
                   to={item.path}

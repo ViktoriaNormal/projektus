@@ -7,6 +7,7 @@ interface AuthContextValue {
   isLoading: boolean;
   isAdmin: boolean;
   permissions: string[];
+  hasPermission: (perm: string) => boolean;
   setAuth: (data: AuthResponse) => void;
   clearAuth: () => void;
 }
@@ -114,10 +115,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(interval);
   }, [user, clearAuth]);
 
-  const isAdmin = permissions.includes('system.roles.manage');
+  const isAdmin = permissions.some((p) => p.startsWith('system.'));
+
+  const hasPermission = useCallback(
+    (perm: string) => permissions.includes(perm),
+    [permissions],
+  );
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, isAdmin, permissions, setAuth, clearAuth }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, isAdmin, permissions, hasPermission, setAuth, clearAuth }}>
       {children}
     </AuthContext.Provider>
   );

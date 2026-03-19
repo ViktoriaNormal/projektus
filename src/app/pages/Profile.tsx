@@ -28,6 +28,7 @@ import {
   type ProjectRoleResponse,
   type UserProfileResponse,
 } from '../api/users';
+import { getPermissionsCatalog, type PermissionDescriptor } from '../api/admin';
 import { changePassword, getPasswordPolicy, type PasswordPolicy } from '../api/auth';
 import { ApiError } from '../api/client';
 import { UserAvatar } from '../components/UserAvatar';
@@ -60,6 +61,7 @@ export default function Profile() {
   // Roles
   const [systemRoles, setSystemRoles] = useState<SystemRoleResponse[]>([]);
   const [projectRoles, setProjectRoles] = useState<ProjectRoleResponse[]>([]);
+  const [permCatalog, setPermCatalog] = useState<PermissionDescriptor[]>([]);
 
   // Avatar
   const [avatarUploading, setAvatarUploading] = useState(false);
@@ -76,13 +78,15 @@ export default function Profile() {
       getPasswordPolicy().catch(() => null),
       getUserSystemRoles(authUser.id).catch(() => [] as SystemRoleResponse[]),
       getUserProjectRoles(authUser.id).catch(() => [] as ProjectRoleResponse[]),
-    ]).then(([userData, policyData, sysRoles, projRoles]) => {
+      getPermissionsCatalog().catch(() => [] as PermissionDescriptor[]),
+    ]).then(([userData, policyData, sysRoles, projRoles, perms]) => {
       setProfile(userData);
       setFullName(userData.full_name);
       setEmail(userData.email);
       setPolicy(policyData);
       setSystemRoles(sysRoles);
       setProjectRoles(projRoles);
+      setPermCatalog(perms);
     }).catch(() => {
       setFullName(authUser.full_name || '');
       setEmail(authUser.email || '');
@@ -539,7 +543,7 @@ export default function Profile() {
                                 key={perm}
                                 className="inline-block px-2 py-0.5 bg-purple-100 text-purple-800 text-xs rounded-md"
                               >
-                                {perm}
+                                {permCatalog.find((p) => p.key === perm)?.description || perm}
                               </span>
                             ))}
                           </div>
