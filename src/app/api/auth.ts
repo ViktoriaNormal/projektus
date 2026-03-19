@@ -9,10 +9,18 @@ export interface UserResponse {
 }
 
 
+export interface AuthRoleResponse {
+  id: string;
+  name: string;
+  description: string;
+  permissions: string[];
+}
+
 export interface AuthResponse {
   access_token: string;
   refresh_token: string;
   user: UserResponse;
+  roles: AuthRoleResponse[];
 }
 
 export interface PasswordPolicy {

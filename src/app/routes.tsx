@@ -1,5 +1,6 @@
 import { createBrowserRouter } from "react-router";
 import Root from "./layouts/Root";
+import AdminGuard from "./layouts/AdminGuard";
 import Dashboard from "./pages/Dashboard";
 import Projects from "./pages/Projects";
 import ProjectDetail from "./pages/ProjectDetail";
@@ -35,10 +36,16 @@ export const router = createBrowserRouter([
       { path: "calendar", Component: Calendar },
       { path: "analytics", Component: Analytics },
       { path: "team", Component: Team },
-      { path: "admin/users", Component: AdminUsers },
-      { path: "admin/roles", Component: AdminRoles },
-      { path: "admin/password-policy", Component: AdminPasswordPolicy },
-      { path: "admin/project-templates", Component: ProjectTemplates },
+      {
+        path: "admin",
+        Component: AdminGuard,
+        children: [
+          { path: "users", Component: AdminUsers },
+          { path: "roles", Component: AdminRoles },
+          { path: "password-policy", Component: AdminPasswordPolicy },
+          { path: "project-templates", Component: ProjectTemplates },
+        ],
+      },
       { path: "profile", Component: Profile },
       { path: "settings", Component: Settings },
       { path: "*", Component: NotFound },

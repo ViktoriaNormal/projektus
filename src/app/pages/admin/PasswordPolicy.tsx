@@ -1,19 +1,85 @@
-import { useState } from "react";
-import { Key, Save, Info } from "lucide-react";
-import { passwordPolicy } from "../../data/mockData";
+import { useState, useEffect } from 'react';
+import { Key, Save, Info, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { getAdminPasswordPolicy, updateAdminPasswordPolicy } from '../../api/admin';
+import { ApiError } from '../../api/client';
 
 export default function AdminPasswordPolicy() {
-  const [policy, setPolicy] = useState(passwordPolicy);
-  const [saved, setSaved] = useState(false);
+  const [policy, setPolicy] = useState({
+    minLength: 8,
+    requireDigits: true,
+    requireLowercase: true,
+    requireUppercase: true,
+    requireSpecial: false,
+    notes: '',
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const handleSave = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+  useEffect(() => {
+    getAdminPasswordPolicy()
+      .then((data) => {
+        setPolicy({
+          minLength: data.minLength,
+          requireDigits: data.requireDigits,
+          requireLowercase: data.requireLowercase,
+          requireUppercase: data.requireUppercase,
+          requireSpecial: data.requireSpecial,
+          notes: data.notes || '',
+        });
+      })
+      .catch((err) => {
+        if (err instanceof ApiError && err.code === 'NOT_FOUND') {
+          // Policy not configured yet — use defaults
+        } else {
+          setMsg({ type: 'error', text: 'Не удалось загрузить парольную политику' });
+        }
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    setMsg(null);
+    setSaving(true);
+    try {
+      const updated = await updateAdminPasswordPolicy({
+        minLength: policy.minLength,
+        requireDigits: policy.requireDigits,
+        requireLowercase: policy.requireLowercase,
+        requireUppercase: policy.requireUppercase,
+        requireSpecial: policy.requireSpecial,
+        notes: policy.notes || null,
+      });
+      setPolicy({
+        minLength: updated.minLength,
+        requireDigits: updated.requireDigits,
+        requireLowercase: updated.requireLowercase,
+        requireUppercase: updated.requireUppercase,
+        requireSpecial: updated.requireSpecial,
+        notes: updated.notes || '',
+      });
+      setMsg({ type: 'success', text: 'Парольная политика успешно обновлена' });
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setMsg({ type: 'error', text: err.message });
+      } else {
+        setMsg({ type: 'error', text: 'Не удалось сохранить изменения' });
+      }
+    } finally {
+      setSaving(false);
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 size={32} className="animate-spin text-purple-600" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div>
         <h1 className="text-3xl font-bold">Парольная политика</h1>
         <p className="text-slate-600 mt-1">
@@ -21,7 +87,6 @@ export default function AdminPasswordPolicy() {
         </p>
       </div>
 
-      {/* Policy Form */}
       <div className="bg-white rounded-xl p-6 shadow-md border border-slate-100">
         <div className="flex items-center gap-3 mb-6">
           <div className="bg-gradient-to-br from-purple-500 to-pink-500 p-3 rounded-lg">
@@ -31,6 +96,24 @@ export default function AdminPasswordPolicy() {
         </div>
 
         <div className="space-y-6">
+          {msg && (
+            <div
+              className={`flex items-start gap-3 p-4 rounded-xl text-sm ${
+                msg.type === 'success'
+                  ? 'bg-green-50 border border-green-200 text-green-800'
+                  : 'bg-red-50 border border-red-200 text-red-800'
+              }`}
+            >
+              {msg.type === 'success' ? (
+                <CheckCircle2 size={18} className="shrink-0 mt-0.5" />
+              ) : (
+                <AlertCircle size={18} className="shrink-0 mt-0.5" />
+              )}
+              <span>{msg.text}</span>
+            </div>
+          )}
+
+
           {/* Min Length */}
           <div>
             <label className="block text-sm font-medium mb-2">
@@ -162,33 +245,17 @@ export default function AdminPasswordPolicy() {
           <div className="flex justify-end gap-3 pt-4">
             <button
               onClick={handleSave}
-              className="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all shadow-md hover:shadow-lg flex items-center gap-2 font-medium"
+              disabled={saving}
+              className="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all shadow-md hover:shadow-lg flex items-center gap-2 font-medium disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              <Save size={20} />
-              Сохранить изменения
+              {saving ? (
+                <Loader2 size={20} className="animate-spin" />
+              ) : (
+                <Save size={20} />
+              )}
+              {saving ? 'Сохранение...' : 'Сохранить изменения'}
             </button>
           </div>
-
-          {saved && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-green-900 text-sm">
-              ✓ Парольная политика успешно обновлена
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Preview */}
-      <div className="bg-white rounded-xl p-6 shadow-md border border-slate-100">
-        <h2 className="text-xl font-bold mb-4">Предпросмотр требований</h2>
-        <div className="bg-slate-50 rounded-lg p-4">
-          <p className="font-semibold mb-2">Пароль должен содержать:</p>
-          <ul className="space-y-1 text-sm text-slate-700">
-            <li>• Минимум {policy.minLength} символов</li>
-            {policy.requireDigits && <li>• Хотя бы одну цифру</li>}
-            {policy.requireLowercase && <li>• Строчные буквы</li>}
-            {policy.requireUppercase && <li>• Заглавные буквы</li>}
-            {policy.requireSpecial && <li>• Специальные символы</li>}
-          </ul>
         </div>
       </div>
     </div>

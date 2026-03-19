@@ -25,7 +25,7 @@ import { useAuth } from "../contexts/AuthContext";
 
 export default function Root() {
   const location = useLocation();
-  const { user, isAuthenticated, isLoading, clearAuth } = useAuth();
+  const { user, isAuthenticated, isLoading, isAdmin, clearAuth } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
 
@@ -189,6 +189,7 @@ export default function Root() {
               </Link>
             ))}
 
+            {isAdmin && (
             <div className="pt-4 mt-4 border-t border-slate-200">
               <div className="px-3 mb-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">
                 Администрирование
@@ -209,6 +210,7 @@ export default function Root() {
                 </Link>
               ))}
             </div>
+            )}
           </nav>
         </aside>
 
