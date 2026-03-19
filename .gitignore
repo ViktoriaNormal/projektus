@@ -1,5 +1,10 @@
 .idea
+.claude
+dist
 guidelines
 node_modules
 package-lock.json
 README.md
+BACKEND_CORS_FIX.md
+CLAUDE.md
+FRONTEND_API_GUIDE.md

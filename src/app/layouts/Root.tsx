@@ -1,4 +1,4 @@
-import { Outlet, Link, useLocation } from "react-router";
+import { Outlet, Link, useLocation, Navigate } from "react-router";
 import {
   LayoutDashboard,
   FolderKanban,
@@ -16,15 +16,30 @@ import {
   Menu,
   X,
   UsersRound,
+  LogOut,
 } from "lucide-react";
 import { useState } from "react";
 import { currentUser, notifications } from "../data/mockData";
 import { UserAvatar } from "../components/UserAvatar";
+import { useAuth } from "../contexts/AuthContext";
 
 export default function Root() {
   const location = useLocation();
+  const { isAuthenticated, isLoading, clearAuth } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
 
   const isActive = (path: string) => {
     if (path === "/") {

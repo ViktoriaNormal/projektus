@@ -16,8 +16,12 @@ import ProjectTemplates from "./pages/admin/ProjectTemplates";
 import Profile from "./pages/Profile";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
+import Login from "./pages/Login";
+import Register from "./pages/Register";
 
 export const router = createBrowserRouter([
+  { path: "/login", Component: Login },
+  { path: "/register", Component: Register },
   {
     path: "/",
     Component: Root,

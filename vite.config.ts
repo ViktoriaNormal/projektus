@@ -15,6 +15,15 @@ export default defineConfig({
     },
   },
 
-  // File types to support raw imports. 
+  // File types to support raw imports.
   assetsInclude: ['**/*.svg', '**/*.csv'],
+
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+    },
+  },
 })
