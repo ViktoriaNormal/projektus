@@ -8,6 +8,7 @@ export interface UserResponse {
   avatar_url: string | null;
 }
 
+
 export interface AuthResponse {
   access_token: string;
   refresh_token: string;
@@ -52,6 +53,7 @@ export function refreshToken(refresh_token: string) {
   );
 }
 
+
 export function logout(refresh_token: string) {
   return apiRequest<null>('/auth/logout', {
     method: 'POST',
@@ -61,4 +63,11 @@ export function logout(refresh_token: string) {
 
 export function getPasswordPolicy() {
   return apiRequest<PasswordPolicy>('/auth/password-policy');
+}
+
+export function changePassword(old_password: string, new_password: string) {
+  return apiRequest<null>('/auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify({ old_password, new_password }),
+  });
 }

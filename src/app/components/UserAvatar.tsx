@@ -10,6 +10,7 @@ interface UserAvatarProps {
 export function UserAvatar({ user, size = 'md', className = '' }: UserAvatarProps) {
   // Получаем инициалы: первую букву фамилии + первую букву имени
   const getInitials = (fullName: string) => {
+    if (!fullName) return '';
     const parts = fullName.trim().split(' ');
     if (parts.length >= 2) {
       // Фамилия Имя Отчество - берём первую букву фамилии и первую букву имени
@@ -22,7 +23,7 @@ export function UserAvatar({ user, size = 'md', className = '' }: UserAvatarProp
   };
 
   // Генерируем цвет фона на основе имени
-  const getBackgroundColor = (fullName: string) => {
+  const getBackgroundColor = (fullName: string = '') => {
     const colors = [
       'bg-gradient-to-br from-blue-500 to-blue-600',
       'bg-gradient-to-br from-purple-500 to-purple-600',
@@ -59,7 +60,7 @@ export function UserAvatar({ user, size = 'md', className = '' }: UserAvatarProp
       <img
         src={user.avatarUrl}
         alt={user.fullName}
-        className={`${sizeClasses[size]} rounded-full object-cover ${className}`}
+        className={`${sizeClasses[size]} rounded-full object-cover ring-1 ring-slate-200 ${className}`}
       />
     );
   }

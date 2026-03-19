@@ -150,6 +150,7 @@ components:
         email:      { type: string }
         full_name:  { type: string }
         avatar_url: { type: string, nullable: true }
+        position:   { type: string, nullable: true }
 
     UpdateUserProfileRequest:
       type: object
@@ -157,6 +158,7 @@ components:
       properties:
         full_name: { type: string }
         email:     { type: string, format: email }
+        position:  { type: string, nullable: true }
 
     # ── Projects ─────────────────────────────────────────────────────
     CreateProjectRequest:
@@ -752,6 +754,15 @@ components:
         id:          { type: string, format: uuid }
         name:        { type: string }
         description: { type: string }
+        permissions: { type: array, items: { type: string } }
+
+    ProjectRoleResponse:
+      type: object
+      properties:
+        projectId:   { type: string, format: uuid }
+        projectName: { type: string }
+        roles:       { type: array, items: { type: string } }
+        permissions: { type: array, items: { type: string } }
 
     CreateRoleRequest:
       type: object
@@ -1089,6 +1100,60 @@ paths:
                   - type: object
                     properties:
                       data: { $ref: '#/components/schemas/UserResponse' }
+
+  /v1/users/{userId}/roles:
+    get:
+      tags: [Users]
+      summary: Системные роли пользователя (только свои)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Системные роли пользователя
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/RoleResponse' }
+        '403':
+          description: Попытка запросить роли другого пользователя
+
+  /v1/users/{userId}/project-roles:
+    get:
+      tags: [Users]
+      summary: Проектные роли пользователя (только свои)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Проектные роли пользователя
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/ProjectRoleResponse' }
+        '403':
+          description: Попытка запросить роли другого пользователя
 
   # ── Notifications ─────────────────────────────────────────────────
   /v1/notifications:

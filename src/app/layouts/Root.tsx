@@ -19,13 +19,13 @@ import {
   LogOut,
 } from "lucide-react";
 import { useState } from "react";
-import { currentUser, notifications } from "../data/mockData";
+import { notifications } from "../data/mockData";
 import { UserAvatar } from "../components/UserAvatar";
 import { useAuth } from "../contexts/AuthContext";
 
 export default function Root() {
   const location = useLocation();
-  const { isAuthenticated, isLoading, clearAuth } = useAuth();
+  const { user, isAuthenticated, isLoading, clearAuth } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
 
@@ -148,8 +148,8 @@ export default function Root() {
               to="/profile"
               className="flex items-center gap-2 pl-3 pr-4 py-2 hover:bg-slate-100 rounded-lg transition-colors"
             >
-              <UserAvatar user={currentUser} size="sm" />
-              <span className="hidden md:block font-medium">{currentUser.fullName}</span>
+              <UserAvatar user={{ fullName: user?.full_name || '', avatarUrl: user?.avatar_url }} size="sm" />
+              <span className="hidden md:block font-medium">{user?.full_name}</span>
             </Link>
           </div>
         </div>

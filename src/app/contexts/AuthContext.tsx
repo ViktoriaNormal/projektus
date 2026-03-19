@@ -18,7 +18,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const setAuth = useCallback((data: AuthResponse) => {
     localStorage.setItem('access_token', data.access_token);
     localStorage.setItem('refresh_token', data.refresh_token);
-    setUser(data.user);
+    if (data.user) {
+      localStorage.setItem('user', JSON.stringify(data.user));
+      setUser(data.user);
+    }
   }, []);
 
   const clearAuth = useCallback(() => {
@@ -43,17 +46,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         clearAuth();
       }
+      setIsLoading(false);
     } else if (rt) {
       refreshTokenApi(rt)
         .then((data) => {
           localStorage.setItem('access_token', data.access_token);
           localStorage.setItem('refresh_token', data.refresh_token);
+          // Refresh doesn't return user — restore from localStorage
           const u = localStorage.getItem('user');
-          if (u) setUser(JSON.parse(u));
+          if (u) {
+            try {
+              setUser(JSON.parse(u));
+            } catch {
+              clearAuth();
+            }
+          } else {
+            // No saved user and refresh can't provide one — need to re-login
+            clearAuth();
+          }
         })
-        .catch(() => clearAuth());
+        .catch(() => clearAuth())
+        .finally(() => setIsLoading(false));
+    } else {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   }, [clearAuth]);
 
   useEffect(() => {
