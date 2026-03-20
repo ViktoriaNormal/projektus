@@ -144,7 +144,7 @@ export default function Register() {
             )}
 
             <div>
-              <label className="block text-sm font-medium mb-2">Полное имя <span className="text-red-500">*</span></label>
+              <label className="block text-sm font-medium mb-2">ФИО <span className="text-red-500">*</span></label>
               <input
                 type="text"
                 value={form.full_name}
