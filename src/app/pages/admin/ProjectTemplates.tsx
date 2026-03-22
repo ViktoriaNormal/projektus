@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import {
@@ -26,25 +26,35 @@ import {
   Link2,
   MessageCircle,
 } from "lucide-react";
+import { toast } from "sonner";
+import {
+  getTemplateReferences,
+  getProjectTemplates,
+  getProjectTemplate,
+  updateProjectTemplate,
+  createTemplateBoard,
+  updateTemplateBoard,
+  deleteTemplateBoard,
+  reorderTemplateBoards,
+  createTemplateBoardColumn,
+  updateTemplateBoardColumn,
+  deleteTemplateBoardColumn,
+  reorderTemplateBoardColumns,
+  updateTemplateBoardSwimlane,
+  deleteTemplateBoardSwimlane,
+  reorderTemplateBoardSwimlanes,
+  replaceTemplateBoardPriorityValues,
+  createTemplateBoardCustomField,
+  deleteTemplateBoardCustomField,
+  type TemplateReferences,
+  type ProjectTemplateDetail,
+  type TemplateBoard,
+  type TemplateBoardColumn,
+  type TemplateBoardSwimlane,
+  type TemplateBoardCustomField,
+} from "@/app/api/admin";
 
-// ── Types ──────────────────────────────────────────────────────
-
-interface TemplateColumn {
-  id: string;
-  name: string;
-  systemType: string;
-  wipLimit: number | null;
-  order: number;
-  isLocked?: boolean; // non-editable, non-deletable
-}
-
-interface TemplateSwimlane {
-  id: string;
-  name: string;
-  value: string;
-  wipLimit: number | null;
-  order: number;
-}
+// ── Types (internal, for UI state) ──────────────────────────
 
 interface TaskField {
   id: string;
@@ -56,212 +66,62 @@ interface TaskField {
   options?: string[];
 }
 
-interface TemplateBoard {
-  id: string;
-  name: string;
-  description: string;
-  isDefault: boolean;
-  columns: TemplateColumn[];
-  swimlaneGroupBy: string;
-  swimlanes: TemplateSwimlane[];
-  // Task template config
-  priorityType: "priority" | "service_class"; // kanban can choose; scrum always "priority"
-  priorityValues: string[];
-  estimationUnit: "story_points" | "time"; // scrum can choose; kanban always "time"
-  customFields: TaskField[];
-}
-
-interface ProjectTemplate {
-  id: string;
-  name: string;
-  type: "scrum" | "kanban";
-  description: string;
-  boards: TemplateBoard[];
-}
-
-// ── Constants ──────────────────────────────────────────────────
-
-// System types assignable to columns (on_pause and cancelled are NOT column types)
-const COLUMN_SYSTEM_TYPE_LABELS: Record<string, string> = {
-  initial: "Начальный",
-  in_progress: "В работе",
-  completed: "Выполнено",
-};
-
-const FIELD_TYPE_LABELS: Record<string, string> = {
-  text: "Текст",
-  number: "Число",
-  datetime: "Дата и время",
-  select: "Выпадающий список",
-  multiselect: "Множественный выбор",
-  checkbox: "Флажок",
-  user: "Пользователь",
-};
-
-const SWIMLANE_GROUP_LABELS: Record<string, string> = {
-  priority: "приоритету",
-  service_class: "классу обслуживания",
-  assignee: "исполнителю",
-  type: "типу задачи",
-  tags: "меткам",
-};
-
-const DEFAULT_PRIORITY_VALUES = ["Низкий", "Средний", "Высокий", "Критичный"];
-const DEFAULT_SERVICE_CLASS_VALUES = ["Ускоренный", "С фиксированной датой", "Стандартный", "Нематериальный"];
-
-function getSystemFieldNames(templateType: "scrum" | "kanban", board: TemplateBoard): string[] {
-  const fields = [
-    "Название", "Описание", "Статус",
-    "Автор", "Исполнитель", "Наблюдатели",
-    "Крайний срок выполнения",
-  ];
-
-  if (templateType === "scrum") {
-    fields.push("Приоритет");
-    fields.push("Спринт");
-    fields.push(board.estimationUnit === "story_points" ? "Оценка (Story Points)" : "Оценка (время)");
-  } else {
-    fields.push(board.priorityType === "service_class" ? "Класс обслуживания" : "Приоритет");
-    fields.push("Оценка (время)");
-  }
-
-  return fields;
-}
-
-function createDefaultBoard(name: string, templateType: "scrum" | "kanban"): TemplateBoard {
-  const ts = Date.now();
-  if (templateType === "scrum") {
-    return {
-      id: `board-${ts}`,
-      name,
-      description: "",
-      isDefault: false,
-      columns: [
-        { id: `col-${ts}-0`, name: "Бэклог спринта", systemType: "initial", wipLimit: null, order: 1, isLocked: true },
-        { id: `col-${ts}-1`, name: "В работе", systemType: "in_progress", wipLimit: null, order: 2 },
-        { id: `col-${ts}-2`, name: "На проверке", systemType: "in_progress", wipLimit: null, order: 3 },
-        { id: `col-${ts}-3`, name: "Выполнено", systemType: "completed", wipLimit: null, order: 4 },
-      ],
-      swimlaneGroupBy: "",
-      swimlanes: [],
-      priorityType: "priority",
-      priorityValues: [...DEFAULT_PRIORITY_VALUES],
-      estimationUnit: "story_points",
-      customFields: [],
-    };
-  }
-  return {
-    id: `board-${ts}`,
-    name,
-    description: "",
-    isDefault: false,
-    columns: [
-      { id: `col-${ts}-1`, name: "Надо сделать", systemType: "initial", wipLimit: null, order: 1 },
-      { id: `col-${ts}-2`, name: "Готово к работе", systemType: "initial", wipLimit: null, order: 2 },
-      { id: `col-${ts}-3`, name: "В работе", systemType: "in_progress", wipLimit: null, order: 3 },
-      { id: `col-${ts}-4`, name: "На проверке", systemType: "in_progress", wipLimit: null, order: 4 },
-      { id: `col-${ts}-5`, name: "Выполнено", systemType: "completed", wipLimit: null, order: 5 },
-    ],
-    swimlaneGroupBy: "service_class",
-    swimlanes: [
-      { id: `sw-${ts}-1`, name: "Ускоренный", value: "Ускоренный", wipLimit: null, order: 1 },
-      { id: `sw-${ts}-2`, name: "С фиксированной датой", value: "С фиксированной датой", wipLimit: null, order: 2 },
-      { id: `sw-${ts}-3`, name: "Стандартный", value: "Стандартный", wipLimit: null, order: 3 },
-      { id: `sw-${ts}-4`, name: "Нематериальный", value: "Нематериальный", wipLimit: null, order: 4 },
-    ],
-    priorityType: "service_class",
-    priorityValues: [...DEFAULT_SERVICE_CLASS_VALUES],
-    estimationUnit: "time",
-    customFields: [],
-  };
-}
-
-// ── Mock data ──────────────────────────────────────────────────
-
-const INITIAL_TEMPLATES: ProjectTemplate[] = [
-  {
-    id: "tpl-scrum",
-    name: "Scrum стандартный",
-    type: "scrum",
-    description: "Стандартный шаблон для Scrum-проектов с настройками по умолчанию",
-    boards: [
-      {
-        id: "board-scrum-1",
-        name: "Основная доска",
-        description: "Доска для основного хода разработки",
-        isDefault: true,
-        columns: [
-          { id: "col-s1", name: "Бэклог спринта", systemType: "initial", wipLimit: null, order: 1, isLocked: true },
-          { id: "col-s2", name: "В работе", systemType: "in_progress", wipLimit: null, order: 2 },
-          { id: "col-s3", name: "На проверке", systemType: "in_progress", wipLimit: null, order: 3 },
-          { id: "col-s4", name: "Выполнено", systemType: "completed", wipLimit: null, order: 4 },
-        ],
-        swimlaneGroupBy: "",
-        swimlanes: [],
-        priorityType: "priority",
-        priorityValues: [...DEFAULT_PRIORITY_VALUES],
-        estimationUnit: "story_points",
-        customFields: [],
-      },
-    ],
-  },
-  {
-    id: "tpl-kanban",
-    name: "Kanban стандартный",
-    type: "kanban",
-    description: "Стандартный шаблон для Kanban-проектов с поддержкой WIP лимитов",
-    boards: [
-      {
-        id: "board-kanban-1",
-        name: "Основная доска",
-        description: "Kanban-доска с поддержкой WIP лимитов",
-        isDefault: true,
-        columns: [
-          { id: "col-k1", name: "Надо сделать", systemType: "initial", wipLimit: null, order: 1 },
-          { id: "col-k2", name: "Готово к работе", systemType: "initial", wipLimit: null, order: 2 },
-          { id: "col-k3", name: "В работе", systemType: "in_progress", wipLimit: null, order: 3 },
-          { id: "col-k4", name: "На проверке", systemType: "in_progress", wipLimit: null, order: 4 },
-          { id: "col-k5", name: "Выполнено", systemType: "completed", wipLimit: null, order: 5 },
-        ],
-        swimlaneGroupBy: "service_class",
-        swimlanes: [
-          { id: "sw-1", name: "Ускоренный", value: "Ускоренный", wipLimit: null, order: 1 },
-          { id: "sw-2", name: "С фиксированной датой", value: "С фиксированной датой", wipLimit: null, order: 2 },
-          { id: "sw-3", name: "Стандартный", value: "Стандартный", wipLimit: null, order: 3 },
-          { id: "sw-4", name: "Нематериальный", value: "Нематериальный", wipLimit: null, order: 4 },
-        ],
-        priorityType: "service_class",
-        priorityValues: [...DEFAULT_SERVICE_CLASS_VALUES],
-        estimationUnit: "time",
-        customFields: [],
-      },
-    ],
-  },
-];
-
 // ════════════════════════════════════════════════════════════════
 // Main Component
 // ════════════════════════════════════════════════════════════════
 
 export default function ProjectTemplates() {
-  const [templates, setTemplates] = useState<ProjectTemplate[]>(INITIAL_TEMPLATES);
-  const [editingTemplate, setEditingTemplate] = useState<ProjectTemplate | null>(null);
+  const [templates, setTemplates] = useState<ProjectTemplateDetail[]>([]);
+  const [refs, setRefs] = useState<TemplateReferences | null>(null);
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  function openEditor(template: ProjectTemplate) {
-    setEditingTemplate(JSON.parse(JSON.stringify(template)));
+  const loadTemplates = useCallback(async () => {
+    try {
+      const data = await getProjectTemplates();
+      setTemplates(data);
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось загрузить шаблоны");
+    }
+  }, []);
+
+  useEffect(() => {
+    async function init() {
+      setLoading(true);
+      try {
+        const [tpls, references] = await Promise.all([
+          getProjectTemplates(),
+          getTemplateReferences(),
+        ]);
+        setTemplates(tpls);
+        setRefs(references);
+      } catch (e: any) {
+        toast.error(e.message || "Не удалось загрузить данные");
+      } finally {
+        setLoading(false);
+      }
+    }
+    init();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 size={32} className="animate-spin text-purple-600" />
+      </div>
+    );
   }
 
-  function handleSaveTemplate(updated: ProjectTemplate) {
-    setTemplates((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-    setEditingTemplate(null);
-  }
-
-  if (editingTemplate) {
+  if (editingTemplateId && refs) {
     return (
       <TemplateEditor
-        template={editingTemplate}
-        onSave={handleSaveTemplate}
-        onCancel={() => setEditingTemplate(null)}
+        templateId={editingTemplateId}
+        refs={refs}
+        onSave={() => {
+          setEditingTemplateId(null);
+          loadTemplates();
+        }}
+        onCancel={() => setEditingTemplateId(null)}
       />
     );
   }
@@ -280,7 +140,8 @@ export default function ProjectTemplates() {
           <TemplateCard
             key={template.id}
             template={template}
-            onEdit={() => openEditor(template)}
+            refs={refs}
+            onEdit={() => setEditingTemplateId(template.id)}
           />
         ))}
       </div>
@@ -289,10 +150,12 @@ export default function ProjectTemplates() {
 }
 
 // ════════════════════════════════════════════════════════════════
-// Template Card
+// Template Card (list view) — full board preview
 // ════════════════════════════════════════════════════════════════
 
-function TemplateCard({ template, onEdit }: { template: ProjectTemplate; onEdit: () => void }) {
+function TemplateCard({ template, refs, onEdit }: { template: ProjectTemplateDetail; refs: TemplateReferences | null; onEdit: () => void }) {
+  const swimlaneGroupLabels = refs ? buildSwimlaneGroupLabels(refs) : {};
+
   return (
     <div className="bg-white rounded-xl shadow-md border border-slate-100 hover:shadow-lg transition-all">
       <div className="p-6 space-y-5">
@@ -323,11 +186,11 @@ function TemplateCard({ template, onEdit }: { template: ProjectTemplate; onEdit:
           <div>
             <span className="text-slate-500">Тип проекта: </span>
             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-              template.type === "scrum"
+              template.projectType === "scrum"
                 ? "bg-blue-100 text-blue-700"
                 : "bg-green-100 text-green-700"
             }`}>
-              {template.type === "scrum" ? "Scrum" : "Kanban"}
+              {template.projectType === "scrum" ? "Scrum" : "Kanban"}
             </span>
           </div>
           <div>
@@ -338,8 +201,13 @@ function TemplateCard({ template, onEdit }: { template: ProjectTemplate; onEdit:
 
         {/* Boards preview */}
         <div className="space-y-3">
+          {template.boards.length === 0 && (
+            <div className="rounded-lg border-2 border-dashed border-slate-200 p-6 text-center">
+              <p className="text-sm text-slate-500">Доски ещё не добавлены. Нажмите «Редактировать», чтобы настроить шаблон.</p>
+            </div>
+          )}
           {template.boards.map((board) => {
-            const sysFields = getSystemFieldNames(template.type, board);
+            const sysFields = refs ? getSystemFieldNames(refs, template.projectType, board) : [];
             const customNames = board.customFields.map((f) => f.name);
             const allFields = [...sysFields, ...customNames];
 
@@ -358,26 +226,30 @@ function TemplateCard({ template, onEdit }: { template: ProjectTemplate; onEdit:
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
                       Этапы работы (колонки)
                     </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {board.columns.map((col) => (
-                        <span
-                          key={col.id}
-                          className="px-2.5 py-1 bg-purple-50 text-purple-700 text-xs rounded-md border border-purple-100 font-medium"
-                        >
-                          {col.name}
-                          {col.wipLimit != null && (
-                            <span className="text-purple-400 ml-1 font-normal">WIP:{col.wipLimit}</span>
-                          )}
-                        </span>
-                      ))}
-                    </div>
+                    {board.columns.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {board.columns.map((col) => (
+                          <span
+                            key={col.id}
+                            className="px-2.5 py-1 bg-purple-50 text-purple-700 text-xs rounded-md border border-purple-100 font-medium"
+                          >
+                            {col.name}
+                            {col.wipLimit != null && (
+                              <span className="text-purple-400 ml-1 font-normal">WIP:{col.wipLimit}</span>
+                            )}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-400">Колонки ещё не добавлены</p>
+                    )}
                   </div>
 
                   {/* Swimlanes */}
                   {board.swimlaneGroupBy && board.swimlanes.length > 0 && (
                     <div>
                       <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
-                        Дорожки (по {SWIMLANE_GROUP_LABELS[board.swimlaneGroupBy] || board.swimlaneGroupBy})
+                        Дорожки (по {swimlaneGroupLabels[board.swimlaneGroupBy] || board.swimlaneGroupBy})
                       </p>
                       <div className="flex flex-wrap gap-1.5">
                         {board.swimlanes.map((sw) => (
@@ -400,16 +272,20 @@ function TemplateCard({ template, onEdit }: { template: ProjectTemplate; onEdit:
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
                       Параметры задач
                     </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {allFields.map((name) => (
-                        <span
-                          key={name}
-                          className="px-2.5 py-1 bg-slate-100 text-slate-600 text-xs rounded-md border border-slate-200"
-                        >
-                          {name}
-                        </span>
-                      ))}
-                    </div>
+                    {allFields.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {allFields.map((name) => (
+                          <span
+                            key={name}
+                            className="px-2.5 py-1 bg-slate-100 text-slate-600 text-xs rounded-md border border-slate-200"
+                          >
+                            {name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-400">Параметры не настроены</p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -422,96 +298,219 @@ function TemplateCard({ template, onEdit }: { template: ProjectTemplate; onEdit:
 }
 
 // ════════════════════════════════════════════════════════════════
+// Helper: build labels from refs
+// ════════════════════════════════════════════════════════════════
+
+function buildColumnSystemTypeLabels(refs: TemplateReferences): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const t of refs.columnSystemTypes) map[t.key] = t.name;
+  return map;
+}
+
+function buildFieldTypeLabels(refs: TemplateReferences): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const t of refs.fieldTypes) map[t.key] = t.name;
+  return map;
+}
+
+// Labels for system task field types (fieldType values from systemTaskFields)
+// These are different from custom field types — they include special types like column, user_list, priority, etc.
+const SYSTEM_FIELD_TYPE_LABELS: Record<string, string> = {
+  text: "Текст",
+  number: "Число",
+  datetime: "Дата и время",
+  select: "Выпадающий список",
+  multiselect: "Множественный выбор",
+  checkbox: "Флажок",
+  user: "Пользователь",
+  user_list: "Список пользователей",
+  column: "Текущая колонка на доске задач или статус отмены задачи ",
+  priority: "Выбор из списка",
+  estimation: "Оценка",
+  sprint: "Итерация разработки",
+  tags: "Метки",
+};
+
+function buildSwimlaneGroupLabels(refs: TemplateReferences): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const t of refs.swimlaneGroupOptions) map[t.key] = t.name;
+  return map;
+}
+
+function buildPriorityTypeLabels(refs: TemplateReferences): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const t of refs.priorityTypeOptions) map[t.key] = t.name;
+  return map;
+}
+
+function getDefaultValuesForPriorityType(refs: TemplateReferences, priorityType: string): string[] {
+  const opt = refs.priorityTypeOptions.find(o => o.key === priorityType);
+  return opt ? [...opt.defaultValues] : [];
+}
+
+function getSystemFieldNames(refs: TemplateReferences, templateType: string, board: TemplateBoard): string[] {
+  return refs.systemTaskFields
+    .filter(f => f.availableFor.includes(templateType))
+    .map(f => {
+      if (f.key === "priority") {
+        const ptLabel = buildPriorityTypeLabels(refs)[board.priorityType];
+        return ptLabel || f.name;
+      }
+      if (f.key === "estimation") {
+        const eu = refs.estimationUnits.find(u => u.key === board.estimationUnit);
+        return eu ? `Оценка (${eu.name})` : f.name;
+      }
+      return f.name;
+    });
+}
+
+// ════════════════════════════════════════════════════════════════
 // Template Editor
 // ════════════════════════════════════════════════════════════════
 
 function TemplateEditor({
-  template,
+  templateId,
+  refs,
   onSave,
   onCancel,
 }: {
-  template: ProjectTemplate;
-  onSave: (t: ProjectTemplate) => void;
+  templateId: string;
+  refs: TemplateReferences;
+  onSave: () => void;
   onCancel: () => void;
 }) {
-  const [data, setData] = useState<ProjectTemplate>(template);
+  const [data, setData] = useState<ProjectTemplateDetail | null>(null);
+  const [loading, setLoading] = useState(true);
   const [activeBoardIndex, setActiveBoardIndex] = useState(0);
   const [activeTab, setActiveTab] = useState<"params" | "columns" | "swimlanes" | "template">("params");
   const [saving, setSaving] = useState(false);
 
   const [columnError, setColumnError] = useState("");
 
-  const board = data.boards[activeBoardIndex];
-  const isScrum = data.type === "scrum";
+  const COLUMN_SYSTEM_TYPE_LABELS = buildColumnSystemTypeLabels(refs);
+  const SWIMLANE_GROUP_LABELS = buildSwimlaneGroupLabels(refs);
 
-  function updateTemplate(patch: Partial<ProjectTemplate>) {
-    setData((prev) => ({ ...prev, ...patch }));
-  }
-
-  function updateBoard(boardIndex: number, patch: Partial<TemplateBoard>) {
-    setData((prev) => {
-      const boards = [...prev.boards];
-      boards[boardIndex] = { ...boards[boardIndex], ...patch };
-      return { ...prev, boards };
-    });
-  }
-
-  function addBoard() {
-    const newBoard = createDefaultBoard(`Доска ${data.boards.length + 1}`, data.type);
-    // If no boards exist, this one becomes default
-    if (data.boards.length === 0) {
-      newBoard.isDefault = true;
-    }
-    setData((prev) => ({ ...prev, boards: [...prev.boards, newBoard] }));
-    setActiveBoardIndex(data.boards.length);
-    setActiveTab("params");
-  }
-
-  function removeBoard(index: number) {
-    if (data.boards.length <= 1) return;
-    const removedWasDefault = data.boards[index].isDefault;
-    setData((prev) => {
-      const boards = prev.boards.filter((_, i) => i !== index);
-      // If we removed the default board, make the first remaining board default
-      if (removedWasDefault && boards.length > 0) {
-        boards[0] = { ...boards[0], isDefault: true };
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      try {
+        const detail = await getProjectTemplate(templateId);
+        setData(detail);
+      } catch (e: any) {
+        toast.error(e.message || "Не удалось загрузить шаблон");
+      } finally {
+        setLoading(false);
       }
-      return { ...prev, boards };
-    });
-    if (activeBoardIndex >= data.boards.length - 1) {
-      setActiveBoardIndex(Math.max(0, data.boards.length - 2));
+    }
+    load();
+  }, [templateId]);
+
+  // Reload full template from server
+  async function reloadTemplate() {
+    try {
+      const detail = await getProjectTemplate(templateId);
+      setData(detail);
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось обновить данные");
     }
   }
 
-  function setDefaultBoard(boardIndex: number) {
-    setData((prev) => ({
-      ...prev,
-      boards: prev.boards.map((b, i) => ({ ...b, isDefault: i === boardIndex })),
-    }));
+  if (loading || !data) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 size={32} className="animate-spin text-purple-600" />
+      </div>
+    );
   }
 
-  function moveBoard(dragIndex: number, hoverIndex: number) {
-    setData((prev) => {
-      const boards = [...prev.boards];
-      const [removed] = boards.splice(dragIndex, 1);
-      boards.splice(hoverIndex, 0, removed);
-      return { ...prev, boards };
-    });
+  const board = data.boards[activeBoardIndex];
+  const isScrum = data.projectType === "scrum";
+
+  // ── Board management ──────────────────────────────────────
+
+  async function addBoard() {
+    try {
+      const newBoard = await createTemplateBoard(templateId, {
+        name: `Доска ${data!.boards.length + 1}`,
+        isDefault: data!.boards.length === 0,
+        priorityType: isScrum ? "priority" : "service_class",
+        estimationUnit: isScrum ? "story_points" : "time",
+        swimlaneGroupBy: null,
+      });
+      await reloadTemplate();
+      // Find index of the new board
+      const detail = await getProjectTemplate(templateId);
+      setData(detail);
+      const idx = detail.boards.findIndex(b => b.id === newBoard.id);
+      setActiveBoardIndex(idx >= 0 ? idx : detail.boards.length - 1);
+      setActiveTab("params");
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось добавить доску");
+    }
+  }
+
+  async function removeBoard(index: number) {
+    if (data!.boards.length <= 1) return;
+    const boardToRemove = data!.boards[index];
+    try {
+      await deleteTemplateBoard(templateId, boardToRemove.id);
+      await reloadTemplate();
+      if (activeBoardIndex >= data!.boards.length - 1) {
+        setActiveBoardIndex(Math.max(0, activeBoardIndex - 1));
+      }
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось удалить доску");
+    }
+  }
+
+  async function setDefaultBoard(boardIndex: number) {
+    const targetBoard = data!.boards[boardIndex];
+    try {
+      await updateTemplateBoard(templateId, targetBoard.id, { isDefault: true });
+      await reloadTemplate();
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось установить доску по умолчанию");
+    }
+  }
+
+  async function moveBoard(dragIndex: number, hoverIndex: number) {
+    // Optimistic: reorder locally, then send to server
+    const boards = [...data!.boards];
+    const [removed] = boards.splice(dragIndex, 1);
+    boards.splice(hoverIndex, 0, removed);
+    const orders = boards.map((b, i) => ({ boardId: b.id, order: i + 1 }));
+    setData(prev => prev ? { ...prev, boards } : prev);
     setActiveBoardIndex(hoverIndex);
+    try {
+      await reorderTemplateBoards(templateId, orders);
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось изменить порядок досок");
+      await reloadTemplate();
+    }
   }
 
-  // ── Column order validation ──────────────────────────────────
-  // Rule: initial < in_progress < completed
-  // At least one in_progress must exist between initial and completed.
+  // ── Board update helper ──────────────────────────────────
+  async function handleUpdateBoard(boardId: string, patch: Partial<{
+    name: string; description: string; isDefault: boolean; order: number;
+    priorityType: string; estimationUnit: string; swimlaneGroupBy: string | null;
+  }>) {
+    try {
+      await updateTemplateBoard(templateId, boardId, patch);
+      await reloadTemplate();
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось обновить доску");
+    }
+  }
+
+  // ── Column validation ──────────────────────────────────────
 
   const PHASE_EARLY = new Set(["initial"]);
   const PHASE_MIDDLE = new Set(["in_progress"]);
   const PHASE_FINAL = new Set(["completed"]);
 
-  function validateColumnOrder(columns: TemplateColumn[]): string | null {
+  function validateColumnOrder(columns: TemplateBoardColumn[]): string | null {
     if (columns.length === 0) return null;
 
-    // Check ordering: all early before all middle before all final
     let phase: "early" | "middle" | "final" = "early";
     let hasMiddle = false;
 
@@ -533,7 +532,6 @@ function TemplateEditor({
       }
     }
 
-    // Must have at least one middle column
     const hasEarly = columns.some((c) => PHASE_EARLY.has(c.systemType));
     const hasFinal = columns.some((c) => PHASE_FINAL.has(c.systemType));
     if (hasEarly && hasFinal && !hasMiddle) {
@@ -545,103 +543,170 @@ function TemplateEditor({
 
   // ── Column helpers ──────────────────────────────────────────
 
-  function addColumn() {
-    const newCol: TemplateColumn = {
-      id: `col-${Date.now()}`,
-      name: "",
-      systemType: "in_progress",
-      wipLimit: null,
-      order: board.columns.length + 1,
-    };
-    const next = [...board.columns, newCol];
-    const err = validateColumnOrder(next);
-    if (err) { setColumnError(err); return; }
-    setColumnError("");
-    updateBoard(activeBoardIndex, { columns: next });
+  async function addColumn() {
+    if (!board) return;
+    try {
+      await createTemplateBoardColumn(templateId, board.id, {
+        name: "",
+        systemType: "in_progress",
+        wipLimit: null,
+        order: board.columns.length + 1,
+      });
+      setColumnError("");
+      await reloadTemplate();
+    } catch (e: any) {
+      if (e.code === "INVALID_COLUMN_ORDER") {
+        setColumnError(e.message);
+      } else {
+        toast.error(e.message || "Не удалось добавить колонку");
+      }
+    }
   }
 
-  function updateColumn(colId: string, field: string, value: any) {
-    const columns = board.columns.map((c) => (c.id === colId ? { ...c, [field]: value } : c));
+  async function updateColumn(colId: string, field: string, value: any) {
+    if (!board) return;
+    // Client-side pre-validation for systemType changes
     if (field === "systemType") {
+      const columns = board.columns.map((c) => (c.id === colId ? { ...c, systemType: value } : c));
       const err = validateColumnOrder(columns);
       if (err) { setColumnError(err); return; }
     }
     setColumnError("");
-    updateBoard(activeBoardIndex, { columns });
+    try {
+      await updateTemplateBoardColumn(templateId, board.id, colId, { [field]: value });
+      await reloadTemplate();
+    } catch (e: any) {
+      if (e.code === "INVALID_COLUMN_ORDER" || e.code === "COLUMN_LOCKED") {
+        setColumnError(e.message);
+      } else {
+        toast.error(e.message || "Не удалось обновить колонку");
+      }
+    }
   }
 
-  function removeColumn(colId: string) {
+  async function removeColumn(colId: string) {
+    if (!board) return;
     const col = board.columns.find((c) => c.id === colId);
     if (col?.isLocked) return;
-    const columns = board.columns.filter((c) => c.id !== colId);
-    columns.forEach((c, i) => (c.order = i + 1));
-    const err = validateColumnOrder(columns);
-    if (err) { setColumnError(err); return; }
-    setColumnError("");
-    updateBoard(activeBoardIndex, { columns });
+    try {
+      await deleteTemplateBoardColumn(templateId, board.id, colId);
+      setColumnError("");
+      await reloadTemplate();
+    } catch (e: any) {
+      if (e.code === "INVALID_COLUMN_ORDER" || e.code === "COLUMN_LOCKED") {
+        setColumnError(e.message);
+      } else {
+        toast.error(e.message || "Не удалось удалить колонку");
+      }
+    }
   }
 
-  function moveColumn(colId: string, direction: "up" | "down") {
+  async function moveColumn(colId: string, direction: "up" | "down") {
+    if (!board) return;
     const columns = [...board.columns];
     const index = columns.findIndex((c) => c.id === colId);
     const newIndex = direction === "up" ? index - 1 : index + 1;
     if (newIndex < 0 || newIndex >= columns.length) return;
-    // Can't move anything above the locked first column
     if (isScrum && (index === 0 || newIndex === 0)) return;
     [columns[index], columns[newIndex]] = [columns[newIndex], columns[index]];
     columns.forEach((c, i) => (c.order = i + 1));
     const err = validateColumnOrder(columns);
     if (err) { setColumnError(err); return; }
     setColumnError("");
-    updateBoard(activeBoardIndex, { columns });
+    const orders = columns.map(c => ({ columnId: c.id, order: c.order }));
+    // Optimistic update
+    setData(prev => {
+      if (!prev) return prev;
+      const boards = [...prev.boards];
+      boards[activeBoardIndex] = { ...boards[activeBoardIndex], columns };
+      return { ...prev, boards };
+    });
+    try {
+      await reorderTemplateBoardColumns(templateId, board.id, orders);
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось переместить колонку");
+      await reloadTemplate();
+    }
   }
 
   // ── Swimlane helpers ────────────────────────────────────────
 
-  function handleSetSwimlaneGroupBy(value: string) {
-    let swimlanes: TemplateSwimlane[] = [];
-    if (value === "priority") {
-      swimlanes = DEFAULT_PRIORITY_VALUES.map((v, i) => ({
-        id: `sw-${Date.now()}-${i}`, name: v, value: v, wipLimit: null, order: i + 1,
-      }));
-    } else if (value === "service_class") {
-      const vals = board.priorityType === "service_class" ? board.priorityValues : DEFAULT_SERVICE_CLASS_VALUES;
-      swimlanes = vals.map((v, i) => ({
-        id: `sw-${Date.now()}-${i}`, name: v, value: v, wipLimit: null, order: i + 1,
-      }));
+  async function handleSetSwimlaneGroupBy(value: string) {
+    if (!board) return;
+    try {
+      await updateTemplateBoard(templateId, board.id, {
+        swimlaneGroupBy: value || null,
+      });
+      await reloadTemplate();
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось изменить группировку");
     }
-    updateBoard(activeBoardIndex, { swimlaneGroupBy: value, swimlanes });
   }
 
-  function updateSwimlane(swId: string, field: string, value: any) {
-    const swimlanes = board.swimlanes.map((s) => (s.id === swId ? { ...s, [field]: value } : s));
-    updateBoard(activeBoardIndex, { swimlanes });
+  async function updateSwimlane(swId: string, field: string, value: any) {
+    if (!board) return;
+    try {
+      await updateTemplateBoardSwimlane(templateId, board.id, swId, { [field]: value });
+      await reloadTemplate();
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось обновить дорожку");
+    }
   }
 
-  function removeSwimlane(swId: string) {
-    const swimlanes = board.swimlanes.filter((s) => s.id !== swId);
-    swimlanes.forEach((s, i) => (s.order = i + 1));
-    updateBoard(activeBoardIndex, { swimlanes });
+  async function removeSwimlane(swId: string) {
+    if (!board) return;
+    try {
+      await deleteTemplateBoardSwimlane(templateId, board.id, swId);
+      await reloadTemplate();
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось удалить дорожку");
+    }
   }
 
-  function moveSwimlane(swId: string, direction: "up" | "down") {
+  async function moveSwimlane(swId: string, direction: "up" | "down") {
+    if (!board) return;
     const swimlanes = [...board.swimlanes];
     const index = swimlanes.findIndex((s) => s.id === swId);
     const newIndex = direction === "up" ? index - 1 : index + 1;
     if (newIndex < 0 || newIndex >= swimlanes.length) return;
     [swimlanes[index], swimlanes[newIndex]] = [swimlanes[newIndex], swimlanes[index]];
     swimlanes.forEach((s, i) => (s.order = i + 1));
-    updateBoard(activeBoardIndex, { swimlanes });
+    const orders = swimlanes.map(s => ({ swimlaneId: s.id, order: s.order }));
+    // Optimistic update
+    setData(prev => {
+      if (!prev) return prev;
+      const boards = [...prev.boards];
+      boards[activeBoardIndex] = { ...boards[activeBoardIndex], swimlanes };
+      return { ...prev, boards };
+    });
+    try {
+      await reorderTemplateBoardSwimlanes(templateId, board.id, orders);
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось переместить дорожку");
+      await reloadTemplate();
+    }
   }
 
-  // ── Save ────────────────────────────────────────────────────
+  // ── Save (template name/description) ──────────────────────
 
   async function handleSave() {
     setSaving(true);
-    // TODO: API call
-    await new Promise((r) => setTimeout(r, 300));
-    onSave(data);
-    setSaving(false);
+    try {
+      await updateProjectTemplate(templateId, {
+        name: data!.name,
+        description: data!.description,
+      });
+      toast.success("Шаблон сохранён");
+      onSave();
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось сохранить шаблон");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function updateLocalTemplate(patch: Partial<ProjectTemplateDetail>) {
+    setData(prev => prev ? { ...prev, ...patch } : prev);
   }
 
   return (
@@ -657,7 +722,7 @@ function TemplateEditor({
         <div className="flex-1">
           <h1 className="text-2xl font-bold">Редактирование шаблона</h1>
           <p className="text-slate-500 text-sm mt-0.5">
-            {data.type === "scrum" ? "Scrum" : "Kanban"} — {data.name}
+            {data.projectType === "scrum" ? "Scrum" : "Kanban"} — {data.name}
           </p>
         </div>
         <button
@@ -681,7 +746,7 @@ function TemplateEditor({
             <input
               type="text"
               value={data.name}
-              onChange={(e) => updateTemplate({ name: e.target.value })}
+              onChange={(e) => updateLocalTemplate({ name: e.target.value })}
               className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
             />
           </div>
@@ -689,7 +754,7 @@ function TemplateEditor({
             <label className="block text-sm font-medium mb-2">Тип проекта</label>
             <input
               type="text"
-              value={data.type === "scrum" ? "Scrum" : "Kanban"}
+              value={data.projectType === "scrum" ? "Scrum" : "Kanban"}
               disabled
               className="w-full px-4 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-500"
             />
@@ -699,7 +764,7 @@ function TemplateEditor({
           <label className="block text-sm font-medium mb-2">Описание</label>
           <textarea
             value={data.description}
-            onChange={(e) => updateTemplate({ description: e.target.value })}
+            onChange={(e) => updateLocalTemplate({ description: e.target.value })}
             className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
             rows={2}
           />
@@ -734,6 +799,24 @@ function TemplateEditor({
           </div>
         </div>
 
+        {/* Empty state when no boards */}
+        {data.boards.length === 0 && (
+          <div className="p-12 text-center">
+            <Columns size={48} className="mx-auto text-slate-400 mb-4" />
+            <p className="text-slate-600 mb-2">Нет досок в шаблоне</p>
+            <p className="text-sm text-slate-500 mb-4">
+              Добавьте первую доску, чтобы настроить колонки, дорожки и параметры задач
+            </p>
+            <button
+              onClick={addBoard}
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors inline-flex items-center gap-2"
+            >
+              <Plus size={18} />
+              Добавить первую доску
+            </button>
+          </div>
+        )}
+
         {/* Board settings tabs */}
         {board && (
           <>
@@ -765,7 +848,7 @@ function TemplateEditor({
               {activeTab === "params" && (
                 <BoardParamsTab
                   board={board}
-                  onChange={(patch) => updateBoard(activeBoardIndex, patch)}
+                  onChange={(patch) => handleUpdateBoard(board.id, patch)}
                   onSetDefault={() => setDefaultBoard(activeBoardIndex)}
                 />
               )}
@@ -779,24 +862,30 @@ function TemplateEditor({
                   onUpdate={updateColumn}
                   onRemove={removeColumn}
                   onMove={moveColumn}
+                  columnSystemTypeLabels={COLUMN_SYSTEM_TYPE_LABELS}
+                  taskStatusTypes={refs.taskStatusTypes}
                 />
               )}
               {activeTab === "swimlanes" && (
                 <BoardSwimlanesTab
                   isScrum={isScrum}
-                  swimlaneGroupBy={board.swimlaneGroupBy}
+                  swimlaneGroupBy={board.swimlaneGroupBy || ""}
                   swimlanes={board.swimlanes}
                   onSetGroupBy={handleSetSwimlaneGroupBy}
                   onUpdate={updateSwimlane}
                   onRemove={removeSwimlane}
                   onMove={moveSwimlane}
+                  swimlaneGroupLabels={SWIMLANE_GROUP_LABELS}
+                  swimlaneGroupOptions={refs.swimlaneGroupOptions}
                 />
               )}
               {activeTab === "template" && (
                 <BoardTaskTemplateTab
                   isScrum={isScrum}
                   board={board}
-                  onUpdateBoard={(patch) => updateBoard(activeBoardIndex, patch)}
+                  templateId={templateId}
+                  refs={refs}
+                  onReload={reloadTemplate}
                 />
               )}
             </div>
@@ -954,8 +1043,10 @@ function BoardColumnsTab({
   onUpdate,
   onRemove,
   onMove,
+  columnSystemTypeLabels,
+  taskStatusTypes,
 }: {
-  columns: TemplateColumn[];
+  columns: TemplateBoardColumn[];
   isScrum: boolean;
   error: string;
   onDismissError: () => void;
@@ -963,7 +1054,16 @@ function BoardColumnsTab({
   onUpdate: (id: string, field: string, value: any) => void;
   onRemove: (id: string) => void;
   onMove: (id: string, dir: "up" | "down") => void;
+  columnSystemTypeLabels: Record<string, string>;
+  taskStatusTypes: TemplateReferences["taskStatusTypes"];
 }) {
+  // Build description map from taskStatusTypes
+  const typeDescriptions: Record<string, string> = {};
+  const cancelledType = taskStatusTypes.find(t => !t.isColumnType);
+  for (const t of taskStatusTypes) {
+    typeDescriptions[t.key] = t.description;
+  }
+
   return (
     <div className="space-y-4">
       {/* Ordering rule */}
@@ -973,14 +1073,16 @@ function BoardColumnsTab({
           <div className="text-sm text-amber-800">
             <p className="font-medium mb-1">Правило порядка колонок:</p>
             <p>
-              Колонки с типом <strong>«Начальный»</strong> должны располагаться перед колонками <strong>«В работе»</strong>,
-              а те — перед <strong>«Выполнено»</strong>.
-              Между «Начальный» и «Выполнено» обязательно должна быть хотя бы одна колонка «В работе».
+              Колонки с типом <strong>«{columnSystemTypeLabels["initial"]}»</strong> должны располагаться перед колонками <strong>«{columnSystemTypeLabels["in_progress"]}»</strong>,
+              а те — перед <strong>«{columnSystemTypeLabels["completed"]}»</strong>.
+              Между «{columnSystemTypeLabels["initial"]}» и «{columnSystemTypeLabels["completed"]}» обязательно должна быть хотя бы одна колонка «{columnSystemTypeLabels["in_progress"]}».
             </p>
-            <p className="mt-1 text-amber-700">
-              Статус <strong>«Отменено»</strong> назначается задаче напрямую (не через колонку). Отменённые задачи
-              хранятся в отдельном разделе проекта.
-            </p>
+            {cancelledType && (
+              <p className="mt-1 text-amber-700">
+                Статус <strong>«{cancelledType.name}»</strong> назначается задаче напрямую (не через колонку). Отменённые задачи
+                хранятся в отдельном разделе проекта.
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -1047,7 +1149,7 @@ function BoardColumnsTab({
                     disabled={locked}
                     className={`w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 ${locked ? "bg-slate-100 text-slate-500" : ""}`}
                   >
-                    {Object.entries(COLUMN_SYSTEM_TYPE_LABELS).map(([val, label]) => (
+                    {Object.entries(columnSystemTypeLabels).map(([val, label]) => (
                       <option key={val} value={val}>{label}</option>
                     ))}
                   </select>
@@ -1118,10 +1220,12 @@ function BoardColumnsTab({
       <div className="mt-6 p-4 bg-slate-50 border border-slate-200 rounded-lg">
         <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Системные типы статусов задач</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-600">
-          <div><span className="font-medium">Начальный</span> — задача создана, но не взята в работу</div>
-          <div><span className="font-medium">В работе</span> — задача взята в работу</div>
-          <div><span className="font-medium">Выполнено</span> — задача выполнена и закрыта</div>
-          <div className="text-slate-400"><span className="font-medium">Отменено</span> — задача не выполнена и закрыта (назначается задаче, не колонке)</div>
+          {taskStatusTypes.map(t => (
+            <div key={t.key} className={!t.isColumnType ? "text-slate-400" : ""}>
+              <span className="font-medium">{t.name}</span> — {t.description}
+              {!t.isColumnType && " (назначается задаче, не колонке)"}
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -1140,27 +1244,28 @@ function BoardSwimlanesTab({
   onUpdate,
   onRemove,
   onMove,
+  swimlaneGroupLabels,
+  swimlaneGroupOptions,
 }: {
   isScrum: boolean;
   swimlaneGroupBy: string;
-  swimlanes: TemplateSwimlane[];
+  swimlanes: TemplateBoardSwimlane[];
   onSetGroupBy: (val: string) => void;
   onUpdate: (id: string, field: string, value: any) => void;
   onRemove: (id: string) => void;
   onMove: (id: string, dir: "up" | "down") => void;
+  swimlaneGroupLabels: Record<string, string>;
+  swimlaneGroupOptions: TemplateReferences["swimlaneGroupOptions"];
 }) {
+  const projectType = isScrum ? "scrum" : "kanban";
+  const availableOptions = swimlaneGroupOptions.filter(o => o.availableFor.includes(projectType));
+
   return (
     <div className="space-y-4">
       <div className="mb-6">
         <h3 className="font-semibold text-slate-700 mb-2">Группировка задач в дорожки</h3>
         <p className="text-sm text-slate-600 mb-2">
-          Дорожки автоматически создаются на основе значений выбранного параметра задачи.
-        </p>
-        <p className="text-xs text-slate-500 mb-4">
-          Дорожки можно строить по параметрам следующих типов:
-          <strong> Выпадающий список</strong> (дорожка на каждое значение),
-          <strong> Флажок</strong> (2 дорожки: да/нет),
-          <strong> Пользователь</strong> (дорожка на каждого участника).
+          Дорожки автоматически создаются на основе уникальных значений выбранного параметра задачи.
         </p>
         <div>
           <label className="block text-sm font-medium mb-2">Группировать задачи по:</label>
@@ -1170,11 +1275,9 @@ function BoardSwimlanesTab({
             className="w-full px-4 py-3 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
           >
             <option value="">Без дорожек</option>
-            <option value="priority">Приоритет задачи</option>
-            {!isScrum && <option value="service_class">Класс обслуживания</option>}
-            <option value="assignee">Исполнитель</option>
-            <option value="type">Тип задачи</option>
-            <option value="tags">Метки (теги)</option>
+            {availableOptions.map(opt => (
+              <option key={opt.key} value={opt.key}>{opt.name}</option>
+            ))}
           </select>
         </div>
 
@@ -1186,7 +1289,7 @@ function BoardSwimlanesTab({
               </div>
               <div className="flex-1">
                 <h4 className="font-medium text-purple-900 mb-1">
-                  Группировка по {SWIMLANE_GROUP_LABELS[swimlaneGroupBy] || swimlaneGroupBy}
+                  Группировка по {swimlaneGroupLabels[swimlaneGroupBy] || swimlaneGroupBy}
                 </h4>
                 <p className="text-sm text-purple-700">
                   Дорожки будут созданы автоматически для каждого значения выбранного параметра.
@@ -1270,12 +1373,20 @@ function BoardSwimlanesTab({
 function BoardTaskTemplateTab({
   isScrum,
   board,
-  onUpdateBoard,
+  templateId,
+  refs,
+  onReload,
 }: {
   isScrum: boolean;
   board: TemplateBoard;
-  onUpdateBoard: (patch: Partial<TemplateBoard>) => void;
+  templateId: string;
+  refs: TemplateReferences;
+  onReload: () => Promise<void>;
 }) {
+  const FIELD_TYPE_LABELS = buildFieldTypeLabels(refs);
+  const priorityTypeLabels = buildPriorityTypeLabels(refs);
+  const projectType = isScrum ? "scrum" : "kanban";
+
   // Custom field form state
   const [showAddForm, setShowAddForm] = useState(false);
   const [newName, setNewName] = useState("");
@@ -1287,29 +1398,45 @@ function BoardTaskTemplateTab({
   // Priority/service class value editing
   const [editingValues, setEditingValues] = useState(false);
   const [valueInput, setValueInput] = useState("");
-  const [editedValues, setEditedValues] = useState<string[]>([...board.priorityValues]);
+  const [editedValues, setEditedValues] = useState<string[]>(
+    board.priorityValues.map(v => v.value)
+  );
 
-  function handleAddCustomField() {
+  // Sync editedValues when board changes
+  useEffect(() => {
+    if (!editingValues) {
+      setEditedValues(board.priorityValues.map(v => v.value));
+    }
+  }, [board.priorityValues, editingValues]);
+
+  async function handleAddCustomField() {
     if (!newName.trim()) return;
-    const field: TaskField = {
-      id: `cf-${Date.now()}`,
-      name: newName.trim(),
-      type: newType,
-      isSystem: false,
-      isRequired: newRequired,
-      order: board.customFields.length + 1,
-      options: ["select", "multiselect"].includes(newType) ? newOptions : undefined,
-    };
-    onUpdateBoard({ customFields: [...board.customFields, field] });
-    setNewName("");
-    setNewType("text");
-    setNewRequired(false);
-    setNewOptions([]);
-    setShowAddForm(false);
+    try {
+      await createTemplateBoardCustomField(templateId, board.id, {
+        name: newName.trim(),
+        fieldType: newType,
+        isRequired: newRequired,
+        order: board.customFields.length + 1,
+        options: ["select", "multiselect"].includes(newType) ? newOptions : undefined,
+      });
+      setNewName("");
+      setNewType("text");
+      setNewRequired(false);
+      setNewOptions([]);
+      setShowAddForm(false);
+      await onReload();
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось добавить параметр");
+    }
   }
 
-  function removeCustomField(fieldId: string) {
-    onUpdateBoard({ customFields: board.customFields.filter((f) => f.id !== fieldId) });
+  async function removeCustomField(fieldId: string) {
+    try {
+      await deleteTemplateBoardCustomField(templateId, board.id, fieldId);
+      await onReload();
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось удалить параметр");
+    }
   }
 
   function addOption() {
@@ -1326,20 +1453,44 @@ function BoardTaskTemplateTab({
     }
   }
 
-  function saveValues() {
-    onUpdateBoard({ priorityValues: editedValues });
-    setEditingValues(false);
+  async function saveValues() {
+    try {
+      await replaceTemplateBoardPriorityValues(
+        templateId,
+        board.id,
+        editedValues.map((v, i) => ({ value: v, order: i + 1 })),
+      );
+      await onReload();
+      setEditingValues(false);
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось сохранить значения");
+    }
   }
 
-  function handlePriorityTypeChange(type: "priority" | "service_class") {
-    const values = type === "priority" ? [...DEFAULT_PRIORITY_VALUES] : [...DEFAULT_SERVICE_CLASS_VALUES];
-    onUpdateBoard({ priorityType: type, priorityValues: values });
-    setEditedValues(values);
+  async function handlePriorityTypeChange(type: "priority" | "service_class") {
+    try {
+      await updateTemplateBoard(templateId, board.id, { priorityType: type });
+      await onReload();
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось изменить тип приоритизации");
+    }
   }
 
-  function handleEstimationUnitChange(unit: "story_points" | "time") {
-    onUpdateBoard({ estimationUnit: unit });
+  async function handleEstimationUnitChange(unit: "story_points" | "time") {
+    try {
+      await updateTemplateBoard(templateId, board.id, { estimationUnit: unit });
+      await onReload();
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось изменить единицу оценки");
+    }
   }
+
+  // Get available estimation units for this project type
+  const availableEstimationUnits = refs.estimationUnits.filter(u => u.availableFor.includes(projectType));
+  // Get available priority types for this project type
+  const availablePriorityTypes = refs.priorityTypeOptions.filter(o => o.availableFor.includes(projectType));
+  // System task fields for this project type
+  const systemFields = refs.systemTaskFields.filter(f => f.availableFor.includes(projectType));
 
   // Locked system field row
   const LockedField = ({ name, description }: { name: string; description?: string }) => (
@@ -1353,7 +1504,7 @@ function BoardTaskTemplateTab({
     </div>
   );
 
-  const priorityLabel = board.priorityType === "service_class" ? "Класс обслуживания" : "Приоритет";
+  const priorityLabel = priorityTypeLabels[board.priorityType] || board.priorityType;
 
   return (
     <div className="space-y-6">
@@ -1365,13 +1516,11 @@ function BoardTaskTemplateTab({
         </p>
 
         <div className="space-y-2">
-          <LockedField name="Название" description="Текст" />
-          <LockedField name="Описание" description="Текст" />
-          <LockedField name="Статус" description="Колонка на доске задач" />
-          <LockedField name="Автор" description="Пользователь" />
-          <LockedField name="Исполнитель" description="Пользователь" />
-          <LockedField name="Наблюдатели" description="Список пользователей" />
-          <LockedField name="Крайний срок выполнения" description="Дата и время" />
+          {systemFields
+            .filter(f => f.key !== "priority" && f.key !== "estimation" && f.key !== "sprint")
+            .map(f => (
+              <LockedField key={f.key} name={f.name} description={SYSTEM_FIELD_TYPE_LABELS[f.fieldType] || f.fieldType} />
+            ))}
 
           {/* Priority / Service Class — configurable */}
           <div className="p-4 border border-purple-200 rounded-lg bg-purple-50/50">
@@ -1382,30 +1531,23 @@ function BoardTaskTemplateTab({
             </div>
 
             {/* Kanban: choose between priority and service class */}
-            {!isScrum && (
+            {availablePriorityTypes.length > 1 && (
               <div className="mb-3">
                 <p className="text-xs text-slate-600 mb-2">Тип параметра:</p>
                 <div className="flex gap-2">
-                  <button
-                    onClick={() => handlePriorityTypeChange("priority")}
-                    className={`px-3 py-1.5 text-sm rounded-lg border transition-all ${
-                      board.priorityType === "priority"
-                        ? "bg-purple-600 text-white border-purple-600"
-                        : "border-slate-200 hover:bg-slate-50"
-                    }`}
-                  >
-                    Приоритет
-                  </button>
-                  <button
-                    onClick={() => handlePriorityTypeChange("service_class")}
-                    className={`px-3 py-1.5 text-sm rounded-lg border transition-all ${
-                      board.priorityType === "service_class"
-                        ? "bg-purple-600 text-white border-purple-600"
-                        : "border-slate-200 hover:bg-slate-50"
-                    }`}
-                  >
-                    Класс обслуживания
-                  </button>
+                  {availablePriorityTypes.map(opt => (
+                    <button
+                      key={opt.key}
+                      onClick={() => handlePriorityTypeChange(opt.key as "priority" | "service_class")}
+                      className={`px-3 py-1.5 text-sm rounded-lg border transition-all ${
+                        board.priorityType === opt.key
+                          ? "bg-purple-600 text-white border-purple-600"
+                          : "border-slate-200 hover:bg-slate-50"
+                      }`}
+                    >
+                      {opt.name}
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
@@ -1416,7 +1558,7 @@ function BoardTaskTemplateTab({
                 <p className="text-xs text-slate-600">Значения:</p>
                 {!editingValues && (
                   <button
-                    onClick={() => { setEditingValues(true); setEditedValues([...board.priorityValues]); }}
+                    onClick={() => { setEditingValues(true); setEditedValues(board.priorityValues.map(v => v.value)); }}
                     className="text-xs text-purple-600 hover:text-purple-800"
                   >
                     Изменить
@@ -1445,8 +1587,11 @@ function BoardTaskTemplateTab({
                       className="flex-1 px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                       placeholder="Новое значение..."
                     />
-                    <button onClick={addValue} className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 rounded-lg"><Plus size={16} /></button>
+                    <button onClick={addValue} className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 rounded-lg" title="Добавить в список"><Plus size={16} /></button>
                   </div>
+                  <p className="text-xs text-slate-400">
+                    Введите значение и нажмите <strong>+</strong> (или Enter), чтобы добавить его в список. Можно добавить несколько значений. Затем нажмите <strong>Сохранить</strong>.
+                  </p>
                   <div className="flex gap-2">
                     <button onClick={() => setEditingValues(false)} className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">Отмена</button>
                     <button onClick={saveValues} className="px-3 py-1.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700">Сохранить</button>
@@ -1455,7 +1600,7 @@ function BoardTaskTemplateTab({
               ) : (
                 <div className="flex flex-wrap gap-1.5">
                   {board.priorityValues.map((val) => (
-                    <span key={val} className="px-2 py-1 bg-white border border-slate-200 rounded text-xs">{val}</span>
+                    <span key={val.id} className="px-2 py-1 bg-white border border-slate-200 rounded text-xs">{val.value}</span>
                   ))}
                 </div>
               )}
@@ -1472,39 +1617,32 @@ function BoardTaskTemplateTab({
               <span className="text-xs text-slate-400">Обязательный</span>
             </div>
 
-            {isScrum ? (
+            {availableEstimationUnits.length > 1 ? (
               <div>
                 <p className="text-xs text-slate-600 mb-2">Единица измерения:</p>
                 <div className="flex gap-2">
-                  <button
-                    onClick={() => handleEstimationUnitChange("story_points")}
-                    className={`px-3 py-1.5 text-sm rounded-lg border transition-all ${
-                      board.estimationUnit === "story_points"
-                        ? "bg-purple-600 text-white border-purple-600"
-                        : "border-slate-200 hover:bg-slate-50"
-                    }`}
-                  >
-                    Story Points
-                  </button>
-                  <button
-                    onClick={() => handleEstimationUnitChange("time")}
-                    className={`px-3 py-1.5 text-sm rounded-lg border transition-all ${
-                      board.estimationUnit === "time"
-                        ? "bg-purple-600 text-white border-purple-600"
-                        : "border-slate-200 hover:bg-slate-50"
-                    }`}
-                  >
-                    Время (дни/часы/минуты)
-                  </button>
+                  {availableEstimationUnits.map(unit => (
+                    <button
+                      key={unit.key}
+                      onClick={() => handleEstimationUnitChange(unit.key as "story_points" | "time")}
+                      className={`px-3 py-1.5 text-sm rounded-lg border transition-all ${
+                        board.estimationUnit === unit.key
+                          ? "bg-purple-600 text-white border-purple-600"
+                          : "border-slate-200 hover:bg-slate-50"
+                      }`}
+                    >
+                      {unit.name}
+                    </button>
+                  ))}
                 </div>
               </div>
             ) : (
-              <p className="text-xs text-slate-500">Единица измерения: дата и время</p>
+              <p className="text-xs text-slate-500">Единица измерения: {availableEstimationUnits[0]?.name || "время"}</p>
             )}
           </div>
 
           {/* Sprint — Scrum only */}
-          {isScrum && (
+          {systemFields.find(f => f.key === "sprint") && (
             <LockedField name="Спринт" description="Итерация разработки" />
           )}
         </div>
@@ -1600,14 +1738,17 @@ function BoardTaskTemplateTab({
                       type="text"
                       value={optionInput}
                       onChange={(e) => setOptionInput(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addOption())}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addOption(); } }}
                       className="flex-1 px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                       placeholder="Введите вариант..."
                     />
-                    <button onClick={addOption} className="px-3 py-2 bg-slate-200 hover:bg-slate-300 rounded-lg transition-colors">
+                    <button onClick={addOption} className="px-3 py-2 bg-slate-200 hover:bg-slate-300 rounded-lg transition-colors" title="Добавить в список">
                       <Plus size={18} />
                     </button>
                   </div>
+                  <p className="text-xs text-slate-400">
+                    Введите вариант и нажмите <strong>+</strong> (или Enter), чтобы добавить его в список.
+                  </p>
                   {newOptions.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {newOptions.map((option) => (
@@ -1670,8 +1811,8 @@ function BoardTaskTemplateTab({
                       )}
                       <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">кастомное</span>
                     </div>
-                    <p className="text-sm text-slate-600 mt-1">Тип: {FIELD_TYPE_LABELS[field.type]}</p>
-                    {field.options && (
+                    <p className="text-sm text-slate-600 mt-1">Тип: {FIELD_TYPE_LABELS[field.fieldType] || field.fieldType}</p>
+                    {field.options && field.options.length > 0 && (
                       <p className="text-xs text-slate-500 mt-1">Варианты: {field.options.join(", ")}</p>
                     )}
                   </div>
