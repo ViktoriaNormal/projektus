@@ -651,7 +651,7 @@ export default function BoardSettingsModal({
                   <div>
                     <h3 className="text-lg font-bold">Кастомные параметры</h3>
                     <p className="text-sm text-slate-600 mt-1">
-                      Добавьте дополнительные параметры для задач
+                      Добавьте дополнительные параметры для задач. Например, категории задач на проекте.
                     </p>
                   </div>
                   {!showAddFieldForm && (

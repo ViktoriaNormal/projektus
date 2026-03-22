@@ -147,6 +147,9 @@ export interface TemplateReferences {
   swimlaneGroupableFieldTypes: string[];
   priorityTypeOptions: { key: string; name: string; availableFor: string[]; defaultValues: string[] }[];
   systemTaskFields: { key: string; name: string; fieldType: string; availableFor: string[]; description?: string }[];
+  systemProjectParams: { key: string; name: string; fieldType: string; isRequired: boolean; options: string[] | null }[];
+  permissionAreas: { area: string; name: string; description: string; availableFor: string[] }[];
+  accessLevels: { key: string; name: string; description: string }[];
 }
 
 export interface TemplateBoardColumn {
@@ -208,6 +211,30 @@ export interface ProjectTemplateListItem {
   updatedAt: string;
 }
 
+export interface TemplateProjectParam {
+  id: string;
+  name: string;
+  fieldType: string;
+  isSystem: boolean;
+  isRequired: boolean;
+  order: number;
+  options: string[] | null;
+}
+
+export interface TemplateRolePermission {
+  area: string;
+  access: "full" | "view" | "none";
+}
+
+export interface TemplateRole {
+  id: string;
+  name: string;
+  description: string;
+  isDefault: boolean;
+  order: number;
+  permissions: TemplateRolePermission[];
+}
+
 export interface ProjectTemplateDetail {
   id: string;
   name: string;
@@ -216,6 +243,8 @@ export interface ProjectTemplateDetail {
   createdAt: string;
   updatedAt: string;
   boards: TemplateBoard[];
+  customProjectParams: TemplateProjectParam[];
+  roles: TemplateRole[];
 }
 
 // ── Project Templates — API ──────────────────────────────────
@@ -381,6 +410,72 @@ export function deleteTemplateBoardCustomField(templateId: string, boardId: stri
 
 export function reorderTemplateBoardCustomFields(templateId: string, boardId: string, orders: { fieldId: string; order: number }[]) {
   return apiRequest<null>(`/admin/project-templates/${templateId}/boards/${boardId}/custom-fields/reorder`, {
+    method: 'PATCH',
+    body: JSON.stringify({ orders }),
+  });
+}
+
+// ── Template Project Params ──────────────────────────────────
+
+export function createTemplateProjectParam(templateId: string, data: {
+  name: string; fieldType: string; isRequired?: boolean; order?: number; options?: string[] | null;
+}) {
+  return apiRequest<TemplateProjectParam>(`/admin/project-templates/${templateId}/project-params`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateTemplateProjectParam(templateId: string, paramId: string, data: Partial<{
+  name: string; isRequired: boolean; options: string[] | null;
+}>) {
+  return apiRequest<TemplateProjectParam>(`/admin/project-templates/${templateId}/project-params/${paramId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteTemplateProjectParam(templateId: string, paramId: string) {
+  return apiRequest<null>(`/admin/project-templates/${templateId}/project-params/${paramId}`, {
+    method: 'DELETE',
+  });
+}
+
+export function reorderTemplateProjectParams(templateId: string, orders: { paramId: string; order: number }[]) {
+  return apiRequest<null>(`/admin/project-templates/${templateId}/project-params/reorder`, {
+    method: 'PATCH',
+    body: JSON.stringify({ orders }),
+  });
+}
+
+// ── Template Roles ───────────────────────────────────────────
+
+export function createTemplateRole(templateId: string, data: {
+  name: string; description?: string; permissions: TemplateRolePermission[];
+}) {
+  return apiRequest<TemplateRole>(`/admin/project-templates/${templateId}/roles`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateTemplateRole(templateId: string, roleId: string, data: Partial<{
+  name: string; description: string; permissions: TemplateRolePermission[];
+}>) {
+  return apiRequest<TemplateRole>(`/admin/project-templates/${templateId}/roles/${roleId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteTemplateRole(templateId: string, roleId: string) {
+  return apiRequest<null>(`/admin/project-templates/${templateId}/roles/${roleId}`, {
+    method: 'DELETE',
+  });
+}
+
+export function reorderTemplateRoles(templateId: string, orders: { roleId: string; order: number }[]) {
+  return apiRequest<null>(`/admin/project-templates/${templateId}/roles/reorder`, {
     method: 'PATCH',
     body: JSON.stringify({ orders }),
   });

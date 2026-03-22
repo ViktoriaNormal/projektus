@@ -25,6 +25,13 @@ import {
   CheckSquare,
   Link2,
   MessageCircle,
+  Shield,
+  Users,
+  Settings,
+  Eye,
+  EyeOff,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -46,12 +53,20 @@ import {
   replaceTemplateBoardPriorityValues,
   createTemplateBoardCustomField,
   deleteTemplateBoardCustomField,
+  createTemplateProjectParam,
+  deleteTemplateProjectParam,
+  createTemplateRole,
+  updateTemplateRole,
+  deleteTemplateRole,
   type TemplateReferences,
   type ProjectTemplateDetail,
   type TemplateBoard,
   type TemplateBoardColumn,
   type TemplateBoardSwimlane,
   type TemplateBoardCustomField,
+  type TemplateProjectParam,
+  type TemplateRole,
+  type TemplateRolePermission,
 } from "@/app/api/admin";
 
 // ── Types (internal, for UI state) ──────────────────────────
@@ -450,7 +465,6 @@ function TemplateEditor({
   const [loading, setLoading] = useState(true);
   const [activeBoardIndex, setActiveBoardIndex] = useState(0);
   const [activeTab, setActiveTab] = useState<"params" | "columns" | "swimlanes" | "template">("params");
-  const [saving, setSaving] = useState(false);
 
   const [columnError, setColumnError] = useState("");
 
@@ -754,26 +768,15 @@ function TemplateEditor({
     }
   }
 
-  // ── Save (template name/description) ──────────────────────
+  // ── Save template name/description (debounced via NoteTextarea) ──
 
-  async function handleSave() {
-    setSaving(true);
+  async function handleUpdateTemplateProp(patch: Partial<{ name: string; description: string }>) {
     try {
-      await updateProjectTemplate(templateId, {
-        name: data!.name,
-        description: data!.description,
-      });
+      await updateProjectTemplate(templateId, patch);
       await reloadTemplate();
-      toast.success("Шаблон сохранён");
     } catch (e: any) {
-      toast.error(e.message || "Не удалось сохранить шаблон");
-    } finally {
-      setSaving(false);
+      toast.error(e.message || "Не удалось сохранить изменения");
     }
-  }
-
-  function updateLocalTemplate(patch: Partial<ProjectTemplateDetail>) {
-    setData(prev => prev ? { ...prev, ...patch } : prev);
   }
 
   return (
@@ -792,14 +795,12 @@ function TemplateEditor({
             {data.projectType === "scrum" ? "Scrum" : "Kanban"} — {data.name}
           </p>
         </div>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all shadow-md font-medium flex items-center gap-2 disabled:opacity-60"
-        >
-          {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-          {saving ? "Сохранение..." : "Сохранить шаблон"}
-        </button>
+      </div>
+
+      {/* Auto-save notice */}
+      <div className="flex items-center gap-2 px-4 py-2.5 bg-green-50 border border-green-200 rounded-lg">
+        <Save size={16} className="text-green-600 shrink-0" />
+        <p className="text-sm text-green-800">Все изменения сохраняются автоматически</p>
       </div>
 
       {/* Template info */}
@@ -810,11 +811,9 @@ function TemplateEditor({
             <label className="block text-sm font-medium mb-2">
               Название шаблона <span className="text-red-500">*</span>
             </label>
-            <input
-              type="text"
+            <NoteTextarea
               value={data.name}
-              onChange={(e) => updateLocalTemplate({ name: e.target.value })}
-              className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+              onSave={(val) => handleUpdateTemplateProp({ name: val || "" })}
             />
           </div>
           <div>
@@ -829,11 +828,9 @@ function TemplateEditor({
         </div>
         <div className="mt-4">
           <label className="block text-sm font-medium mb-2">Описание</label>
-          <textarea
+          <NoteTextarea
             value={data.description}
-            onChange={(e) => updateLocalTemplate({ description: e.target.value })}
-            className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-            rows={2}
+            onSave={(val) => handleUpdateTemplateProp({ description: val || "" })}
           />
         </div>
       </div>
@@ -841,6 +838,15 @@ function TemplateEditor({
       {/* Boards section */}
       <DndProvider backend={HTML5Backend}>
       <div className="bg-white rounded-xl shadow-md border border-slate-100 overflow-hidden">
+        <div className="p-6 pb-0">
+          <div className="flex items-center gap-3 mb-1">
+            <Layout size={20} className="text-purple-600" />
+            <h2 className="text-lg font-bold">Доски задач</h2>
+          </div>
+          <p className="text-sm text-slate-500 mb-4">
+            Настройте доски проекта: колонки рабочего процесса, дорожки, параметры задач и кастомные поля. Каждая доска представляет отдельный рабочий поток.
+          </p>
+        </div>
         {/* Board tabs */}
         <div className="border-b border-slate-200 bg-slate-50 px-6">
           <div className="flex items-center gap-2 overflow-x-auto pb-0 pt-3">
@@ -960,6 +966,24 @@ function TemplateEditor({
         )}
       </div>
       </DndProvider>
+
+      {/* Project Parameters */}
+      <ProjectParamsSection
+        templateId={templateId}
+        isScrum={isScrum}
+        refs={refs}
+        customParams={data.customProjectParams || []}
+        onReload={reloadTemplate}
+      />
+
+      {/* Project Roles */}
+      <ProjectRolesSection
+        templateId={templateId}
+        projectType={data.projectType}
+        refs={refs}
+        roles={data.roles || []}
+        onReload={reloadTemplate}
+      />
     </div>
   );
 }
@@ -1173,7 +1197,7 @@ function BoardColumnsTab({
           </p>
           {isScrum && (
             <p className="text-xs text-purple-600 mt-1">
-              Scrum: колонка «Бэклог спринта» обязательна и всегда первая.
+              Scrum: колонка «Бэклог спринта» обязательна и всегда первая. В неё переносятся выбранные из бэклога продукта задачи на спринт.
             </p>
           )}
         </div>
@@ -1773,7 +1797,7 @@ function BoardTaskTemplateTab({
           <div>
             <h3 className="text-lg font-bold">Кастомные параметры</h3>
             <p className="text-sm text-slate-500 mt-1">
-              Добавьте дополнительные параметры для задач
+              Добавьте дополнительные параметры для задач. Например, категории задач на проекте.
             </p>
           </div>
           {!showAddForm && (
@@ -1922,6 +1946,527 @@ function BoardTaskTemplateTab({
             </button>
           </div>
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// Section: Project Parameters
+// ════════════════════════════════════════════════════════════════
+
+function ProjectParamsSection({ templateId, isScrum, refs, customParams, onReload }: {
+  templateId: string;
+  isScrum: boolean;
+  refs: TemplateReferences;
+  customParams: TemplateProjectParam[];
+  onReload: () => Promise<void>;
+}) {
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newType, setNewType] = useState("text");
+  const [newRequired, setNewRequired] = useState(false);
+  const [newOptions, setNewOptions] = useState<string[]>([]);
+  const [optionInput, setOptionInput] = useState("");
+
+  const FIELD_TYPE_LABELS_LOCAL = buildFieldTypeLabels(refs);
+  const systemProjectParams = refs.systemProjectParams || [];
+
+  async function addCustomParam() {
+    if (!newName.trim()) return;
+    try {
+      await createTemplateProjectParam(templateId, {
+        name: newName.trim(),
+        fieldType: newType,
+        isRequired: newRequired,
+        order: customParams.length + 1,
+        options: ["select", "multiselect"].includes(newType) ? newOptions : null,
+      });
+      setNewName("");
+      setNewType("text");
+      setNewRequired(false);
+      setNewOptions([]);
+      setShowAddForm(false);
+      await onReload();
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось добавить параметр");
+    }
+  }
+
+  async function removeCustomParam(paramId: string) {
+    try {
+      await deleteTemplateProjectParam(templateId, paramId);
+      await onReload();
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось удалить параметр");
+    }
+  }
+
+  function addOption() {
+    if (optionInput.trim() && !newOptions.includes(optionInput.trim())) {
+      setNewOptions([...newOptions, optionInput.trim()]);
+      setOptionInput("");
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-xl shadow-md border border-slate-100 overflow-hidden">
+      <div className="p-6">
+        <div className="flex items-center gap-3 mb-1">
+          <Settings size={20} className="text-purple-600" />
+          <h2 className="text-lg font-bold">Параметры проекта</h2>
+        </div>
+        <p className="text-sm text-slate-500 mb-5">
+          Системные параметры задаются при создании каждого проекта на основе этого шаблона и не могут быть убраны. Дополнительно можно добавить кастомные параметры.
+        </p>
+
+        {/* System params */}
+        <div className="space-y-2">
+          {systemProjectParams.map((param) => (
+            <div key={param.key} className="p-3 border border-slate-200 rounded-lg bg-slate-50 flex items-center gap-3">
+              <Lock size={14} className="text-slate-400 shrink-0" />
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">{param.name}</span>
+                  <span className="text-xs px-1.5 py-0.5 bg-slate-200 text-slate-600 rounded">
+                    {SYSTEM_FIELD_TYPE_LABELS[param.fieldType] || FIELD_TYPE_LABELS_LOCAL[param.fieldType] || param.fieldType}
+                  </span>
+                </div>
+                {param.options && param.options.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {param.options.map(opt => (
+                      <span key={opt} className="text-xs px-2 py-0.5 bg-white border border-slate-200 rounded">{opt}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <span className="text-xs text-slate-400">
+                {param.isRequired ? "Обязательный" : "Опциональный"}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="flex items-start gap-2">
+            <Info size={16} className="text-blue-600 shrink-0 mt-0.5" />
+            <p className="text-xs text-blue-800">
+              Тип проекта ({isScrum ? "Scrum" : "Kanban"}) фиксируется при создании шаблона и определяет доступные функции:
+              {isScrum
+                ? " спринты, бэклог продукта, Story Points, Burndown-диаграмма."
+                : " WIP-лимиты, классы обслуживания, специфичная для Kanban аналитика, прогнозирование сроков завершения работ методом Монте-Карло."
+              }
+            </p>
+          </div>
+        </div>
+
+        {/* Custom params */}
+        <div className="mt-6">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 className="text-base font-bold">Кастомные параметры проекта</h3>
+              <p className="text-sm text-slate-500 mt-0.5">Дополнительные параметры, специфичные для ваших проектов. Например, наименование заказчика.</p>
+            </div>
+            {!showAddForm && (
+              <button
+                onClick={() => setShowAddForm(true)}
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2 text-sm"
+              >
+                <Plus size={16} />
+                Добавить параметр
+              </button>
+            )}
+          </div>
+
+          {showAddForm && (
+            <div className="p-4 border-2 border-purple-300 rounded-lg bg-purple-50 mb-4">
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Название параметра *</label>
+                    <input
+                      type="text"
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      placeholder="Например: Бюджет проекта"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Тип параметра *</label>
+                    <select
+                      value={newType}
+                      onChange={(e) => setNewType(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    >
+                      {Object.entries(FIELD_TYPE_LABELS_LOCAL).map(([val, label]) => (
+                        <option key={val} value={val}>{label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {["select", "multiselect"].includes(newType) && (
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Варианты для выбора</label>
+                    <div className="flex gap-2 mb-2">
+                      <input
+                        type="text"
+                        value={optionInput}
+                        onChange={(e) => setOptionInput(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addOption(); } }}
+                        className="flex-1 px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        placeholder="Введите вариант..."
+                      />
+                      <button onClick={addOption} className="px-3 py-2 bg-slate-200 hover:bg-slate-300 rounded-lg transition-colors" title="Добавить в список">
+                        <Plus size={18} />
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-400 mb-2">
+                      Введите вариант и нажмите <strong>+</strong> (или Enter), чтобы добавить его в список.
+                    </p>
+                    {newOptions.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {newOptions.map((option) => (
+                          <span key={option} className="px-2 py-1 bg-white border border-slate-200 rounded text-sm flex items-center gap-2">
+                            {option}
+                            <button onClick={() => setNewOptions(newOptions.filter((o) => o !== option))} className="hover:text-red-600">
+                              <X size={14} />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="project-param-required"
+                    checked={newRequired}
+                    onChange={(e) => setNewRequired(e.target.checked)}
+                    className="w-4 h-4 text-purple-600 rounded"
+                  />
+                  <label htmlFor="project-param-required" className="text-sm">Обязательное поле</label>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    onClick={() => { setShowAddForm(false); setNewName(""); setNewType("text"); setNewRequired(false); setNewOptions([]); }}
+                    className="flex-1 px-4 py-2 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+                  >
+                    Отмена
+                  </button>
+                  <button
+                    onClick={addCustomParam}
+                    disabled={!newName.trim()}
+                    className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Добавить
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {customParams.length > 0 ? (
+            <div className="space-y-2">
+              {customParams.map((param) => (
+                <div key={param.id} className="p-4 border border-slate-200 rounded-lg bg-white flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1">
+                    <GripVertical size={18} className="text-slate-400" />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-sm">{param.name}</p>
+                        {param.isRequired && (
+                          <span className="text-xs px-1.5 py-0.5 bg-red-100 text-red-700 rounded">обязательное</span>
+                        )}
+                        <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">кастомное</span>
+                      </div>
+                      <p className="text-sm text-slate-600 mt-0.5">Тип: {FIELD_TYPE_LABELS_LOCAL[param.fieldType] || param.fieldType}</p>
+                      {param.options && param.options.length > 0 && (
+                        <p className="text-xs text-slate-500 mt-0.5">Варианты: {param.options.join(", ")}</p>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => removeCustomParam(param.id)}
+                    className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : !showAddForm ? (
+            <div className="text-center py-8 bg-slate-50 rounded-lg border-2 border-dashed border-slate-300">
+              <p className="text-slate-600 mb-3">Нет кастомных параметров проекта</p>
+              <button
+                onClick={() => setShowAddForm(true)}
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+              >
+                Добавить первый параметр
+              </button>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// Section: Project Roles & Permissions
+// ════════════════════════════════════════════════════════════════
+
+function ProjectRolesSection({
+  templateId,
+  projectType,
+  refs,
+  roles,
+  onReload,
+}: {
+  templateId: string;
+  projectType: string;
+  refs: TemplateReferences;
+  roles: TemplateRole[];
+  onReload: () => Promise<void>;
+}) {
+  const [expandedRoleId, setExpandedRoleId] = useState<string | null>(null);
+  const [showAddRoleForm, setShowAddRoleForm] = useState(false);
+  const [newRoleName, setNewRoleName] = useState("");
+  const [newRoleDescription, setNewRoleDescription] = useState("");
+
+  const allAreas = Array.isArray(refs.permissionAreas) ? refs.permissionAreas : [];
+  const permissionAreas = allAreas.filter(a => a.availableFor?.includes(projectType));
+  const accessLevels = Array.isArray(refs.accessLevels) ? refs.accessLevels : [];
+  const areaMap = Object.fromEntries(allAreas.map(a => [a.area, a]));
+
+  async function handleAddRole() {
+    if (!newRoleName.trim()) return;
+    try {
+      const defaultPerms: TemplateRolePermission[] = permissionAreas.map(a => ({ area: a.area, access: "none" }));
+      const newRole = await createTemplateRole(templateId, {
+        name: newRoleName.trim(),
+        description: newRoleDescription.trim(),
+        permissions: defaultPerms,
+      });
+      setNewRoleName("");
+      setNewRoleDescription("");
+      setShowAddRoleForm(false);
+      await onReload();
+      setExpandedRoleId(newRole.id);
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось добавить роль");
+    }
+  }
+
+  async function handleUpdateRole(roleId: string, patch: Partial<{ name: string; description: string }>) {
+    try {
+      await updateTemplateRole(templateId, roleId, patch);
+      await onReload();
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось обновить роль");
+    }
+  }
+
+  async function handleUpdatePermission(roleId: string, area: string, access: TemplateRolePermission["access"]) {
+    try {
+      await updateTemplateRole(templateId, roleId, {
+        permissions: [{ area, access }],
+      });
+      await onReload();
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось обновить права");
+    }
+  }
+
+  async function handleRemoveRole(roleId: string) {
+    try {
+      await deleteTemplateRole(templateId, roleId);
+      await onReload();
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось удалить роль");
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-xl shadow-md border border-slate-100 overflow-hidden">
+      <div className="p-6">
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center gap-3">
+            <Shield size={20} className="text-purple-600" />
+            <h2 className="text-lg font-bold">Роли участников проекта</h2>
+          </div>
+          {!showAddRoleForm && (
+            <button
+              onClick={() => setShowAddRoleForm(true)}
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2 text-sm"
+            >
+              <Plus size={16} />
+              Добавить роль
+            </button>
+          )}
+        </div>
+        <p className="text-sm text-slate-500 mb-5">
+          Роли определяют права доступа участников к функциям проекта. При создании проекта из этого шаблона роли будут доступны для назначения участникам.
+        </p>
+
+        {showAddRoleForm && (
+          <div className="p-4 border-2 border-purple-300 rounded-lg bg-purple-50 mb-4">
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Название роли *</label>
+                  <input
+                    type="text"
+                    value={newRoleName}
+                    onChange={(e) => setNewRoleName(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="Например: Тестировщик"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Описание</label>
+                  <input
+                    type="text"
+                    value={newRoleDescription}
+                    onChange={(e) => setNewRoleDescription(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="Краткое описание роли..."
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-slate-500">Права доступа можно настроить после создания роли.</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setShowAddRoleForm(false); setNewRoleName(""); setNewRoleDescription(""); }}
+                  className="flex-1 px-4 py-2 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+                >
+                  Отмена
+                </button>
+                <button
+                  onClick={handleAddRole}
+                  disabled={!newRoleName.trim()}
+                  className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Добавить
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-3">
+          {roles.map((role) => {
+            const isExpanded = expandedRoleId === role.id;
+            return (
+              <div key={role.id} className="border border-slate-200 rounded-lg overflow-hidden">
+                {/* Role header */}
+                <div
+                  className={`p-4 flex items-center gap-3 cursor-pointer transition-colors ${isExpanded ? "bg-purple-50 border-b border-slate-200" : "bg-slate-50 hover:bg-slate-100"}`}
+                  onClick={() => setExpandedRoleId(isExpanded ? null : role.id)}
+                >
+                  <Users size={18} className="text-slate-500 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-sm">{role.name || "Без названия"}</span>
+                        {role.isDefault && (
+                          <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">по умолчанию</span>
+                        )}
+                      </div>
+                      {role.description && <p className="text-xs text-slate-500 mt-0.5">{role.description}</p>}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleRemoveRole(role.id); }}
+                      className="p-1.5 text-red-500 hover:bg-red-50 rounded transition-colors"
+                      title="Удалить роль"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                    {isExpanded ? <ChevronUp size={18} className="text-slate-400" /> : <ChevronDown size={18} className="text-slate-400" />}
+                  </div>
+                </div>
+
+                {/* Expanded: permissions */}
+                {isExpanded && (
+                  <div className="p-4 space-y-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                      <div>
+                        <label className="block text-xs font-medium mb-1">Название роли</label>
+                        <NoteTextarea
+                          value={role.name}
+                          onSave={(val) => handleUpdateRole(role.id, { name: val || "" })}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium mb-1">Описание роли</label>
+                        <NoteTextarea
+                          value={role.description}
+                          onSave={(val) => handleUpdateRole(role.id, { description: val || "" })}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Права доступа</p>
+                      <div className="space-y-1.5">
+                        {role.permissions.map((perm) => {
+                          const areaDef = areaMap[perm.area];
+                          return (
+                            <div key={perm.area} className="flex items-center justify-between p-2.5 bg-slate-50 rounded-lg gap-3">
+                              <div className="min-w-0">
+                                <span className="text-sm font-medium">{areaDef?.name || perm.area}</span>
+                                {areaDef?.description && <p className="text-xs text-slate-500 mt-0.5">{areaDef.description}</p>}
+                              </div>
+                              <div className="flex gap-1 shrink-0">
+                                {accessLevels.map((level) => (
+                                  <button
+                                    key={level.key}
+                                    onClick={() => handleUpdatePermission(role.id, perm.area, level.key as TemplateRolePermission["access"])}
+                                    className={`px-2.5 py-1 text-xs rounded-md border transition-all ${
+                                      perm.access === level.key
+                                        ? level.key === "full"
+                                          ? "bg-green-600 text-white border-green-600"
+                                          : level.key === "view"
+                                            ? "bg-amber-500 text-white border-amber-500"
+                                            : "bg-slate-500 text-white border-slate-500"
+                                        : "border-slate-200 text-slate-600 hover:bg-slate-100"
+                                    }`}
+                                    title={level.description || ""}
+                                  >
+                                    {level.key === "none" ? <EyeOff size={12} className="inline mr-1" /> : <Eye size={12} className="inline mr-1" />}
+                                    {level.name}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {roles.length === 0 && !showAddRoleForm && (
+            <div className="text-center py-8 bg-slate-50 rounded-lg border-2 border-dashed border-slate-300">
+              <p className="text-slate-600 mb-3">Нет ролей</p>
+              <button
+                onClick={() => setShowAddRoleForm(true)}
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+              >
+                Добавить первую роль
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
