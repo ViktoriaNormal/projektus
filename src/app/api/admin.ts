@@ -156,6 +156,7 @@ export interface TemplateBoardColumn {
   wipLimit: number | null;
   order: number;
   isLocked: boolean;
+  note: string | null;
 }
 
 export interface TemplateBoardSwimlane {
@@ -163,6 +164,7 @@ export interface TemplateBoardSwimlane {
   name: string;
   wipLimit: number | null;
   order: number;
+  note: string | null;
 }
 
 export interface TemplateBoardPriorityValue {

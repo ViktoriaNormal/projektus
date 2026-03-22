@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import {
@@ -293,6 +293,73 @@ function TemplateCard({ template, refs, onEdit }: { template: ProjectTemplateDet
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// Note Textarea with debounced save
+// ════════════════════════════════════════════════════════════════
+
+function NoteTextarea({ value, onSave }: { value: string | null; onSave: (val: string | null) => void }) {
+  const [localValue, setLocalValue] = useState(value ?? "");
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const textareaRef = useCallback((el: HTMLTextAreaElement | null) => {
+    if (el) {
+      el.style.height = "auto";
+      el.style.height = el.scrollHeight + "px";
+    }
+  }, []);
+
+  // Sync from server when value changes externally (e.g. after reload)
+  useEffect(() => {
+    setLocalValue(value ?? "");
+  }, [value]);
+
+  function handleChange(newVal: string) {
+    setLocalValue(newVal);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      onSave(newVal || null);
+    }, 600);
+  }
+
+  function handleClear() {
+    setLocalValue("");
+    if (timerRef.current) clearTimeout(timerRef.current);
+    onSave(null);
+  }
+
+  // Save on unmount if pending
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  return (
+    <div className="relative">
+      <textarea
+        ref={textareaRef}
+        value={localValue}
+        onChange={(e) => {
+          handleChange(e.target.value);
+          e.target.style.height = "auto";
+          e.target.style.height = e.target.scrollHeight + "px";
+        }}
+        rows={1}
+        className="w-full px-3 py-1.5 pr-8 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none overflow-hidden"
+        placeholder="Правила работы, пояснения для команды..."
+      />
+      {localValue && (
+        <button
+          onClick={handleClear}
+          className="absolute right-2 top-1.5 p-0.5 text-slate-400 hover:text-red-500 rounded transition-colors"
+          title="Очистить заметку"
+        >
+          <X size={14} />
+        </button>
+      )}
     </div>
   );
 }
@@ -696,8 +763,8 @@ function TemplateEditor({
         name: data!.name,
         description: data!.description,
       });
+      await reloadTemplate();
       toast.success("Шаблон сохранён");
-      onSave();
     } catch (e: any) {
       toast.error(e.message || "Не удалось сохранить шаблон");
     } finally {
@@ -1102,6 +1169,7 @@ function BoardColumnsTab({
         <div>
           <p className="text-sm text-slate-600">
             Настройте колонки доски задач. Каждая колонка должна иметь системный тип.
+            К каждой колонке можно добавить заметку — например, чтобы зафиксировать правила работы на этом этапе.
           </p>
           {isScrum && (
             <p className="text-xs text-purple-600 mt-1">
@@ -1198,6 +1266,14 @@ function BoardColumnsTab({
                   )}
                 </div>
               </div>
+              {/* Note */}
+              <div className="mt-3">
+                <label className="block text-xs font-medium mb-1 text-slate-500">Заметка</label>
+                <NoteTextarea
+                  value={column.note}
+                  onSave={(val) => onUpdate(column.id, "note", val)}
+                />
+              </div>
             </div>
           );
         })}
@@ -1266,6 +1342,7 @@ function BoardSwimlanesTab({
         <h3 className="font-semibold text-slate-700 mb-2">Группировка задач в дорожки</h3>
         <p className="text-sm text-slate-600 mb-2">
           Дорожки автоматически создаются на основе уникальных значений выбранного параметра задачи.
+          К каждой дорожке можно добавить заметку — например, чтобы описать правила приоритизации или обработки задач в этой категории.
         </p>
         <div>
           <label className="block text-sm font-medium mb-2">Группировать задачи по:</label>
@@ -1357,6 +1434,14 @@ function BoardSwimlanesTab({
                     <Trash2 size={16} />
                   </button>
                 </div>
+              </div>
+              {/* Note */}
+              <div className="mt-3">
+                <label className="block text-xs font-medium mb-1 text-slate-500">Заметка</label>
+                <NoteTextarea
+                  value={swimlane.note}
+                  onSave={(val) => onUpdate(swimlane.id, "note", val)}
+                />
               </div>
             </div>
           ))}
