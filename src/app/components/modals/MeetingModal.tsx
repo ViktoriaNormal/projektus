@@ -1,95 +1,257 @@
-import { X, Calendar as CalendarIcon, Clock, MapPin, Users, Save, Trash2, Search, Plus, UserPlus } from "lucide-react";
+import { X, Calendar as CalendarIcon, Clock, MapPin, Users, Save, Search, Plus, UserPlus, Loader2, Crown } from "lucide-react";
 import { useState, useEffect } from "react";
-import { users, projects } from "../../data/mockData";
+import { toast } from "sonner";
+import { projects } from "../../data/mockData";
 import { UserAvatar } from "../UserAvatar";
+import { searchUsers, getUser, type UserProfileResponse } from "../../api/users";
+import { useAuth } from "../../contexts/AuthContext";
+import type { MeetingDetailsResponse, CreateMeetingData, UpdateMeetingData } from "../../api/meetings";
 
-interface Meeting {
-  id?: number;
-  title: string;
-  type: string;
-  projectId?: number | null;
-  startTime: string;
-  endTime: string;
-  participants: number[];
-  location: string;
-}
-
-interface MeetingModalNewProps {
-  meeting?: Meeting;
+interface MeetingModalProps {
+  meeting?: MeetingDetailsResponse;
   isOpen: boolean;
   onClose: () => void;
-  onSave?: (meeting: Meeting) => void;
-  onDelete?: (id: number) => void;
+  onSave?: (data: CreateMeetingData) => Promise<void>;
+  onUpdate?: (meetingId: string, data: UpdateMeetingData, newParticipantIds?: string[]) => Promise<void>;
+  onCancel?: (id: string) => Promise<void>;
   mode: "create" | "edit";
+  defaultStartDate?: string;
 }
 
-export function MeetingModal({ meeting, isOpen, onClose, onSave, onDelete, mode }: MeetingModalNewProps) {
-  const [selectedProject, setSelectedProject] = useState<number | null>(meeting?.projectId || null);
-  const [selectedType, setSelectedType] = useState(meeting?.type || "");
-  const [selectedParticipants, setSelectedParticipants] = useState<number[]>(meeting?.participants || []);
+function formatLocalDateTime(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  const h = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `${y}-${m}-${d}T${h}:${min}`;
+}
+
+function getRoundedNow(): string {
+  const now = new Date();
+  const minutes = now.getMinutes();
+  const remainder = minutes % 10;
+  if (remainder > 0) {
+    now.setMinutes(minutes + (10 - remainder));
+  }
+  now.setSeconds(0, 0);
+  return formatLocalDateTime(now);
+}
+
+function plusOneHour(dateTimeLocal: string): string {
+  const date = new Date(dateTimeLocal);
+  date.setHours(date.getHours() + 1);
+  return formatLocalDateTime(date);
+}
+
+export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCancel, mode, defaultStartDate }: MeetingModalProps) {
+  const { user: authUser } = useAuth();
+  const organizerId = meeting?.organizerId || authUser?.id || null;
+
+  const [name, setName] = useState(meeting?.name || "");
+  const [description, setDescription] = useState(meeting?.description || "");
+  const [selectedProject, setSelectedProject] = useState<string | null>(meeting?.projectId || null);
+  const [selectedType, setSelectedType] = useState(meeting?.meetingType || "");
+  const initStart = meeting?.startTime ? meeting.startTime.slice(0, 16) : defaultStartDate || getRoundedNow();
+  const [startTime, setStartTime] = useState(initStart);
+  const [endTime, setEndTime] = useState(meeting?.endTime ? meeting.endTime.slice(0, 16) : plusOneHour(initStart));
+  const [location, setLocation] = useState(meeting?.location || "");
+  const [selectedParticipants, setSelectedParticipants] = useState<UserProfileResponse[]>([]);
+  const [organizerProfile, setOrganizerProfile] = useState<UserProfileResponse | null>(null);
+  const [existingParticipantIds, setExistingParticipantIds] = useState<string[]>([]);
   const [showUserSearch, setShowUserSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<UserProfileResponse[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // Load organizer profile
+  useEffect(() => {
+    if (!organizerId) return;
+    getUser(organizerId)
+      .then(setOrganizerProfile)
+      .catch(() => setOrganizerProfile(null));
+  }, [organizerId]);
+
+  // Auto-add organizer to participants on create
+  useEffect(() => {
+    if (mode === "create" && organizerProfile && !selectedParticipants.find((p) => p.id === organizerProfile.id)) {
+      setSelectedParticipants((prev) => {
+        if (prev.find((p) => p.id === organizerProfile.id)) return prev;
+        return [organizerProfile, ...prev];
+      });
+    }
+  }, [organizerProfile, mode]);
 
   useEffect(() => {
+    if (!isOpen) return;
     if (meeting) {
+      setName(meeting.name);
+      setDescription(meeting.description || "");
       setSelectedProject(meeting.projectId || null);
-      setSelectedType(meeting.type);
-      setSelectedParticipants(meeting.participants);
+      setSelectedType(meeting.meetingType);
+      setStartTime(meeting.startTime ? meeting.startTime.slice(0, 16) : "");
+      setEndTime(meeting.endTime ? meeting.endTime.slice(0, 16) : "");
+      setLocation(meeting.location || "");
+      const ids = meeting.participants.map((p) => p.userId);
+      setExistingParticipantIds(ids);
+      loadParticipantProfiles(ids);
+    } else {
+      const start = defaultStartDate || getRoundedNow();
+      setName("");
+      setDescription("");
+      setSelectedProject(null);
+      setSelectedType("");
+      setStartTime(start);
+      setEndTime(plusOneHour(start));
+      setLocation("");
+
+      // Keep organizer, clear the rest
+      setSelectedParticipants(organizerProfile ? [organizerProfile] : []);
+      setExistingParticipantIds([]);
     }
-  }, [meeting]);
+  }, [isOpen, meeting, defaultStartDate]);
+
+  const loadParticipantProfiles = async (userIds: string[]) => {
+    if (userIds.length === 0) {
+      setSelectedParticipants(organizerProfile ? [organizerProfile] : []);
+      return;
+    }
+    try {
+      const profiles = await Promise.all(
+        userIds.map(async (id) => {
+          try {
+            return await getUser(id);
+          } catch {
+            return null;
+          }
+        })
+      );
+      const loaded = profiles.filter((p): p is UserProfileResponse => p !== null);
+      // Ensure organizer is first
+      if (organizerId && !loaded.find((p) => p.id === organizerId) && organizerProfile) {
+        loaded.unshift(organizerProfile);
+      }
+      setSelectedParticipants(loaded);
+    } catch {
+      setSelectedParticipants(organizerProfile ? [organizerProfile] : []);
+    }
+  };
+
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    const timeout = setTimeout(async () => {
+      try {
+        const results = await searchUsers(searchQuery, 10, 0);
+        const selectedIds = selectedParticipants.map((p) => p.id);
+        setSearchResults(results.filter((u) => !selectedIds.includes(u.id)));
+      } catch {
+        setSearchResults([]);
+      }
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [searchQuery, selectedParticipants]);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onClose();
+
+    // Validate times are in the future
+    const startDate = new Date(startTime);
+    const endDate = new Date(endTime);
+    const now = new Date();
+
+    if (startDate <= now) {
+      toast.error("Время начала должно быть позже текущего времени");
+      return;
+    }
+    if (endDate <= now) {
+      toast.error("Время окончания должно быть позже текущего времени");
+      return;
+    }
+    if (endDate <= startDate) {
+      toast.error("Время окончания должно быть позже времени начала");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      if (mode === "create" && onSave) {
+        const data: CreateMeetingData = {
+          name,
+          startTime: startDate.toISOString(),
+          endTime: endDate.toISOString(),
+          projectId: selectedProject || undefined,
+          description: description || undefined,
+          meetingType: selectedType || undefined,
+          location: location || undefined,
+          participantIds: selectedParticipants.map((p) => p.id),
+        };
+        await onSave(data);
+        toast.success("Встреча создана");
+      } else if (mode === "edit" && meeting && onUpdate) {
+        const data: UpdateMeetingData = {
+          name,
+          startTime: startDate.toISOString(),
+          endTime: endDate.toISOString(),
+          description: description || null,
+          meetingType: selectedType || null,
+          location: location || null,
+        };
+        const newIds = selectedParticipants
+          .map((p) => p.id)
+          .filter((id) => !existingParticipantIds.includes(id));
+        await onUpdate(meeting.id, data, newIds.length > 0 ? newIds : undefined);
+        toast.success("Изменения сохранены");
+      }
+      onClose();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Не удалось сохранить встречу");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleDelete = () => {
-    if (meeting?.id && onDelete) {
-      if (confirm("Вы уверены, что хотите удалить эту встречу? Все участники получат уведомление об отмене.")) {
-        onDelete(meeting.id);
+  const handleCancel = async () => {
+    if (meeting?.id && onCancel) {
+      setSaving(true);
+      try {
+        await onCancel(meeting.id);
+        toast.success("Встреча отменена");
+        setShowDeleteConfirm(false);
         onClose();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Не удалось отменить встречу");
+        setShowDeleteConfirm(false);
+      } finally {
+        setSaving(false);
       }
     }
   };
 
-  const handleInviteAllTeam = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.checked && selectedProject) {
-      const project = projects.find(p => p.id === selectedProject);
-      if (project && project.members) {
-        setSelectedParticipants(project.members);
-      }
-    } else {
-      setSelectedParticipants([]);
-    }
-  };
-
-  const addParticipant = (userId: number) => {
-    if (!selectedParticipants.includes(userId)) {
-      setSelectedParticipants([...selectedParticipants, userId]);
+  const addParticipant = (user: UserProfileResponse) => {
+    if (!selectedParticipants.find((p) => p.id === user.id)) {
+      setSelectedParticipants([...selectedParticipants, user]);
     }
     setShowUserSearch(false);
     setSearchQuery("");
+    setSearchResults([]);
   };
 
-  const removeParticipant = (userId: number) => {
-    setSelectedParticipants(selectedParticipants.filter(id => id !== userId));
+  const removeParticipant = (userId: string) => {
+    if (userId === organizerId) return; // Can't remove organizer
+    setSelectedParticipants(selectedParticipants.filter((p) => p.id !== userId));
   };
 
-  const filteredUsers = users.filter((user) =>
-    (user.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    user.email.toLowerCase().includes(searchQuery.toLowerCase())) &&
-    !selectedParticipants.includes(user.id)
-  );
-
-  const selectedProjectData = projects.find(p => p.id === selectedProject);
+  const selectedProjectData = projects.find((p) => String(p.id) === selectedProject);
   const projectType = selectedProjectData?.type;
 
-  // Фильтруем типы встреч в зависимости от типа проекта
   const getMeetingTypes = () => {
     if (!selectedProject) {
-      // Если проект не выбран, показываем все типы
       return [
         { group: "Scrum-события", options: [
           { value: "scrum_planning", label: "Планирование спринта" },
@@ -167,11 +329,12 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onDelete, mode 
           <div>
             <label className="block text-sm font-medium mb-2 flex items-center gap-2">
               <CalendarIcon size={16} />
-              Название встречи
+              Название встречи <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
-              defaultValue={meeting?.title}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
               className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="Введите название встречи..."
               required
@@ -179,19 +342,29 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onDelete, mode 
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-2">Проект (опционально)</label>
-            <select 
+            <label className="block text-sm font-medium mb-2">Описание</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              placeholder="Описание встречи..."
+              rows={2}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">Проект</label>
+            <select
               value={selectedProject || ""}
               onChange={(e) => {
-                const value = e.target.value ? Number(e.target.value) : null;
+                const value = e.target.value || null;
                 setSelectedProject(value);
-                setSelectedType(""); // Сбрасываем тип при смене проекта
-                setSelectedParticipants([]); // Сбрасываем участников
+                setSelectedType("");
               }}
               className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">Без привязки к проекту</option>
-              {projects.filter(p => p.status === "Активный").map((project) => (
+              {projects.filter((p) => p.status === "Активный").map((project) => (
                 <option key={project.id} value={project.id}>
                   {project.name} ({project.type === "scrum" ? "Scrum" : "Kanban"})
                 </option>
@@ -200,8 +373,8 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onDelete, mode 
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-2">Тип встречи</label>
-            <select 
+            <label className="block text-sm font-medium mb-2">Тип встречи <span className="text-red-500">*</span></label>
+            <select
               value={selectedType}
               onChange={(e) => setSelectedType(e.target.value)}
               className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -229,11 +402,15 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onDelete, mode 
             <div>
               <label className="block text-sm font-medium mb-2 flex items-center gap-2">
                 <Clock size={16} />
-                Дата и время начала
+                Дата и время начала <span className="text-red-500">*</span>
               </label>
               <input
                 type="datetime-local"
-                defaultValue={meeting?.startTime ? meeting.startTime.slice(0, 16) : ""}
+                value={startTime}
+                onChange={(e) => {
+                  setStartTime(e.target.value);
+                  if (e.target.value) setEndTime(plusOneHour(e.target.value));
+                }}
                 className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 required
               />
@@ -241,11 +418,12 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onDelete, mode 
             <div>
               <label className="block text-sm font-medium mb-2 flex items-center gap-2">
                 <Clock size={16} />
-                Дата и время окончания
+                Дата и время окончания <span className="text-red-500">*</span>
               </label>
               <input
                 type="datetime-local"
-                defaultValue={meeting?.endTime ? meeting.endTime.slice(0, 16) : ""}
+                value={endTime}
+                onChange={(e) => setEndTime(e.target.value)}
                 className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 required
               />
@@ -255,11 +433,12 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onDelete, mode 
           <div>
             <label className="block text-sm font-medium mb-2 flex items-center gap-2">
               <MapPin size={16} />
-              Место проведения
+              Место проведения <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
-              defaultValue={meeting?.location}
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
               className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="Конференц-зал, Online и т.д."
               required
@@ -274,15 +453,9 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onDelete, mode 
                 Участники ({selectedParticipants.length})
               </label>
               {selectedProject && (
-                <label className="flex items-center gap-2 cursor-pointer text-sm">
-                  <input
-                    type="checkbox"
-                    checked={selectedProjectData?.members && selectedParticipants.length === selectedProjectData.members.length}
-                    onChange={handleInviteAllTeam}
-                    className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
-                  />
+                <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-500">
                   <UserPlus size={14} />
-                  <span>Пригласить всю команду</span>
+                  <span>Привязка к проекту — скоро</span>
                 </label>
               )}
             </div>
@@ -290,25 +463,34 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onDelete, mode 
             {/* Selected Participants */}
             {selectedParticipants.length > 0 && (
               <div className="mb-3 p-3 bg-slate-50 rounded-lg space-y-2 max-h-48 overflow-y-auto">
-                {selectedParticipants.map((userId) => {
-                  const user = users.find(u => u.id === userId);
-                  if (!user) return null;
+                {selectedParticipants.map((user) => {
+                  const isOrganizer = user.id === organizerId;
                   return (
-                    <div key={userId} className="flex items-center justify-between p-2 bg-white rounded-lg border border-slate-200">
+                    <div key={user.id} className={`flex items-center justify-between p-2 rounded-lg border ${isOrganizer ? "bg-amber-50 border-amber-200" : "bg-white border-slate-200"}`}>
                       <div className="flex items-center gap-2">
-                        <UserAvatar user={user} size="sm" />
+                        <UserAvatar user={{ fullName: user.full_name, avatarUrl: user.avatar_url }} size="sm" />
                         <div>
-                          <p className="text-sm font-medium">{user.fullName}</p>
+                          <p className="text-sm font-medium flex items-center gap-1.5">
+                            {user.full_name}
+                            {isOrganizer && (
+                              <span className="inline-flex items-center gap-0.5 text-xs text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full font-medium">
+                                <Crown size={10} />
+                                Организатор
+                              </span>
+                            )}
+                          </p>
                           <p className="text-xs text-slate-500">{user.email}</p>
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => removeParticipant(userId)}
-                        className="p-1 hover:bg-red-100 text-red-600 rounded transition-colors"
-                      >
-                        <X size={16} />
-                      </button>
+                      {!isOrganizer && (
+                        <button
+                          type="button"
+                          onClick={() => removeParticipant(user.id)}
+                          className="p-1 hover:bg-red-100 text-red-600 rounded transition-colors"
+                        >
+                          <X size={16} />
+                        </button>
+                      )}
                     </div>
                   );
                 })}
@@ -336,19 +518,20 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onDelete, mode 
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    autoFocus
                   />
                 </div>
                 <div className="max-h-48 overflow-y-auto space-y-2">
-                  {filteredUsers.length > 0 ? (
-                    filteredUsers.map((user) => (
+                  {searchResults.length > 0 ? (
+                    searchResults.map((user) => (
                       <div
                         key={user.id}
-                        onClick={() => addParticipant(user.id)}
+                        onClick={() => addParticipant(user)}
                         className="flex items-center gap-2 p-2 hover:bg-white rounded-lg cursor-pointer transition-colors border border-transparent hover:border-blue-300"
                       >
-                        <UserAvatar user={user} size="sm" />
+                        <UserAvatar user={{ fullName: user.full_name, avatarUrl: user.avatar_url }} size="sm" />
                         <div className="flex-1">
-                          <p className="text-sm font-medium">{user.fullName}</p>
+                          <p className="text-sm font-medium">{user.full_name}</p>
                           <p className="text-xs text-slate-500">{user.email}</p>
                         </div>
                       </div>
@@ -363,45 +546,80 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onDelete, mode 
             )}
           </div>
 
-          <div className="flex gap-3 pt-4 border-t border-slate-200">
-            {mode === "edit" && meeting?.id && (
+          <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+            {mode === "edit" && meeting?.id && meeting.status !== "cancelled" && (
               <button
                 type="button"
-                onClick={handleDelete}
-                className="px-4 py-2.5 bg-red-100 text-red-700 hover:bg-red-200 rounded-lg transition-colors font-medium flex items-center gap-2"
+                onClick={() => setShowDeleteConfirm(true)}
+                disabled={saving}
+                className="mr-auto px-4 h-11 bg-red-100 text-red-700 hover:bg-red-200 rounded-lg transition-colors font-medium flex items-center gap-2 disabled:opacity-60 text-sm"
               >
-                <Trash2 size={18} />
-                Удалить встречу
+                <X size={16} />
+                Отменить встречу
               </button>
             )}
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium"
+              className="px-8 h-11 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium text-sm"
             >
               Отмена
             </button>
             <button
               type="submit"
-              className="flex-1 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md font-medium flex items-center justify-center gap-2"
+              disabled={saving}
+              className="px-5 h-11 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md font-medium flex items-center gap-2 disabled:opacity-60 whitespace-nowrap"
             >
-              <Save size={18} />
+              {saving ? (
+                <Loader2 size={18} className="animate-spin" />
+              ) : (
+                <Save size={18} />
+              )}
               {mode === "create" ? "Создать встречу" : "Сохранить изменения"}
             </button>
           </div>
 
           {mode === "create" && (
             <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-900">
-              ℹ️ Все участники автоматически получат уведомление о новой встрече
+              Все участники автоматически получат уведомление о новой встрече
             </div>
           )}
           {mode === "edit" && (
             <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-900">
-              ℹ️ При изменении параметров встречи все участники получат уведомление
+              При изменении параметров встречи все участники получат уведомление
             </div>
           )}
         </form>
       </div>
+
+      {/* Cancel Confirmation */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full">
+            <h2 className="text-xl font-bold mb-2">Отменить встречу</h2>
+            <p className="text-slate-600 mb-6">
+              Вы уверены, что хотите отменить встречу <strong>"{name}"</strong>? Все участники получат уведомление об отмене.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={saving}
+                className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium"
+              >
+                Назад
+              </button>
+              <button
+                onClick={handleCancel}
+                disabled={saving}
+                className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium flex items-center justify-center gap-2 disabled:opacity-60"
+              >
+                {saving ? <Loader2 size={18} className="animate-spin" /> : <X size={18} />}
+                {saving ? "Отмена..." : "Отменить"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
