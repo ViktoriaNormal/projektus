@@ -16,6 +16,9 @@ import {
   Briefcase,
   Shield,
   FolderKanban,
+  Palmtree,
+  Thermometer,
+  MessageCircle,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -42,6 +45,10 @@ export default function Profile() {
   // Profile form
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
+  const [onVacation, setOnVacation] = useState(false);
+  const [isSick, setIsSick] = useState(false);
+  const [altContactChannel, setAltContactChannel] = useState('');
+  const [altContactInfo, setAltContactInfo] = useState('');
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMsg, setProfileMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -83,6 +90,10 @@ export default function Profile() {
       setProfile(userData);
       setFullName(userData.full_name);
       setEmail(userData.email);
+      setOnVacation(userData.on_vacation ?? false);
+      setIsSick(userData.is_sick ?? false);
+      setAltContactChannel(userData.alternative_contact_channel ?? '');
+      setAltContactInfo(userData.alternative_contact_info ?? '');
       setPolicy(policyData);
       setSystemRoles(sysRoles);
       setProjectRoles(projRoles);
@@ -120,6 +131,10 @@ export default function Profile() {
       const updated = await updateUser(authUser.id, {
         full_name: fullName.trim(),
         email: email.trim(),
+        on_vacation: onVacation,
+        is_sick: isSick,
+        alternative_contact_channel: altContactChannel.trim() || null,
+        alternative_contact_info: altContactInfo.trim() || null,
       });
       setProfile(updated);
       const accessToken = localStorage.getItem('access_token') || '';
@@ -282,6 +297,62 @@ export default function Profile() {
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+              </div>
+
+              {/* Status checkboxes */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                <p className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                  <Info size={16} />
+                  Статус доступности
+                </p>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={onVacation}
+                    onChange={(e) => setOnVacation(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <Palmtree size={18} className="text-green-600" />
+                  <span className="text-sm">В отпуске</span>
+                </label>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isSick}
+                    onChange={(e) => setIsSick(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <Thermometer size={18} className="text-red-500" />
+                  <span className="text-sm">Болею</span>
+                </label>
+              </div>
+
+              {/* Alternative contact */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                <p className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                  <MessageCircle size={16} />
+                  Альтернативный канал связи
+                </p>
+                <div>
+                  <label className="block text-sm text-slate-600 mb-1">Название канала</label>
+                  <input
+                    type="text"
+                    value={altContactChannel}
+                    onChange={(e) => setAltContactChannel(e.target.value)}
+                    placeholder="Например: Telegram, WhatsApp, Slack..."
+                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-600 mb-1">Контакт</label>
+                  <input
+                    type="text"
+                    value={altContactInfo}
+                    onChange={(e) => setAltContactInfo(e.target.value)}
+                    placeholder="Ник, номер телефона или ссылка..."
+                    className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
               </div>
 
               <button

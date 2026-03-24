@@ -1249,9 +1249,10 @@ components:
     ReferencePermissionArea:
       type: object
       properties:
-        area:        { type: string }
-        name:        { type: string }
-        description: { type: string }
+        area:         { type: string }
+        name:         { type: string }
+        description:  { type: string }
+        availableFor: { type: array, items: { type: string } }
 
     ReferencesResponse:
       type: object

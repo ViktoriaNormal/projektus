@@ -1,24 +1,81 @@
-import { useState } from "react";
-import { Search, Mail, Briefcase } from "lucide-react";
-import { users } from "../data/mockData";
-import { UserAvatar } from "../components/UserAvatar";
+import { useState, useEffect, useCallback } from 'react';
+import {
+  Search,
+  Mail,
+  Briefcase,
+  Loader2,
+  Palmtree,
+  Thermometer,
+  MessageCircle,
+  Copy,
+  Check,
+} from 'lucide-react';
+import { UserAvatar } from '../components/UserAvatar';
+import { searchUsers, type UserProfileResponse } from '../api/users';
+import { useAuth } from '../contexts/AuthContext';
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      className="text-slate-400 hover:text-blue-600 transition-colors shrink-0 p-1 rounded hover:bg-blue-50"
+      title="Скопировать"
+    >
+      {copied ? <Check size={18} className="text-green-600" /> : <Copy size={18} />}
+    </button>
+  );
+}
 
 export default function Team() {
-  const [searchQuery, setSearchQuery] = useState("");
+  const { user: authUser } = useAuth();
+  const [searchQuery, setSearchQuery] = useState('');
+  const [users, setUsers] = useState<UserProfileResponse[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [totalLoaded, setTotalLoaded] = useState(false);
+  const [totalCount, setTotalCount] = useState(0);
 
-  const filteredUsers = users.filter((user) =>
-    user.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    user.role.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const loadUsers = useCallback(async (query: string) => {
+    setLoading(true);
+    try {
+      const result = await searchUsers(query, 100, 0);
+      const list = Array.isArray(result) ? result : [];
+      setUsers(list);
+      if (!query && !totalLoaded) {
+        setTotalCount(list.length);
+        setTotalLoaded(true);
+      }
+    } catch {
+      setUsers([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [totalLoaded]);
+
+  useEffect(() => {
+    loadUsers('');
+  }, []);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      loadUsers(searchQuery);
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [searchQuery]);
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold">Коллеги</h1>
-        <p className="text-slate-600 mt-1">
-          Поиск коллег по организации
-        </p>
+        <p className="text-slate-600 mt-1">Поиск коллег по организации</p>
       </div>
 
       {/* Search Bar */}
@@ -30,7 +87,7 @@ export default function Team() {
           />
           <input
             type="text"
-            placeholder="Поиск по имени, email или роли..."
+            placeholder="Поиск по имени, должности, email, имени пользователя или контакту..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -47,7 +104,7 @@ export default function Team() {
             </div>
             <div>
               <p className="text-slate-600 text-sm">Всего сотрудников</p>
-              <p className="text-2xl font-bold">{users.length}</p>
+              <p className="text-2xl font-bold">{totalCount}</p>
             </div>
           </div>
         </div>
@@ -59,56 +116,109 @@ export default function Team() {
             </div>
             <div>
               <p className="text-slate-600 text-sm">Найдено</p>
-              <p className="text-2xl font-bold">{filteredUsers.length}</p>
+              <p className="text-2xl font-bold">{users.length}</p>
             </div>
           </div>
         </div>
       </div>
 
+      {/* Loading */}
+      {loading && (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 size={32} className="animate-spin text-blue-600" />
+        </div>
+      )}
+
       {/* Team Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredUsers.map((user) => (
-          <div
-            key={user.id}
-            className="bg-white rounded-xl p-6 shadow-md border border-slate-100 hover:shadow-lg hover:border-blue-300 transition-all"
-          >
-            <div className="flex flex-col items-center text-center">
-              <UserAvatar user={user} size="xl" className="mb-4" />
-              
-              <h3 className="font-bold text-lg mb-1">{user.fullName}</h3>
-              
-              <div className="inline-flex items-center gap-2 px-3 py-1 bg-gradient-to-r from-blue-100 to-indigo-100 text-blue-700 text-sm font-semibold rounded-full mb-3">
-                <Briefcase size={14} />
-                {user.role}
-              </div>
+      {!loading && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {users.map((user) => {
+            const isMe = authUser?.id === user.id;
+            return (
+            <div
+              key={user.id}
+              className={`bg-white rounded-xl p-6 shadow-md border ${
+                isMe
+                  ? 'border-blue-300 ring-1 ring-blue-200'
+                  : user.on_vacation || user.is_sick
+                    ? 'border-orange-200'
+                    : 'border-slate-100'
+              }`}
+            >
+              <div className="flex flex-col items-center text-center">
+                <UserAvatar
+                  user={{ fullName: user.full_name, avatarUrl: user.avatar_url }}
+                  size="xl"
+                  className="mb-4"
+                />
 
-              <div className="w-full space-y-2 text-sm text-slate-600 mb-4">
-                <div className="flex items-center gap-2 justify-center">
-                  <Mail size={14} className="text-slate-400" />
-                  <a
-                    href={`mailto:${user.email}`}
-                    className="hover:text-blue-600 hover:underline truncate"
-                  >
-                    {user.email}
-                  </a>
-                </div>
-                
-                <div className="flex items-center gap-2 justify-center">
-                  <span className="text-slate-400">@{user.username}</span>
-                </div>
-              </div>
+                {/* Status badges */}
+                {(user.on_vacation || user.is_sick) && (
+                  <div className="flex flex-wrap gap-1.5 mb-2 justify-center">
+                    {user.on_vacation && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-50 border border-green-200 text-green-700 text-xs font-medium rounded-full">
+                        <Palmtree size={12} />
+                        В отпуске
+                      </span>
+                    )}
+                    {user.is_sick && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-50 border border-red-200 text-red-700 text-xs font-medium rounded-full">
+                        <Thermometer size={12} />
+                        Болею
+                      </span>
+                    )}
+                  </div>
+                )}
 
-              <div className="mt-auto w-full">
-                <button className="w-full px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md text-sm font-medium">
-                  Отправить сообщение
-                </button>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <h3 className="font-bold text-lg">{user.full_name}</h3>
+                  <CopyButton text={user.full_name} />
+                </div>
+
+                {user.position && (
+                  <div className="inline-flex items-center gap-2 px-3 py-1 bg-gradient-to-r from-blue-100 to-indigo-100 text-blue-700 text-sm font-semibold rounded-full mb-3">
+                    <Briefcase size={14} />
+                    {user.position}
+                    <CopyButton text={user.position} />
+                  </div>
+                )}
+
+                <div className="w-full space-y-2 text-sm text-slate-600">
+                  <div className="flex items-center gap-2 justify-center">
+                    <span className="text-slate-500">@{user.username}</span>
+                    <CopyButton text={`@${user.username}`} />
+                  </div>
+
+                  <div className="flex items-center gap-2 justify-center">
+                    <Mail size={14} className="text-slate-400" />
+                    <a
+                      href={`mailto:${user.email}`}
+                      className="hover:text-blue-600 hover:underline truncate"
+                    >
+                      {user.email}
+                    </a>
+                    <CopyButton text={user.email} />
+                  </div>
+
+                  {user.alternative_contact_channel && user.alternative_contact_info && (
+                    <div className="flex items-center gap-2 justify-center">
+                      <MessageCircle size={14} className="text-slate-400" />
+                      <span>
+                        <span className="text-slate-500">{user.alternative_contact_channel}:</span>{' '}
+                        <span className="font-medium text-slate-700">{user.alternative_contact_info}</span>
+                      </span>
+                      <CopyButton text={user.alternative_contact_info} />
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        ))}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
-      {filteredUsers.length === 0 && (
+      {!loading && users.length === 0 && (
         <div className="text-center py-12 bg-white rounded-xl border border-slate-200">
           <Search size={48} className="mx-auto text-slate-300 mb-4" />
           <p className="text-slate-500 text-lg">Коллеги не найдены</p>

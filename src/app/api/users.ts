@@ -17,15 +17,38 @@ export interface ProjectRoleResponse {
 
 export interface UserProfileResponse extends UserResponse {
   position: string | null;
+  on_vacation: boolean;
+  is_sick: boolean;
+  alternative_contact_channel: string | null;
+  alternative_contact_info: string | null;
+}
+
+export interface UpdateUserProfileData {
+  full_name?: string;
+  email?: string;
+  position?: string | null;
+  on_vacation?: boolean;
+  is_sick?: boolean;
+  alternative_contact_channel?: string | null;
+  alternative_contact_info?: string | null;
 }
 
 export function getUser(userId: string) {
   return apiRequest<UserProfileResponse>(`/users/${userId}`);
 }
 
+export function searchUsers(query: string, limit = 20, offset = 0) {
+  const params = new URLSearchParams();
+  if (query) params.set('q', query);
+  params.set('limit', String(limit));
+  params.set('offset', String(offset));
+  return apiRequest<{ users: UserProfileResponse[] }>(`/users?${params.toString()}`)
+    .then((res) => res.users);
+}
+
 export function updateUser(
   userId: string,
-  data: { full_name?: string; email?: string },
+  data: UpdateUserProfileData,
 ) {
   return apiRequest<UserProfileResponse>(`/users/${userId}`, {
     method: 'PATCH',
