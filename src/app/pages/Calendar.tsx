@@ -485,7 +485,7 @@ export default function Calendar() {
                                 minute: "2-digit",
                               })}
                             </span>
-                            <CopyInviteButton meeting={meeting} organizerName={authUser?.full_name} size="sm" />
+                            <CopyInviteButton meeting={meeting} organizerName={authUser?.fullName} size="sm" />
                           </div>
                         ))}
                       </div>
@@ -550,7 +550,7 @@ export default function Calendar() {
                           meetingTypeColors={meetingTypeColors}
                           meetingTypeLabels={meetingTypeLabels}
                           dayNames={dayNames}
-                          organizerName={authUser?.full_name}
+                          organizerName={authUser?.fullName}
                           onClick={() => handleMeetingClick(meeting)}
                           cancelled={section.cancelled}
                           badge={section.badge}

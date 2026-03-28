@@ -20,7 +20,7 @@ export default function Register() {
   const [form, setForm] = useState({
     username: '',
     email: '',
-    full_name: '',
+    fullName: '',
     password: '',
     confirmPassword: '',
   });
@@ -70,7 +70,7 @@ export default function Register() {
     e.preventDefault();
     setError('');
 
-    if (!form.username.trim() || !form.email.trim() || !form.full_name.trim() || !form.password) {
+    if (!form.username.trim() || !form.email.trim() || !form.fullName.trim() || !form.password) {
       setError('Заполните все поля');
       return;
     }
@@ -90,7 +90,7 @@ export default function Register() {
       await register({
         username: form.username.trim(),
         email: form.email.trim(),
-        full_name: form.full_name.trim(),
+        fullName: form.fullName.trim(),
         password: form.password,
       });
       navigate('/login', {
@@ -147,8 +147,8 @@ export default function Register() {
               <label className="block text-sm font-medium mb-2">ФИО <span className="text-red-500">*</span></label>
               <input
                 type="text"
-                value={form.full_name}
-                onChange={(e) => updateField('full_name', e.target.value)}
+                value={form.fullName}
+                onChange={(e) => updateField('fullName', e.target.value)}
                 placeholder="Иван Иванов"
                 className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
                 autoFocus

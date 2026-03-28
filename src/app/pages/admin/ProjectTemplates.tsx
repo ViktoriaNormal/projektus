@@ -47,13 +47,15 @@ import {
   updateTemplateBoardColumn,
   deleteTemplateBoardColumn,
   reorderTemplateBoardColumns,
+  createTemplateBoardSwimlane,
   updateTemplateBoardSwimlane,
   deleteTemplateBoardSwimlane,
   reorderTemplateBoardSwimlanes,
-  replaceTemplateBoardPriorityValues,
-  createTemplateBoardCustomField,
-  deleteTemplateBoardCustomField,
+  createTemplateBoardField,
+  updateTemplateBoardField,
+  deleteTemplateBoardField,
   createTemplateProjectParam,
+  updateTemplateProjectParam,
   deleteTemplateProjectParam,
   createTemplateRole,
   updateTemplateRole,
@@ -63,7 +65,7 @@ import {
   type TemplateBoard,
   type TemplateBoardColumn,
   type TemplateBoardSwimlane,
-  type TemplateBoardCustomField,
+  type TemplateBoardField,
   type TemplateProjectParam,
   type TemplateRole,
   type TemplateRolePermission,
@@ -136,7 +138,10 @@ export default function ProjectTemplates() {
           setEditingTemplateId(null);
           loadTemplates();
         }}
-        onCancel={() => setEditingTemplateId(null)}
+        onCancel={() => {
+          setEditingTemplateId(null);
+          loadTemplates();
+        }}
       />
     );
   }
@@ -169,7 +174,6 @@ export default function ProjectTemplates() {
 // ════════════════════════════════════════════════════════════════
 
 function TemplateCard({ template, refs, onEdit }: { template: ProjectTemplateDetail; refs: TemplateReferences | null; onEdit: () => void }) {
-  const swimlaneGroupLabels = refs ? buildSwimlaneGroupLabels(refs) : {};
 
   return (
     <div className="bg-white rounded-xl shadow-md border border-slate-100 hover:shadow-lg transition-all">
@@ -222,9 +226,8 @@ function TemplateCard({ template, refs, onEdit }: { template: ProjectTemplateDet
             </div>
           )}
           {template.boards.map((board) => {
-            const sysFields = refs ? getSystemFieldNames(refs, template.projectType, board) : [];
-            const customNames = board.customFields.map((f) => f.name);
-            const allFields = [...sysFields, ...customNames];
+            const systemFields = board.fields.filter(f => f.isSystem);
+            const customFields = board.fields.filter(f => !f.isSystem);
 
             return (
               <div key={board.id} className="rounded-lg border border-slate-200 overflow-hidden">
@@ -264,7 +267,7 @@ function TemplateCard({ template, refs, onEdit }: { template: ProjectTemplateDet
                   {board.swimlaneGroupBy && board.swimlanes.length > 0 && (
                     <div>
                       <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
-                        Дорожки (по {swimlaneGroupLabels[board.swimlaneGroupBy] || board.swimlaneGroupBy})
+                        Дорожки (по {board.fields.find(f => f.id === board.swimlaneGroupBy)?.name || board.swimlaneGroupBy})
                       </p>
                       <div className="flex flex-wrap gap-1.5">
                         {board.swimlanes.map((sw) => (
@@ -287,14 +290,22 @@ function TemplateCard({ template, refs, onEdit }: { template: ProjectTemplateDet
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
                       Параметры задач
                     </p>
-                    {allFields.length > 0 ? (
+                    {board.fields.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
-                        {allFields.map((name) => (
+                        {systemFields.map((f) => (
                           <span
-                            key={name}
+                            key={f.id}
                             className="px-2.5 py-1 bg-slate-100 text-slate-600 text-xs rounded-md border border-slate-200"
                           >
-                            {name}
+                            {f.name}{f.isRequired && <span className="text-red-400 ml-0.5">*</span>}
+                          </span>
+                        ))}
+                        {customFields.map((f) => (
+                          <span
+                            key={f.id}
+                            className="px-2.5 py-1 bg-purple-50 text-purple-600 text-xs rounded-md border border-purple-100"
+                          >
+                            {f.name}{f.isRequired && <span className="text-red-400 ml-0.5">*</span>}
                           </span>
                         ))}
                       </div>
@@ -307,6 +318,56 @@ function TemplateCard({ template, refs, onEdit }: { template: ProjectTemplateDet
             );
           })}
         </div>
+
+        {/* Project params preview */}
+        {template.params.length > 0 && (
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
+              Параметры проекта
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {template.params.map((p) => (
+                <span
+                  key={p.id}
+                  className={`px-2.5 py-1 text-xs rounded-md border font-medium ${
+                    p.isSystem
+                      ? "bg-slate-100 text-slate-600 border-slate-200"
+                      : "bg-purple-50 text-purple-600 border-purple-100"
+                  }`}
+                  title={p.description || undefined}
+                >
+                  {p.name}
+                  {p.isRequired && <span className="text-red-400 ml-0.5">*</span>}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Roles preview */}
+        {template.roles.length > 0 && (
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
+              Роли проекта
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {template.roles.map((r) => (
+                <span
+                  key={r.id}
+                  className={`px-2.5 py-1 text-xs rounded-md border font-medium ${
+                    r.isAdmin
+                      ? "bg-amber-50 text-amber-700 border-amber-100"
+                      : "bg-slate-100 text-slate-600 border-slate-200"
+                  }`}
+                  title={r.description || undefined}
+                >
+                  {r.name}
+                  {r.isAdmin && <span className="text-amber-400 ml-1 font-normal">admin</span>}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -316,15 +377,16 @@ function TemplateCard({ template, refs, onEdit }: { template: ProjectTemplateDet
 // Note Textarea with debounced save
 // ════════════════════════════════════════════════════════════════
 
-function NoteTextarea({ value, onSave }: { value: string | null; onSave: (val: string | null) => void }) {
+function NoteTextarea({ value, onSave, inputClassName, rows: rowsProp }: { value: string | null; onSave: (val: string | null) => void; inputClassName?: string; rows?: number }) {
   const [localValue, setLocalValue] = useState(value ?? "");
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasFixedHeight = inputClassName?.includes("h-[");
   const textareaRef = useCallback((el: HTMLTextAreaElement | null) => {
-    if (el) {
+    if (el && !hasFixedHeight) {
       el.style.height = "auto";
       el.style.height = el.scrollHeight + "px";
     }
-  }, []);
+  }, [hasFixedHeight]);
 
   // Sync from server when value changes externally (e.g. after reload)
   useEffect(() => {
@@ -359,11 +421,13 @@ function NoteTextarea({ value, onSave }: { value: string | null; onSave: (val: s
         value={localValue}
         onChange={(e) => {
           handleChange(e.target.value);
-          e.target.style.height = "auto";
-          e.target.style.height = e.target.scrollHeight + "px";
+          if (!hasFixedHeight) {
+            e.target.style.height = "auto";
+            e.target.style.height = e.target.scrollHeight + "px";
+          }
         }}
-        rows={1}
-        className="w-full px-3 py-1.5 pr-8 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none overflow-hidden"
+        rows={rowsProp || 1}
+        className={`w-full pr-8 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none overflow-hidden ${inputClassName || "px-3 py-1.5"}`}
         placeholder="Правила работы, пояснения для команды..."
       />
       {localValue && (
@@ -380,6 +444,146 @@ function NoteTextarea({ value, onSave }: { value: string | null; onSave: (val: s
 }
 
 // ════════════════════════════════════════════════════════════════
+// WIP Limit Input with debounced save
+// ════════════════════════════════════════════════════════════════
+
+function WipLimitInput({ value, onSave }: { value: number | null; onSave: (val: number | null) => void }) {
+  const [local, setLocal] = useState(value != null ? String(value) : "");
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const localRef = useRef(local);
+  const valueRef = useRef(value);
+  const onSaveRef = useRef(onSave);
+  localRef.current = local;
+  valueRef.current = value;
+  onSaveRef.current = onSave;
+
+  useEffect(() => {
+    setLocal(value != null ? String(value) : "");
+  }, [value]);
+
+  function handleChange(raw: string) {
+    const v = raw.replace(/[^0-9]/g, "");
+    setLocal(v);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      const parsed = v !== "" ? Number(v) : null;
+      onSave(parsed);
+    }, 600);
+  }
+
+  // Save pending on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        const parsed = localRef.current !== "" ? Number(localRef.current) : null;
+        if (parsed !== valueRef.current) {
+          onSaveRef.current(parsed);
+        }
+      }
+    };
+  }, []);
+
+  return (
+    <div>
+      <label className="block text-xs font-medium mb-1">WIP лимит</label>
+      <input
+        type="text"
+        inputMode="numeric"
+        value={local}
+        onChange={(e) => handleChange(e.target.value)}
+        onBlur={() => {
+          if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+          onSave(local !== "" ? Number(local) : null);
+        }}
+        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+        placeholder="Без лимита"
+      />
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// Debounced Input / Textarea (no clear button)
+// ════════════════════════════════════════════════════════════════
+
+function DebouncedInput({ value, onSave, className, placeholder, required, requiredMessage }: {
+  value: string; onSave: (val: string) => void; className?: string; placeholder?: string; required?: boolean; requiredMessage?: string;
+}) {
+  const [local, setLocal] = useState(value);
+  const [error, setError] = useState("");
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dirtyRef = useRef(false);
+  const localRef = useRef(local);
+  const onSaveRef = useRef(onSave);
+  localRef.current = local;
+  onSaveRef.current = onSave;
+
+  useEffect(() => { if (!dirtyRef.current) setLocal(value); }, [value]);
+
+  function trySave(v: string) {
+    if (required && !v.trim()) {
+      setError(requiredMessage || "Поле не может быть пустым");
+      return;
+    }
+    setError("");
+    onSave(v);
+  }
+
+  function handleChange(v: string) {
+    setLocal(v);
+    if (required && v.trim()) setError("");
+    dirtyRef.current = true;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => { dirtyRef.current = false; trySave(v); }, 1500);
+  }
+
+  useEffect(() => () => {
+    if (timerRef.current) { clearTimeout(timerRef.current); dirtyRef.current = false; if (!required || localRef.current.trim()) onSaveRef.current(localRef.current); }
+  }, []);
+
+  return (
+    <div>
+      <input type="text" value={local} onChange={e => handleChange(e.target.value)} className={`${className} ${error ? "border-red-400 ring-2 ring-red-200" : ""}`} placeholder={placeholder} />
+      {error && (
+        <div className="flex items-center gap-2 mt-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">
+          <AlertCircle size={16} className="shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DebouncedTextarea({ value, onSave, className, placeholder, rows }: {
+  value: string; onSave: (val: string) => void; className?: string; placeholder?: string; rows?: number;
+}) {
+  const [local, setLocal] = useState(value);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dirtyRef = useRef(false);
+  const localRef = useRef(local);
+  const onSaveRef = useRef(onSave);
+  localRef.current = local;
+  onSaveRef.current = onSave;
+
+  // Only sync from server when not actively editing
+  useEffect(() => { if (!dirtyRef.current) setLocal(value); }, [value]);
+
+  function handleChange(v: string) {
+    setLocal(v);
+    dirtyRef.current = true;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => { dirtyRef.current = false; onSave(v); }, 1500);
+  }
+
+  useEffect(() => () => {
+    if (timerRef.current) { clearTimeout(timerRef.current); dirtyRef.current = false; onSaveRef.current(localRef.current); }
+  }, []);
+
+  return <textarea value={local} onChange={e => handleChange(e.target.value)} className={className} placeholder={placeholder} rows={rows} />;
+}
+
+// ════════════════════════════════════════════════════════════════
 // Helper: build labels from refs
 // ════════════════════════════════════════════════════════════════
 
@@ -389,9 +593,13 @@ function buildColumnSystemTypeLabels(refs: TemplateReferences): Record<string, s
   return map;
 }
 
-function buildFieldTypeLabels(refs: TemplateReferences): Record<string, string> {
+function buildFieldTypeLabels(refs: TemplateReferences, opts?: { projectType?: string; scope?: string }): Record<string, string> {
   const map: Record<string, string> = {};
-  for (const t of refs.fieldTypes) map[t.key] = t.name;
+  for (const t of refs.fieldTypes) {
+    if (opts?.projectType && t.availableFor && !t.availableFor.includes(opts.projectType)) continue;
+    if (opts?.scope && t.allowedScopes && !t.allowedScopes.includes(opts.scope)) continue;
+    map[t.key] = t.name;
+  }
   return map;
 }
 
@@ -413,11 +621,6 @@ const SYSTEM_FIELD_TYPE_LABELS: Record<string, string> = {
   tags: "Метки",
 };
 
-function buildSwimlaneGroupLabels(refs: TemplateReferences): Record<string, string> {
-  const map: Record<string, string> = {};
-  for (const t of refs.swimlaneGroupOptions) map[t.key] = t.name;
-  return map;
-}
 
 function buildPriorityTypeLabels(refs: TemplateReferences): Record<string, string> {
   const map: Record<string, string> = {};
@@ -428,22 +631,6 @@ function buildPriorityTypeLabels(refs: TemplateReferences): Record<string, strin
 function getDefaultValuesForPriorityType(refs: TemplateReferences, priorityType: string): string[] {
   const opt = refs.priorityTypeOptions.find(o => o.key === priorityType);
   return opt ? [...opt.defaultValues] : [];
-}
-
-function getSystemFieldNames(refs: TemplateReferences, templateType: string, board: TemplateBoard): string[] {
-  return refs.systemTaskFields
-    .filter(f => f.availableFor.includes(templateType))
-    .map(f => {
-      if (f.key === "priority") {
-        const ptLabel = buildPriorityTypeLabels(refs)[board.priorityType];
-        return ptLabel || f.name;
-      }
-      if (f.key === "estimation") {
-        const eu = refs.estimationUnits.find(u => u.key === board.estimationUnit);
-        return eu ? `Оценка (${eu.name})` : f.name;
-      }
-      return f.name;
-    });
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -469,7 +656,6 @@ function TemplateEditor({
   const [columnError, setColumnError] = useState("");
 
   const COLUMN_SYSTEM_TYPE_LABELS = buildColumnSystemTypeLabels(refs);
-  const SWIMLANE_GROUP_LABELS = buildSwimlaneGroupLabels(refs);
 
   useEffect(() => {
     async function load() {
@@ -510,16 +696,18 @@ function TemplateEditor({
   // ── Board management ──────────────────────────────────────
 
   async function addBoard() {
+    // Inherit priorityType and estimationUnit from the default board (or first board)
+    const defaultBoard = data!.boards.find(b => b.isDefault) || data!.boards[0];
+    const priorityType = defaultBoard?.priorityType || (isScrum ? "priority" : "service_class");
+    const estimationUnit = defaultBoard?.estimationUnit || (isScrum ? "story_points" : "time");
     try {
       const newBoard = await createTemplateBoard(templateId, {
         name: `Доска ${data!.boards.length + 1}`,
         isDefault: data!.boards.length === 0,
-        priorityType: isScrum ? "priority" : "service_class",
-        estimationUnit: isScrum ? "story_points" : "time",
+        priorityType,
+        estimationUnit,
         swimlaneGroupBy: null,
       });
-      await reloadTemplate();
-      // Find index of the new board
       const detail = await getProjectTemplate(templateId);
       setData(detail);
       const idx = detail.boards.findIndex(b => b.id === newBoard.id);
@@ -531,8 +719,8 @@ function TemplateEditor({
   }
 
   async function removeBoard(index: number) {
-    if (data!.boards.length <= 1) return;
     const boardToRemove = data!.boards[index];
+    if (data!.boards.length <= 1 || boardToRemove.isDefault) return;
     try {
       await deleteTemplateBoard(templateId, boardToRemove.id);
       await reloadTemplate();
@@ -575,9 +763,19 @@ function TemplateEditor({
     name: string; description: string; isDefault: boolean; order: number;
     priorityType: string; estimationUnit: string; swimlaneGroupBy: string | null;
   }>) {
+    const isTextOnly = Object.keys(patch).every(k => k === "name" || k === "description");
     try {
       await updateTemplateBoard(templateId, boardId, patch);
-      await reloadTemplate();
+      if (isTextOnly) {
+        // Update state without full reload to avoid overwriting user input
+        setData(prev => {
+          if (!prev) return prev;
+          const boards = prev.boards.map(b => b.id === boardId ? { ...b, ...patch } : b);
+          return { ...prev, boards };
+        });
+      } else {
+        await reloadTemplate();
+      }
     } catch (e: any) {
       toast.error(e.message || "Не удалось обновить доску");
     }
@@ -624,14 +822,19 @@ function TemplateEditor({
 
   // ── Column helpers ──────────────────────────────────────────
 
-  async function addColumn() {
+  async function addColumn(afterIndex: number) {
     if (!board) return;
+    const systemType = (afterIndex >= 0 && board.columns[afterIndex])
+      ? board.columns[afterIndex].systemType
+      : "initial";
+    // order = position right after the selected column (1-based)
+    const order = afterIndex + 2;
     try {
       await createTemplateBoardColumn(templateId, board.id, {
-        name: "",
-        systemType: "in_progress",
+        name: `Колонка ${board.columns.length + 1}`,
+        systemType,
         wipLimit: null,
-        order: board.columns.length + 1,
+        order,
       });
       setColumnError("");
       await reloadTemplate();
@@ -655,7 +858,18 @@ function TemplateEditor({
     setColumnError("");
     try {
       await updateTemplateBoardColumn(templateId, board.id, colId, { [field]: value });
-      await reloadTemplate();
+      if (field === "name") {
+        // Update locally without reload to avoid overwriting user input
+        setData(prev => {
+          if (!prev) return prev;
+          const boards = prev.boards.map((b, i) => i !== activeBoardIndex ? b : {
+            ...b, columns: b.columns.map(c => c.id === colId ? { ...c, name: value } : c),
+          });
+          return { ...prev, boards };
+        });
+      } else {
+        await reloadTemplate();
+      }
     } catch (e: any) {
       if (e.code === "INVALID_COLUMN_ORDER" || e.code === "COLUMN_LOCKED") {
         setColumnError(e.message);
@@ -715,10 +929,52 @@ function TemplateEditor({
   async function handleSetSwimlaneGroupBy(value: string) {
     if (!board) return;
     try {
+      // Delete existing swimlanes when changing or clearing group-by
+      if (board.swimlanes.length > 0) {
+        for (const sw of board.swimlanes) {
+          await deleteTemplateBoardSwimlane(templateId, board.id, sw.id);
+        }
+      }
+
       await updateTemplateBoard(templateId, board.id, {
         swimlaneGroupBy: value || null,
       });
-      await reloadTemplate();
+
+      // Reload to get fresh state after backend processes the group-by change
+      const freshData = await getProjectTemplate(templateId);
+      const freshBoard = freshData.boards.find(b => b.id === board!.id);
+
+      // Auto-create swimlanes if the group-by field is set and no swimlanes exist yet
+      if (value && freshBoard && freshBoard.swimlanes.length === 0) {
+        const field = freshBoard.fields.find(f => f.id === value);
+        let expectedValues: string[] | null = null;
+        if (field) {
+          if (field.fieldType === "checkbox") {
+            expectedValues = ["Да", "Нет"];
+          } else if (field.fieldType === "select" || field.fieldType === "priority") {
+            const priorityFieldId = freshBoard.fields.find(f => f.isSystem && (f.fieldType === "priority" || f.description?.toLowerCase().includes("приоритизаци")))?.id;
+            if (field.id === priorityFieldId) {
+              const defaults = refs.priorityTypeOptions.find(o => o.key === freshBoard.priorityType)?.defaultValues || [];
+              expectedValues = (field.options && field.options.length > 0) ? field.options : defaults.length > 0 ? defaults : null;
+            } else {
+              expectedValues = (field.options && field.options.length > 0) ? field.options : null;
+            }
+          }
+        }
+        if (expectedValues && expectedValues.length > 0) {
+          for (let i = 0; i < expectedValues.length; i++) {
+            await createTemplateBoardSwimlane(templateId, freshBoard.id, {
+              name: expectedValues[i],
+              order: i + 1,
+            });
+          }
+          // Reload again to include created swimlanes
+          setData(await getProjectTemplate(templateId));
+          return;
+        }
+      }
+
+      setData(freshData);
     } catch (e: any) {
       toast.error(e.message || "Не удалось изменить группировку");
     }
@@ -731,16 +987,6 @@ function TemplateEditor({
       await reloadTemplate();
     } catch (e: any) {
       toast.error(e.message || "Не удалось обновить дорожку");
-    }
-  }
-
-  async function removeSwimlane(swId: string) {
-    if (!board) return;
-    try {
-      await deleteTemplateBoardSwimlane(templateId, board.id, swId);
-      await reloadTemplate();
-    } catch (e: any) {
-      toast.error(e.message || "Не удалось удалить дорожку");
     }
   }
 
@@ -772,8 +1018,9 @@ function TemplateEditor({
 
   async function handleUpdateTemplateProp(patch: Partial<{ name: string; description: string }>) {
     try {
-      await updateProjectTemplate(templateId, patch);
-      await reloadTemplate();
+      const updated = await updateProjectTemplate(templateId, patch);
+      // Update state without full reload to avoid overwriting user input
+      setData(prev => prev ? { ...prev, ...patch } : prev);
     } catch (e: any) {
       toast.error(e.message || "Не удалось сохранить изменения");
     }
@@ -811,9 +1058,12 @@ function TemplateEditor({
             <label className="block text-sm font-medium mb-2">
               Название шаблона <span className="text-red-500">*</span>
             </label>
-            <NoteTextarea
+            <DebouncedInput
               value={data.name}
-              onSave={(val) => handleUpdateTemplateProp({ name: val || "" })}
+              onSave={(val) => handleUpdateTemplateProp({ name: val })}
+              className="w-full px-4 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+              placeholder="Название шаблона..."
+              required
             />
           </div>
           <div>
@@ -822,15 +1072,18 @@ function TemplateEditor({
               type="text"
               value={data.projectType === "scrum" ? "Scrum" : "Kanban"}
               disabled
-              className="w-full px-4 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-500"
+              className="w-full px-4 py-2 text-sm border border-slate-200 rounded-lg bg-slate-50 text-slate-500"
             />
           </div>
         </div>
         <div className="mt-4">
           <label className="block text-sm font-medium mb-2">Описание</label>
-          <NoteTextarea
+          <DebouncedTextarea
             value={data.description}
-            onSave={(val) => handleUpdateTemplateProp({ description: val || "" })}
+            onSave={(val) => handleUpdateTemplateProp({ description: val })}
+            className="w-full px-4 py-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+            rows={4}
+            placeholder="Описание шаблона..."
           />
         </div>
       </div>
@@ -856,7 +1109,7 @@ function TemplateEditor({
                 board={b}
                 index={i}
                 isActive={i === activeBoardIndex}
-                canDelete={data.boards.length > 1}
+                canDelete={data.boards.length > 1 && !b.isDefault}
                 onSelect={() => { setActiveBoardIndex(i); setActiveTab("params"); }}
                 onDelete={() => removeBoard(i)}
                 moveBoard={moveBoard}
@@ -896,7 +1149,7 @@ function TemplateEditor({
             <div className="border-b border-slate-200">
               <div className="flex gap-1 p-2">
                 {([
-                  { key: "params" as const, icon: Sliders, label: "Параметры" },
+                  { key: "params" as const, icon: Sliders, label: "Параметры доски" },
                   { key: "columns" as const, icon: Columns, label: `Колонки (${board.columns.length})` },
                   { key: "swimlanes" as const, icon: Layers, label: `Дорожки (${board.swimlanes.length})` },
                   { key: "template" as const, icon: FileText, label: "Шаблон задачи" },
@@ -931,25 +1184,24 @@ function TemplateEditor({
                   isScrum={isScrum}
                   error={columnError}
                   onDismissError={() => setColumnError("")}
-                  onAdd={addColumn}
+                  onAddAfter={(index) => addColumn(index)}
                   onUpdate={updateColumn}
                   onRemove={removeColumn}
                   onMove={moveColumn}
                   columnSystemTypeLabels={COLUMN_SYSTEM_TYPE_LABELS}
-                  taskStatusTypes={refs.taskStatusTypes}
+                  columnSystemTypes={refs.columnSystemTypes}
                 />
               )}
               {activeTab === "swimlanes" && (
                 <BoardSwimlanesTab
-                  isScrum={isScrum}
                   swimlaneGroupBy={board.swimlaneGroupBy || ""}
                   swimlanes={board.swimlanes}
+                  boardFields={board.fields}
+                  board={board}
+                  refs={refs}
                   onSetGroupBy={handleSetSwimlaneGroupBy}
                   onUpdate={updateSwimlane}
-                  onRemove={removeSwimlane}
                   onMove={moveSwimlane}
-                  swimlaneGroupLabels={SWIMLANE_GROUP_LABELS}
-                  swimlaneGroupOptions={refs.swimlaneGroupOptions}
                 />
               )}
               {activeTab === "template" && (
@@ -959,6 +1211,7 @@ function TemplateEditor({
                   templateId={templateId}
                   refs={refs}
                   onReload={reloadTemplate}
+                  onClearSwimlaneGroupBy={() => handleSetSwimlaneGroupBy("")}
                 />
               )}
             </div>
@@ -972,7 +1225,7 @@ function TemplateEditor({
         templateId={templateId}
         isScrum={isScrum}
         refs={refs}
-        customParams={data.customProjectParams || []}
+        params={data.params || []}
         onReload={reloadTemplate}
       />
 
@@ -1083,20 +1336,20 @@ function BoardParamsTab({
         <label className="block text-sm font-medium mb-2">
           Название доски <span className="text-red-500">*</span>
         </label>
-        <input
-          type="text"
+        <DebouncedInput
           value={board.name}
-          onChange={(e) => onChange({ name: e.target.value })}
-          className="w-full px-4 py-3 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+          onSave={(val) => onChange({ name: val })}
+          className="w-full px-4 py-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+          required
           placeholder="Введите название доски..."
         />
       </div>
       <div>
         <label className="block text-sm font-medium mb-2">Описание доски</label>
-        <textarea
+        <DebouncedTextarea
           value={board.description}
-          onChange={(e) => onChange({ description: e.target.value })}
-          className="w-full px-4 py-3 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+          onSave={(val) => onChange({ description: val })}
+          className="w-full px-4 py-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
           rows={4}
           placeholder="Для каких задач предназначена доска..."
         />
@@ -1130,30 +1383,36 @@ function BoardColumnsTab({
   isScrum,
   error,
   onDismissError,
-  onAdd,
+  onAddAfter,
   onUpdate,
   onRemove,
   onMove,
   columnSystemTypeLabels,
-  taskStatusTypes,
+  columnSystemTypes,
 }: {
   columns: TemplateBoardColumn[];
   isScrum: boolean;
   error: string;
   onDismissError: () => void;
-  onAdd: () => void;
+  onAddAfter: (afterIndex: number) => void;
   onUpdate: (id: string, field: string, value: any) => void;
   onRemove: (id: string) => void;
   onMove: (id: string, dir: "up" | "down") => void;
   columnSystemTypeLabels: Record<string, string>;
-  taskStatusTypes: TemplateReferences["taskStatusTypes"];
+  columnSystemTypes: TemplateReferences["columnSystemTypes"];
 }) {
-  // Build description map from taskStatusTypes
-  const typeDescriptions: Record<string, string> = {};
-  const cancelledType = taskStatusTypes.find(t => !t.isColumnType);
-  for (const t of taskStatusTypes) {
-    typeDescriptions[t.key] = t.description;
-  }
+
+  const addButton = (afterIndex: number) => (
+    <div className="flex justify-center py-1">
+      <button
+        onClick={() => onAddAfter(afterIndex)}
+        className="p-1.5 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+        title="Добавить колонку после"
+      >
+        <Plus size={18} />
+      </button>
+    </div>
+  );
 
   return (
     <div className="space-y-4">
@@ -1164,16 +1423,10 @@ function BoardColumnsTab({
           <div className="text-sm text-amber-800">
             <p className="font-medium mb-1">Правило порядка колонок:</p>
             <p>
-              Колонки с типом <strong>«{columnSystemTypeLabels["initial"]}»</strong> должны располагаться перед колонками <strong>«{columnSystemTypeLabels["in_progress"]}»</strong>,
-              а те — перед <strong>«{columnSystemTypeLabels["completed"]}»</strong>.
-              Между «{columnSystemTypeLabels["initial"]}» и «{columnSystemTypeLabels["completed"]}» обязательно должна быть хотя бы одна колонка «{columnSystemTypeLabels["in_progress"]}».
+              Колонки с системным типом <strong>«{columnSystemTypeLabels["initial"]}»</strong> должны располагаться перед колонками с системным типом <strong>«{columnSystemTypeLabels["in_progress"]}»</strong>,
+              а те — перед колонками с системным типом <strong>«{columnSystemTypeLabels["completed"]}»</strong>.
+              Между колонками с системными типами «{columnSystemTypeLabels["initial"]}» и «{columnSystemTypeLabels["completed"]}» обязательно должна быть хотя бы одна колонка с системным типом «{columnSystemTypeLabels["in_progress"]}».
             </p>
-            {cancelledType && (
-              <p className="mt-1 text-amber-700">
-                Статус <strong>«{cancelledType.name}»</strong> назначается задаче напрямую (не через колонку). Отменённые задачи
-                хранятся в отдельном разделе проекта.
-              </p>
-            )}
           </div>
         </div>
       </div>
@@ -1189,115 +1442,111 @@ function BoardColumnsTab({
         </div>
       )}
 
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-slate-600">
-            Настройте колонки доски задач. Каждая колонка должна иметь системный тип.
-            К каждой колонке можно добавить заметку — например, чтобы зафиксировать правила работы на этом этапе.
+      <div>
+        <p className="text-sm text-slate-600">
+          Настройте колонки доски задач. Каждая колонка должна иметь системный тип.
+          К каждой колонке можно добавить заметку — например, чтобы зафиксировать правила работы на этом этапе.
+        </p>
+        {isScrum && (
+          <p className="text-xs text-purple-600 mt-1">
+            Scrum: колонка «Бэклог спринта» обязательна и всегда первая. В неё переносятся выбранные из бэклога продукта задачи на спринт.
           </p>
-          {isScrum && (
-            <p className="text-xs text-purple-600 mt-1">
-              Scrum: колонка «Бэклог спринта» обязательна и всегда первая. В неё переносятся выбранные из бэклога продукта задачи на спринт.
-            </p>
-          )}
-        </div>
-        <button
-          onClick={onAdd}
-          className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2 shrink-0"
-        >
-          <Plus size={18} />
-          Добавить колонку
-        </button>
+        )}
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-1">
         {columns.map((column, index) => {
           const locked = !!column.isLocked;
           return (
-            <div
-              key={column.id}
-              className={`p-4 border rounded-lg ${locked ? "border-purple-200 bg-purple-50/50" : "border-slate-200 bg-slate-50"}`}
-            >
-              <div className={`grid grid-cols-1 gap-3 ${isScrum ? "md:grid-cols-5" : "md:grid-cols-6"}`}>
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-medium mb-1">
-                    Название колонки *
-                    {locked && <Lock size={12} className="inline ml-1 text-purple-500" />}
-                  </label>
-                  <input
-                    type="text"
-                    value={column.name}
-                    onChange={(e) => onUpdate(column.id, "name", e.target.value)}
-                    disabled={locked}
-                    className={`w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 ${locked ? "bg-slate-100 text-slate-500" : ""}`}
-                    placeholder="Название..."
+            <div key={column.id}>
+              <div
+                className={`p-4 border rounded-lg ${locked ? "border-purple-200 bg-purple-50/50" : "border-slate-200 bg-slate-50"}`}
+              >
+                <div className={`grid grid-cols-1 gap-3 ${isScrum ? "md:grid-cols-5" : "md:grid-cols-6"}`}>
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-medium mb-1">
+                      Название колонки *
+                      {locked && <Lock size={12} className="inline ml-1 text-purple-500" />}
+                    </label>
+                    {locked ? (
+                      <input
+                        type="text"
+                        value={column.name}
+                        disabled
+                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-slate-100 text-slate-500"
+                      />
+                    ) : (
+                      <DebouncedInput
+                        value={column.name}
+                        onSave={(val) => onUpdate(column.id, "name", val)}
+                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        placeholder="Название..."
+                        required
+                        requiredMessage="Название колонки не может быть пустым"
+                      />
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1">Системный тип *</label>
+                    <select
+                      value={column.systemType}
+                      onChange={(e) => onUpdate(column.id, "systemType", e.target.value)}
+                      disabled={locked}
+                      className={`w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 ${locked ? "bg-slate-100 text-slate-500" : ""}`}
+                    >
+                      {Object.entries(columnSystemTypeLabels).map(([val, label]) => (
+                        <option key={val} value={val}>{label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {!isScrum && (
+                    <WipLimitInput
+                      value={column.wipLimit}
+                      onSave={(val) => onUpdate(column.id, "wipLimit", val)}
+                    />
+                  )}
+                  <div className="flex items-end gap-1">
+                    {!locked && (
+                      <>
+                        <button
+                          onClick={() => onMove(column.id, "up")}
+                          disabled={index === 0 || (isScrum && index === 1)}
+                          className="p-2 text-slate-600 hover:bg-slate-200 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          <ArrowUp size={16} />
+                        </button>
+                        <button
+                          onClick={() => onMove(column.id, "down")}
+                          disabled={index === columns.length - 1}
+                          className="p-2 text-slate-600 hover:bg-slate-200 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          <ArrowDown size={16} />
+                        </button>
+                        <button
+                          onClick={() => onRemove(column.id)}
+                          className="p-2 text-red-600 hover:bg-red-50 rounded"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </>
+                    )}
+                    {locked && (
+                      <span className="text-xs text-purple-500 flex items-center gap-1 p-2">
+                        <Lock size={14} /> Закреплена
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {/* Note */}
+                <div className="mt-3">
+                  <label className="block text-xs font-medium mb-1 text-slate-500">Заметка</label>
+                  <NoteTextarea
+                    value={column.note}
+                    onSave={(val) => onUpdate(column.id, "note", val)}
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1">Системный тип *</label>
-                  <select
-                    value={column.systemType}
-                    onChange={(e) => onUpdate(column.id, "systemType", e.target.value)}
-                    disabled={locked}
-                    className={`w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 ${locked ? "bg-slate-100 text-slate-500" : ""}`}
-                  >
-                    {Object.entries(columnSystemTypeLabels).map(([val, label]) => (
-                      <option key={val} value={val}>{label}</option>
-                    ))}
-                  </select>
-                </div>
-                {!isScrum && (
-                  <div>
-                    <label className="block text-xs font-medium mb-1">WIP лимит</label>
-                    <input
-                      type="number"
-                      value={column.wipLimit ?? ""}
-                      onChange={(e) => onUpdate(column.id, "wipLimit", e.target.value ? Number(e.target.value) : null)}
-                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                      placeholder="Без лимита"
-                    />
-                  </div>
-                )}
-                <div className="flex items-end gap-1">
-                  {!locked && (
-                    <>
-                      <button
-                        onClick={() => onMove(column.id, "up")}
-                        disabled={index === 0 || (isScrum && index === 1)}
-                        className="p-2 text-slate-600 hover:bg-slate-200 rounded disabled:opacity-30 disabled:cursor-not-allowed"
-                      >
-                        <ArrowUp size={16} />
-                      </button>
-                      <button
-                        onClick={() => onMove(column.id, "down")}
-                        disabled={index === columns.length - 1}
-                        className="p-2 text-slate-600 hover:bg-slate-200 rounded disabled:opacity-30 disabled:cursor-not-allowed"
-                      >
-                        <ArrowDown size={16} />
-                      </button>
-                      <button
-                        onClick={() => onRemove(column.id)}
-                        className="p-2 text-red-600 hover:bg-red-50 rounded"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </>
-                  )}
-                  {locked && (
-                    <span className="text-xs text-purple-500 flex items-center gap-1 p-2">
-                      <Lock size={14} /> Закреплена
-                    </span>
-                  )}
-                </div>
               </div>
-              {/* Note */}
-              <div className="mt-3">
-                <label className="block text-xs font-medium mb-1 text-slate-500">Заметка</label>
-                <NoteTextarea
-                  value={column.note}
-                  onSave={(val) => onUpdate(column.id, "note", val)}
-                />
-              </div>
+              {addButton(index)}
             </div>
           );
         })}
@@ -1307,7 +1556,7 @@ function BoardColumnsTab({
             <Columns size={48} className="mx-auto text-slate-400 mb-4" />
             <p className="text-slate-600 mb-4">Нет колонок</p>
             <button
-              onClick={onAdd}
+              onClick={() => onAddAfter(-1)}
               className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
             >
               Добавить первую колонку
@@ -1318,12 +1567,11 @@ function BoardColumnsTab({
 
       {/* System types reference */}
       <div className="mt-6 p-4 bg-slate-50 border border-slate-200 rounded-lg">
-        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Системные типы статусов задач</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-600">
-          {taskStatusTypes.map(t => (
-            <div key={t.key} className={!t.isColumnType ? "text-slate-400" : ""}>
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Системные типы колонок</p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-slate-600">
+          {columnSystemTypes.map(t => (
+            <div key={t.key}>
               <span className="font-medium">{t.name}</span> — {t.description}
-              {!t.isColumnType && " (назначается задаче, не колонке)"}
             </div>
           ))}
         </div>
@@ -1337,28 +1585,36 @@ function BoardColumnsTab({
 // ════════════════════════════════════════════════════════════════
 
 function BoardSwimlanesTab({
-  isScrum,
   swimlaneGroupBy,
   swimlanes,
   onSetGroupBy,
   onUpdate,
-  onRemove,
   onMove,
-  swimlaneGroupLabels,
-  swimlaneGroupOptions,
+  boardFields,
+  board,
+  refs,
 }: {
-  isScrum: boolean;
   swimlaneGroupBy: string;
   swimlanes: TemplateBoardSwimlane[];
+  boardFields: TemplateBoardField[];
+  board: TemplateBoard;
+  refs: TemplateReferences;
   onSetGroupBy: (val: string) => void;
   onUpdate: (id: string, field: string, value: any) => void;
-  onRemove: (id: string) => void;
   onMove: (id: string, dir: "up" | "down") => void;
-  swimlaneGroupLabels: Record<string, string>;
-  swimlaneGroupOptions: TemplateReferences["swimlaneGroupOptions"];
 }) {
-  const projectType = isScrum ? "scrum" : "kanban";
-  const availableOptions = swimlaneGroupOptions.filter(o => o.availableFor.includes(projectType));
+  // For the priority field, show the current priority type name (e.g. "Класс обслуживания") instead of generic field name
+  const priorityTypeLabel = (refs.priorityTypeOptions || []).find(o => o.key === board.priorityType)?.name;
+  // The priority field's description from backend contains "приоритизации" — use that to identify it reliably
+  const priorityFieldId = boardFields.find(f => f.isSystem && (f.description?.toLowerCase().includes("приоритизаци") || f.name.toLowerCase().includes("приоритизаци")))?.id;
+
+  function getFieldDisplayName(f: TemplateBoardField): string {
+    if (f.id === priorityFieldId && priorityTypeLabel) return priorityTypeLabel;
+    return f.name;
+  }
+
+  const selectedField = boardFields.find(f => f.id === swimlaneGroupBy);
+
 
   return (
     <div className="space-y-4">
@@ -1376,8 +1632,8 @@ function BoardSwimlanesTab({
             className="w-full px-4 py-3 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
           >
             <option value="">Без дорожек</option>
-            {availableOptions.map(opt => (
-              <option key={opt.key} value={opt.key}>{opt.name}</option>
+            {boardFields.map(f => (
+              <option key={f.id} value={f.id}>{getFieldDisplayName(f)}</option>
             ))}
           </select>
         </div>
@@ -1390,7 +1646,7 @@ function BoardSwimlanesTab({
               </div>
               <div className="flex-1">
                 <h4 className="font-medium text-purple-900 mb-1">
-                  Группировка по {swimlaneGroupLabels[swimlaneGroupBy] || swimlaneGroupBy}
+                  Группировка по {selectedField ? getFieldDisplayName(selectedField) : swimlaneGroupBy}
                 </h4>
                 <p className="text-sm text-purple-700">
                   Дорожки будут созданы автоматически для каждого значения выбранного параметра.
@@ -1411,14 +1667,25 @@ function BoardSwimlanesTab({
         </div>
       )}
 
+      {swimlaneGroupBy && swimlanes.length === 0 && (
+        <div className="text-center py-8 bg-slate-50 rounded-xl border-2 border-dashed border-slate-300">
+          <Layers size={48} className="mx-auto text-slate-400 mb-4" />
+          <p className="text-slate-600">Дорожки будут автоматически созданы при появлении задач</p>
+          <p className="text-sm text-slate-500 mt-1">Для данного параметра дорожки формируются динамически по значениям задач</p>
+        </div>
+      )}
+
       {swimlaneGroupBy && swimlanes.length > 0 && (
         <div className="space-y-3">
-          <h3 className="font-semibold text-slate-700">Созданные дорожки ({swimlanes.length})</h3>
+          <h3 className="font-semibold text-slate-700">Дорожки ({swimlanes.length})</h3>
           {swimlanes.map((swimlane, index) => (
             <div key={swimlane.id} className="p-4 border border-slate-200 rounded-lg bg-slate-50">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                 <div className="md:col-span-2">
-                  <label className="block text-xs font-medium mb-1">Название дорожки</label>
+                  <label className="block text-xs font-medium mb-1">
+                    Название дорожки
+                    <Lock size={12} className="inline ml-1 text-slate-400" />
+                  </label>
                   <input
                     type="text"
                     value={swimlane.name}
@@ -1426,16 +1693,10 @@ function BoardSwimlanesTab({
                     className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-slate-100 text-slate-600"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1">WIP лимит</label>
-                  <input
-                    type="number"
-                    value={swimlane.wipLimit ?? ""}
-                    onChange={(e) => onUpdate(swimlane.id, "wipLimit", e.target.value ? Number(e.target.value) : null)}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    placeholder="Без лимита"
-                  />
-                </div>
+                <WipLimitInput
+                  value={swimlane.wipLimit}
+                  onSave={(val) => onUpdate(swimlane.id, "wipLimit", val)}
+                />
                 <div className="flex items-end gap-1">
                   <button
                     onClick={() => onMove(swimlane.id, "up")}
@@ -1450,12 +1711,6 @@ function BoardSwimlanesTab({
                     className="p-2 text-slate-600 hover:bg-slate-200 rounded disabled:opacity-30 disabled:cursor-not-allowed"
                   >
                     <ArrowDown size={16} />
-                  </button>
-                  <button
-                    onClick={() => onRemove(swimlane.id)}
-                    className="p-2 text-red-600 hover:bg-red-50 rounded"
-                  >
-                    <Trash2 size={16} />
                   </button>
                 </div>
               </div>
@@ -1485,16 +1740,34 @@ function BoardTaskTemplateTab({
   templateId,
   refs,
   onReload,
+  onClearSwimlaneGroupBy,
 }: {
   isScrum: boolean;
   board: TemplateBoard;
   templateId: string;
   refs: TemplateReferences;
   onReload: () => Promise<void>;
+  onClearSwimlaneGroupBy: () => Promise<void>;
 }) {
-  const FIELD_TYPE_LABELS = buildFieldTypeLabels(refs);
-  const priorityTypeLabels = buildPriorityTypeLabels(refs);
   const projectType = isScrum ? "scrum" : "kanban";
+  const FIELD_TYPE_LABELS = buildFieldTypeLabels(refs, { projectType, scope: "board_field" });
+  const priorityTypeLabels = buildPriorityTypeLabels(refs);
+
+  // Split fields into system and custom
+  const systemFields = board.fields.filter(f => f.isSystem);
+  const customFields = board.fields.filter(f => !f.isSystem);
+
+  // Find priority and estimation fields by fieldType (most reliable), then fallback to name/description
+  const priorityField = systemFields.find(f => f.fieldType === "priority")
+    || systemFields.find(f =>
+      f.name === "Приоритизация" ||
+      f.description?.toLowerCase().includes("приоритизаци")
+    ) || null;
+  const estimationFieldFound = systemFields.find(f => f.fieldType === "estimation")
+    || systemFields.find(f =>
+      f.name === "Оценка трудозатрат" ||
+      f.description?.toLowerCase().includes("единица измерения")
+    ) || null;
 
   // Custom field form state
   const [showAddForm, setShowAddForm] = useState(false);
@@ -1504,28 +1777,22 @@ function BoardTaskTemplateTab({
   const [newOptions, setNewOptions] = useState<string[]>([]);
   const [optionInput, setOptionInput] = useState("");
 
-  // Priority/service class value editing
-  const [editingValues, setEditingValues] = useState(false);
+  // Priority/service class value editing (inline)
   const [valueInput, setValueInput] = useState("");
-  const [editedValues, setEditedValues] = useState<string[]>(
-    board.priorityValues.map(v => v.value)
-  );
-
-  // Sync editedValues when board changes
-  useEffect(() => {
-    if (!editingValues) {
-      setEditedValues(board.priorityValues.map(v => v.value));
-    }
-  }, [board.priorityValues, editingValues]);
 
   async function handleAddCustomField() {
     if (!newName.trim()) return;
+    const trimmed = newName.trim();
+    if (board.fields.some(f => f.name.toLowerCase() === trimmed.toLowerCase())) {
+      toast.error(`Параметр задачи с названием «${trimmed}» уже существует`);
+      return;
+    }
     try {
-      await createTemplateBoardCustomField(templateId, board.id, {
+      await createTemplateBoardField(templateId, board.id, {
         name: newName.trim(),
         fieldType: newType,
         isRequired: newRequired,
-        order: board.customFields.length + 1,
+        order: customFields.length + 1,
         options: ["select", "multiselect"].includes(newType) ? newOptions : undefined,
       });
       setNewName("");
@@ -1541,12 +1808,37 @@ function BoardTaskTemplateTab({
 
   async function removeCustomField(fieldId: string) {
     try {
-      await deleteTemplateBoardCustomField(templateId, board.id, fieldId);
-      await onReload();
+      const needClearSwimlanes = board.swimlaneGroupBy === fieldId;
+      await deleteTemplateBoardField(templateId, board.id, fieldId);
+      if (needClearSwimlanes) {
+        await onClearSwimlaneGroupBy();
+      } else {
+        await onReload();
+      }
     } catch (e: any) {
       toast.error(e.message || "Не удалось удалить параметр");
     }
   }
+
+  async function handleUpdateCustomField(fieldId: string, updates: Partial<{ name: string; isRequired: boolean; options: string[] }>) {
+    if (updates.name !== undefined) {
+      const trimmed = updates.name.trim();
+      if (!trimmed) return;
+      if (board.fields.some(f => f.id !== fieldId && f.name.toLowerCase() === trimmed.toLowerCase())) {
+        toast.error(`Параметр задачи с названием «${trimmed}» уже существует`);
+        return;
+      }
+    }
+    try {
+      await updateTemplateBoardField(templateId, board.id, fieldId, updates);
+      await onReload();
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось обновить параметр");
+    }
+  }
+
+  const [expandedFieldId, setExpandedFieldId] = useState<string | null>(null);
+  const [editFieldOptionInput, setEditFieldOptionInput] = useState("");
 
   function addOption() {
     if (optionInput.trim() && !newOptions.includes(optionInput.trim())) {
@@ -1555,33 +1847,68 @@ function BoardTaskTemplateTab({
     }
   }
 
-  function addValue() {
-    if (valueInput.trim() && !editedValues.includes(valueInput.trim())) {
-      setEditedValues([...editedValues, valueInput.trim()]);
+  function getCurrentPriorityValues(): string[] {
+    const fieldOpts = priorityField?.options?.length ? priorityField.options : [];
+    if (fieldOpts.length > 0) return fieldOpts;
+    return refs.priorityTypeOptions.find(o => o.key === board.priorityType)?.defaultValues || [];
+  }
+
+  async function addAndSaveValue() {
+    if (!priorityField) { toast.error("Параметр приоритизации не найден"); return; }
+    if (!valueInput.trim()) return;
+    const trimmed = valueInput.trim();
+    const current = getCurrentPriorityValues();
+    if (current.includes(trimmed)) { toast.info("Такое значение уже есть"); return; }
+    const newOpts = [...current, trimmed];
+    try {
+      await updateTemplateBoardField(templateId, board.id, priorityField.id, {
+        options: newOpts,
+      });
       setValueInput("");
+      toast.success("Значение добавлено");
+      await onReload();
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось добавить значение");
     }
   }
 
-  async function saveValues() {
+  async function removeValue(val: string) {
+    if (!priorityField) { toast.error("priorityField не найден"); return; }
+    const current = getCurrentPriorityValues();
+    const newOptions = current.filter(v => v !== val);
+    if (newOptions.length === 0) { toast.error("Нельзя удалить последнее значение"); return; }
     try {
-      await replaceTemplateBoardPriorityValues(
-        templateId,
-        board.id,
-        editedValues.map((v, i) => ({ value: v, order: i + 1 })),
-      );
+      await updateTemplateBoardField(templateId, board.id, priorityField.id, {
+        options: newOptions,
+      });
+      toast.success("Значение удалено");
       await onReload();
-      setEditingValues(false);
     } catch (e: any) {
-      toast.error(e.message || "Не удалось сохранить значения");
+      toast.error(e.message || "Не удалось удалить значение");
     }
   }
 
   async function handlePriorityTypeChange(type: "priority" | "service_class") {
     try {
       await updateTemplateBoard(templateId, board.id, { priorityType: type });
-      await onReload();
     } catch (e: any) {
       toast.error(e.message || "Не удалось изменить тип приоритизации");
+      return;
+    }
+    // Set default values for the new priority type
+    const defaults = refs.priorityTypeOptions.find(o => o.key === type)?.defaultValues || [];
+    if (priorityField && defaults.length > 0) {
+      try {
+        await updateTemplateBoardField(templateId, board.id, priorityField.id, { options: defaults });
+      } catch {
+        // Backend may set defaults automatically when priority type changes
+      }
+    }
+    // If swimlanes were grouped by the priority field, clear them
+    if (priorityField && board.swimlaneGroupBy === priorityField.id) {
+      await onClearSwimlaneGroupBy();
+    } else {
+      await onReload();
     }
   }
 
@@ -1598,18 +1925,25 @@ function BoardTaskTemplateTab({
   const availableEstimationUnits = refs.estimationUnits.filter(u => u.availableFor.includes(projectType));
   // Get available priority types for this project type
   const availablePriorityTypes = refs.priorityTypeOptions.filter(o => o.availableFor.includes(projectType));
-  // System task fields for this project type
-  const systemFields = refs.systemTaskFields.filter(f => f.availableFor.includes(projectType));
+  // Sprint field — by fieldType "sprint"
+  const sprintField = systemFields.find(f => f.fieldType === "sprint") || null;
+  // Use the found estimation field
+  const estimationField = estimationFieldFound;
+  // Simple system fields: everything except priority, estimation, sprint
+  const simpleSystemFields = systemFields.filter(f =>
+    f.id !== priorityField?.id &&
+    f.id !== estimationField?.id &&
+    f.id !== sprintField?.id
+  );
 
   // Locked system field row
-  const LockedField = ({ name, description }: { name: string; description?: string }) => (
+  const LockedField = ({ name, description, isRequired }: { name: string; description?: string; isRequired?: boolean }) => (
     <div className="p-3 border border-slate-200 rounded-lg bg-slate-50 flex items-center gap-3">
       <Lock size={14} className="text-slate-400 shrink-0" />
       <div className="flex-1">
-        <span className="text-sm font-medium">{name}</span>
-        {description && <span className="text-xs text-slate-500 ml-2">{description}</span>}
+        <span className="text-sm font-medium">{name}{isRequired && <span className="text-red-500 ml-0.5">*</span>}</span>
+        {description && <p className="text-xs text-slate-500 mt-0.5">{description}</p>}
       </div>
-      <span className="text-xs text-slate-400">Обязательный</span>
     </div>
   );
 
@@ -1621,22 +1955,20 @@ function BoardTaskTemplateTab({
       <div>
         <h3 className="text-lg font-bold mb-1">Системные параметры задач</h3>
         <p className="text-sm text-slate-500 mb-4">
-          Эти параметры являются обязательными и не могут быть убраны из шаблона.
+          Эти параметры являются системными и не могут быть удалены из шаблона задачи.
         </p>
 
         <div className="space-y-2">
-          {systemFields
-            .filter(f => f.key !== "priority" && f.key !== "estimation" && f.key !== "sprint")
-            .map(f => (
-              <LockedField key={f.key} name={f.name} description={SYSTEM_FIELD_TYPE_LABELS[f.fieldType] || f.fieldType} />
+          {simpleSystemFields.map(f => (
+              <LockedField key={f.id} name={f.name} description={f.description || SYSTEM_FIELD_TYPE_LABELS[f.fieldType] || f.fieldType} isRequired={f.isRequired} />
             ))}
 
           {/* Priority / Service Class — configurable */}
+          {priorityField && (
           <div className="p-4 border border-purple-200 rounded-lg bg-purple-50/50">
-            <div className="flex items-center gap-3 mb-3">
+            <div className="flex items-center gap-3 mb-2">
               <Lock size={14} className="text-purple-500 shrink-0" />
-              <span className="text-sm font-medium">{priorityLabel}</span>
-              <span className="text-xs text-slate-400">Обязательный</span>
+              <span className="text-sm font-medium">{priorityLabel}{priorityField.isRequired && <span className="text-red-500 ml-0.5">*</span>}</span>
             </div>
 
             {/* Kanban: choose between priority and service class */}
@@ -1663,71 +1995,55 @@ function BoardTaskTemplateTab({
 
             {/* Current values */}
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs text-slate-600">Значения:</p>
-                {!editingValues && (
-                  <button
-                    onClick={() => { setEditingValues(true); setEditedValues(board.priorityValues.map(v => v.value)); }}
-                    className="text-xs text-purple-600 hover:text-purple-800"
-                  >
-                    Изменить
-                  </button>
-                )}
+              <p className="text-xs text-slate-600 mb-2">Значения параметра {priorityLabel}:</p>
+              {(() => {
+                const fieldOpts = priorityField?.options?.length ? priorityField.options : [];
+                const defaultOpts = refs.priorityTypeOptions.find(o => o.key === board.priorityType)?.defaultValues || [];
+                const currentValues = fieldOpts.length > 0 ? fieldOpts : defaultOpts;
+                return (<>
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {currentValues.map((val) => (
+                  <span key={val} className="px-2 py-1 bg-white border border-slate-200 rounded text-sm flex items-center gap-1.5">
+                    {val}
+                    <button
+                      onClick={() => removeValue(val)}
+                      disabled={currentValues.length <= 1}
+                      className={currentValues.length <= 1 ? "opacity-30 cursor-not-allowed" : "hover:text-red-600"}
+                    >
+                      <X size={12} />
+                    </button>
+                  </span>
+                ))}
               </div>
-
-              {editingValues ? (
-                <div className="space-y-2">
-                  <div className="flex flex-wrap gap-1.5">
-                    {editedValues.map((val) => (
-                      <span key={val} className="px-2 py-1 bg-white border border-slate-200 rounded text-sm flex items-center gap-1.5">
-                        {val}
-                        <button onClick={() => setEditedValues(editedValues.filter((v) => v !== val))} className="hover:text-red-600">
-                          <X size={12} />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={valueInput}
-                      onChange={(e) => setValueInput(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addValue())}
-                      className="flex-1 px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                      placeholder="Новое значение..."
-                    />
-                    <button onClick={addValue} className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 rounded-lg" title="Добавить в список"><Plus size={16} /></button>
-                  </div>
-                  <p className="text-xs text-slate-400">
-                    Введите значение и нажмите <strong>+</strong> (или Enter), чтобы добавить его в список. Можно добавить несколько значений. Затем нажмите <strong>Сохранить</strong>.
-                  </p>
-                  <div className="flex gap-2">
-                    <button onClick={() => setEditingValues(false)} className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">Отмена</button>
-                    <button onClick={saveValues} className="px-3 py-1.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700">Сохранить</button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-wrap gap-1.5">
-                  {board.priorityValues.map((val) => (
-                    <span key={val.id} className="px-2 py-1 bg-white border border-slate-200 rounded text-xs">{val.value}</span>
-                  ))}
-                </div>
-              )}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={valueInput}
+                  onChange={(e) => setValueInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addAndSaveValue())}
+                  className="flex-1 px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  placeholder="Новое значение..."
+                />
+                <button onClick={addAndSaveValue} className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 rounded-lg" title="Добавить значение"><Plus size={16} /></button>
+              </div>
+              </>);
+              })()}
             </div>
           </div>
 
+          )}
+
           {/* Estimation */}
+          {estimationField && (
           <div className="p-4 border border-purple-200 rounded-lg bg-purple-50/50">
-            <div className="flex items-center gap-3 mb-3">
+            <div className="flex items-center gap-3 mb-2">
               <Lock size={14} className="text-purple-500 shrink-0" />
               <span className="text-sm font-medium">
-                Оценка трудозатрат
+                {estimationField.name}{estimationField.isRequired && <span className="text-red-500 ml-0.5">*</span>}
               </span>
-              <span className="text-xs text-slate-400">Обязательный</span>
             </div>
-
-            {availableEstimationUnits.length > 1 ? (
-              <div>
+            {availableEstimationUnits.length > 0 && (
+              <div className="mb-3">
                 <p className="text-xs text-slate-600 mb-2">Единица измерения:</p>
                 <div className="flex gap-2">
                   {availableEstimationUnits.map(unit => (
@@ -1745,14 +2061,26 @@ function BoardTaskTemplateTab({
                   ))}
                 </div>
               </div>
-            ) : (
-              <p className="text-xs text-slate-500">Единица измерения: {availableEstimationUnits[0]?.name || "время"}</p>
             )}
+            {(() => {
+              const currentUnit = availableEstimationUnits.find(u => u.key === board.estimationUnit);
+              const unitName = currentUnit?.name || board.estimationUnit;
+              const example = board.estimationUnit === "story_points"
+                ? "Пример: 1, 2, 3, 5, 8, 13 (числа Фибоначчи)"
+                : "Пример: 2ч 30м, 4ч, 1д 2ч (часы и минуты)";
+              return (
+                <p className="text-xs text-slate-500">
+                  Текущая единица: <strong>{unitName}</strong>. {example}
+                </p>
+              );
+            })()}
           </div>
 
+          )}
+
           {/* Sprint — Scrum only */}
-          {systemFields.find(f => f.key === "sprint") && (
-            <LockedField name="Спринт" description="Итерация разработки" />
+          {sprintField && (
+            <LockedField name={sprintField.name} description={sprintField.description || undefined} isRequired={sprintField.isRequired} />
           )}
         </div>
       </div>
@@ -1903,37 +2231,124 @@ function BoardTaskTemplateTab({
           </div>
         )}
 
-        {board.customFields.length > 0 ? (
+        {customFields.length > 0 ? (
           <div className="space-y-2">
-            {board.customFields.map((field) => (
-              <div
-                key={field.id}
-                className="p-4 border border-slate-200 rounded-lg bg-white flex items-center justify-between"
-              >
-                <div className="flex items-center gap-3 flex-1">
-                  <GripVertical size={18} className="text-slate-400" />
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium">{field.name}</p>
-                      {field.isRequired && (
-                        <span className="text-xs px-1.5 py-0.5 bg-red-100 text-red-700 rounded">обязательное</span>
-                      )}
-                      <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">кастомное</span>
+            {customFields.map((field) => {
+              const isExpanded = expandedFieldId === field.id;
+              return (
+                <div key={field.id} className="border border-slate-200 rounded-lg bg-white overflow-hidden">
+                  <div
+                    className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors"
+                    onClick={() => setExpandedFieldId(isExpanded ? null : field.id)}
+                  >
+                    <div className="flex items-center gap-3 flex-1">
+                      <GripVertical size={18} className="text-slate-400" />
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium">{field.name}</p>
+                          {field.isRequired && (
+                            <span className="text-xs px-1.5 py-0.5 bg-red-100 text-red-700 rounded">обязательное</span>
+                          )}
+                          <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">кастомное</span>
+                        </div>
+                        <p className="text-sm text-slate-600 mt-0.5">Тип: {FIELD_TYPE_LABELS[field.fieldType] || field.fieldType}</p>
+                      </div>
                     </div>
-                    <p className="text-sm text-slate-600 mt-1">Тип: {FIELD_TYPE_LABELS[field.fieldType] || field.fieldType}</p>
-                    {field.options && field.options.length > 0 && (
-                      <p className="text-xs text-slate-500 mt-1">Варианты: {field.options.join(", ")}</p>
-                    )}
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); removeCustomField(field.id); }}
+                        className="p-1.5 text-red-500 hover:bg-red-50 rounded transition-colors"
+                        title="Удалить параметр"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                      {isExpanded ? <ChevronUp size={18} className="text-slate-400" /> : <ChevronDown size={18} className="text-slate-400" />}
+                    </div>
                   </div>
+
+                  {isExpanded && (
+                    <div className="px-4 pb-4 space-y-3 border-t border-slate-100 pt-3">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium mb-1">Название *</label>
+                          <DebouncedInput
+                            value={field.name}
+                            onSave={(val) => handleUpdateCustomField(field.id, { name: val })}
+                            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                            placeholder="Название параметра..."
+                            required
+                            requiredMessage="Название параметра не может быть пустым"
+                          />
+                        </div>
+                        <div className="flex items-end pb-1">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={field.isRequired}
+                              onChange={(e) => handleUpdateCustomField(field.id, { isRequired: e.target.checked })}
+                              className="w-4 h-4 text-purple-600 rounded"
+                            />
+                            <span className="text-sm">Обязательное поле</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      {["select", "multiselect"].includes(field.fieldType) && (
+                        <div>
+                          <label className="block text-xs font-medium mb-1">Варианты для выбора</label>
+                          <div className="flex gap-2 mb-2">
+                            <input
+                              type="text"
+                              value={editFieldOptionInput}
+                              onChange={(e) => setEditFieldOptionInput(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  const trimmed = editFieldOptionInput.trim();
+                                  if (trimmed && !(field.options || []).includes(trimmed)) {
+                                    handleUpdateCustomField(field.id, { options: [...(field.options || []), trimmed] });
+                                    setEditFieldOptionInput("");
+                                  }
+                                }
+                              }}
+                              className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                              placeholder="Введите вариант..."
+                            />
+                            <button
+                              onClick={() => {
+                                const trimmed = editFieldOptionInput.trim();
+                                if (trimmed && !(field.options || []).includes(trimmed)) {
+                                  handleUpdateCustomField(field.id, { options: [...(field.options || []), trimmed] });
+                                  setEditFieldOptionInput("");
+                                }
+                              }}
+                              className="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm"
+                            >
+                              <Plus size={16} />
+                            </button>
+                          </div>
+                          {field.options && field.options.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5">
+                              {field.options.map((opt) => (
+                                <span key={opt} className="inline-flex items-center gap-1 px-2 py-1 bg-slate-100 text-slate-700 rounded text-xs">
+                                  {opt}
+                                  <button
+                                    onClick={() => handleUpdateCustomField(field.id, { options: field.options!.filter(o => o !== opt) })}
+                                    className="hover:text-red-600"
+                                  >
+                                    <X size={12} />
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <button
-                  onClick={() => removeCustomField(field.id)}
-                  className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                >
-                  <Trash2 size={18} />
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : !showAddForm ? (
           <div className="text-center py-8 bg-slate-50 rounded-lg border-2 border-dashed border-slate-300">
@@ -1955,11 +2370,11 @@ function BoardTaskTemplateTab({
 // Section: Project Parameters
 // ════════════════════════════════════════════════════════════════
 
-function ProjectParamsSection({ templateId, isScrum, refs, customParams, onReload }: {
+function ProjectParamsSection({ templateId, isScrum, refs, params, onReload }: {
   templateId: string;
   isScrum: boolean;
   refs: TemplateReferences;
-  customParams: TemplateProjectParam[];
+  params: TemplateProjectParam[];
   onReload: () => Promise<void>;
 }) {
   const [showAddForm, setShowAddForm] = useState(false);
@@ -1969,11 +2384,38 @@ function ProjectParamsSection({ templateId, isScrum, refs, customParams, onReloa
   const [newOptions, setNewOptions] = useState<string[]>([]);
   const [optionInput, setOptionInput] = useState("");
 
-  const FIELD_TYPE_LABELS_LOCAL = buildFieldTypeLabels(refs);
-  const systemProjectParams = refs.systemProjectParams || [];
+  const [expandedParamId, setExpandedParamId] = useState<string | null>(null);
+  const [editParamOptionInput, setEditParamOptionInput] = useState("");
+
+  const projectType = isScrum ? "scrum" : "kanban";
+  const FIELD_TYPE_LABELS_LOCAL = buildFieldTypeLabels(refs, { projectType, scope: "project_param" });
+  const systemParams = params.filter(p => p.isSystem);
+  const customParams = params.filter(p => !p.isSystem);
+
+  async function handleUpdateCustomParam(paramId: string, updates: Partial<{ name: string; isRequired: boolean; options: string[] | null }>) {
+    if (updates.name !== undefined) {
+      const trimmed = updates.name.trim();
+      if (!trimmed) return;
+      if (params.some(p => p.id !== paramId && p.name.toLowerCase() === trimmed.toLowerCase())) {
+        toast.error(`Параметр проекта с названием «${trimmed}» уже существует`);
+        return;
+      }
+    }
+    try {
+      await updateTemplateProjectParam(templateId, paramId, updates);
+      await onReload();
+    } catch (e: any) {
+      toast.error(e.message || "Не удалось обновить параметр");
+    }
+  }
 
   async function addCustomParam() {
     if (!newName.trim()) return;
+    const trimmed = newName.trim();
+    if (params.some(p => p.name.toLowerCase() === trimmed.toLowerCase())) {
+      toast.error(`Параметр проекта с названием «${trimmed}» уже существует`);
+      return;
+    }
     try {
       await createTemplateProjectParam(templateId, {
         name: newName.trim(),
@@ -2022,16 +2464,19 @@ function ProjectParamsSection({ templateId, isScrum, refs, customParams, onReloa
 
         {/* System params */}
         <div className="space-y-2">
-          {systemProjectParams.map((param) => (
-            <div key={param.key} className="p-3 border border-slate-200 rounded-lg bg-slate-50 flex items-center gap-3">
+          {systemParams.map((param) => (
+            <div key={param.id} className="p-3 border border-slate-200 rounded-lg bg-slate-50 flex items-center gap-3">
               <Lock size={14} className="text-slate-400 shrink-0" />
               <div className="flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">{param.name}</span>
+                  <span className="text-sm font-medium">{param.name}{param.isRequired && <span className="text-red-500 ml-0.5">*</span>}</span>
                   <span className="text-xs px-1.5 py-0.5 bg-slate-200 text-slate-600 rounded">
                     {SYSTEM_FIELD_TYPE_LABELS[param.fieldType] || FIELD_TYPE_LABELS_LOCAL[param.fieldType] || param.fieldType}
                   </span>
                 </div>
+                {param.description && (
+                  <p className="text-xs text-slate-500 mt-0.5">{param.description}</p>
+                )}
                 {param.options && param.options.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-1.5">
                     {param.options.map(opt => (
@@ -2040,9 +2485,6 @@ function ProjectParamsSection({ templateId, isScrum, refs, customParams, onReloa
                   </div>
                 )}
               </div>
-              <span className="text-xs text-slate-400">
-                {param.isRequired ? "Обязательный" : "Опциональный"}
-              </span>
             </div>
           ))}
         </div>
@@ -2172,32 +2614,122 @@ function ProjectParamsSection({ templateId, isScrum, refs, customParams, onReloa
 
           {customParams.length > 0 ? (
             <div className="space-y-2">
-              {customParams.map((param) => (
-                <div key={param.id} className="p-4 border border-slate-200 rounded-lg bg-white flex items-center justify-between">
-                  <div className="flex items-center gap-3 flex-1">
-                    <GripVertical size={18} className="text-slate-400" />
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium text-sm">{param.name}</p>
-                        {param.isRequired && (
-                          <span className="text-xs px-1.5 py-0.5 bg-red-100 text-red-700 rounded">обязательное</span>
-                        )}
-                        <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">кастомное</span>
+              {customParams.map((param) => {
+                const isExpanded = expandedParamId === param.id;
+                return (
+                  <div key={param.id} className="border border-slate-200 rounded-lg bg-white overflow-hidden">
+                    <div
+                      className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors"
+                      onClick={() => setExpandedParamId(isExpanded ? null : param.id)}
+                    >
+                      <div className="flex items-center gap-3 flex-1">
+                        <GripVertical size={18} className="text-slate-400" />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium text-sm">{param.name}</p>
+                            {param.isRequired && (
+                              <span className="text-xs px-1.5 py-0.5 bg-red-100 text-red-700 rounded">обязательное</span>
+                            )}
+                            <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">кастомное</span>
+                          </div>
+                          <p className="text-sm text-slate-600 mt-0.5">Тип: {FIELD_TYPE_LABELS_LOCAL[param.fieldType] || param.fieldType}</p>
+                        </div>
                       </div>
-                      <p className="text-sm text-slate-600 mt-0.5">Тип: {FIELD_TYPE_LABELS_LOCAL[param.fieldType] || param.fieldType}</p>
-                      {param.options && param.options.length > 0 && (
-                        <p className="text-xs text-slate-500 mt-0.5">Варианты: {param.options.join(", ")}</p>
-                      )}
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); removeCustomParam(param.id); }}
+                          className="p-1.5 text-red-500 hover:bg-red-50 rounded transition-colors"
+                          title="Удалить параметр"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                        {isExpanded ? <ChevronUp size={18} className="text-slate-400" /> : <ChevronDown size={18} className="text-slate-400" />}
+                      </div>
                     </div>
+
+                    {isExpanded && (
+                      <div className="px-4 pb-4 space-y-3 border-t border-slate-100 pt-3">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-medium mb-1">Название *</label>
+                            <DebouncedInput
+                              value={param.name}
+                              onSave={(val) => handleUpdateCustomParam(param.id, { name: val })}
+                              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                              placeholder="Название параметра..."
+                              required
+                              requiredMessage="Название параметра не может быть пустым"
+                            />
+                          </div>
+                          <div className="flex items-end pb-1">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={param.isRequired}
+                                onChange={(e) => handleUpdateCustomParam(param.id, { isRequired: e.target.checked })}
+                                className="w-4 h-4 text-purple-600 rounded"
+                              />
+                              <span className="text-sm">Обязательное поле</span>
+                            </label>
+                          </div>
+                        </div>
+
+                        {["select", "multiselect"].includes(param.fieldType) && (
+                          <div>
+                            <label className="block text-xs font-medium mb-1">Варианты для выбора</label>
+                            <div className="flex gap-2 mb-2">
+                              <input
+                                type="text"
+                                value={editParamOptionInput}
+                                onChange={(e) => setEditParamOptionInput(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    const trimmed = editParamOptionInput.trim();
+                                    if (trimmed && !(param.options || []).includes(trimmed)) {
+                                      handleUpdateCustomParam(param.id, { options: [...(param.options || []), trimmed] });
+                                      setEditParamOptionInput("");
+                                    }
+                                  }
+                                }}
+                                className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                placeholder="Введите вариант..."
+                              />
+                              <button
+                                onClick={() => {
+                                  const trimmed = editParamOptionInput.trim();
+                                  if (trimmed && !(param.options || []).includes(trimmed)) {
+                                    handleUpdateCustomParam(param.id, { options: [...(param.options || []), trimmed] });
+                                    setEditParamOptionInput("");
+                                  }
+                                }}
+                                className="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm"
+                              >
+                                <Plus size={16} />
+                              </button>
+                            </div>
+                            {param.options && param.options.length > 0 && (
+                              <div className="flex flex-wrap gap-1.5">
+                                {param.options.map((opt) => (
+                                  <span key={opt} className="inline-flex items-center gap-1 px-2 py-1 bg-slate-100 text-slate-700 rounded text-xs">
+                                    {opt}
+                                    <button
+                                      onClick={() => handleUpdateCustomParam(param.id, { options: param.options!.filter(o => o !== opt) })}
+                                      className="hover:text-red-600"
+                                    >
+                                      <X size={12} />
+                                    </button>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <button
-                    onClick={() => removeCustomParam(param.id)}
-                    className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : !showAddForm ? (
             <div className="text-center py-8 bg-slate-50 rounded-lg border-2 border-dashed border-slate-300">
@@ -2241,12 +2773,18 @@ function ProjectRolesSection({
   const allAreas = Array.isArray(refs.permissionAreas) ? refs.permissionAreas : [];
   const permissionAreas = allAreas.filter(a => a.availableFor?.includes(projectType));
   const accessLevels = Array.isArray(refs.accessLevels) ? refs.accessLevels : [];
-  const areaMap = Object.fromEntries(allAreas.map(a => [a.area, a]));
+  // Build lookup map by area key — also index by short name (without "project." prefix) for compatibility
+  const areaMap: Record<string, typeof allAreas[number]> = {};
+  for (const a of allAreas) {
+    areaMap[a.area] = a;
+    if (a.area.startsWith("project.")) areaMap[a.area.slice(8)] = a;
+    else areaMap[`project.${a.area}`] = a;
+  }
 
   async function handleAddRole() {
     if (!newRoleName.trim()) return;
     try {
-      const defaultPerms: TemplateRolePermission[] = permissionAreas.map(a => ({ area: a.area, access: "none" }));
+      const defaultPerms: TemplateRolePermission[] = permissionAreas.map(a => ({ area: `project.${a.area}`, access: "none" as const }));
       const newRole = await createTemplateRole(templateId, {
         name: newRoleName.trim(),
         description: newRoleDescription.trim(),
@@ -2373,14 +2911,12 @@ function ProjectRolesSection({
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-sm">{role.name || "Без названия"}</span>
-                        {role.isDefault && (
-                          <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">по умолчанию</span>
-                        )}
                       </div>
                       {role.description && <p className="text-xs text-slate-500 mt-0.5">{role.description}</p>}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
+                    {!role.isAdmin && (
                     <button
                       onClick={(e) => { e.stopPropagation(); handleRemoveRole(role.id); }}
                       className="p-1.5 text-red-500 hover:bg-red-50 rounded transition-colors"
@@ -2388,6 +2924,7 @@ function ProjectRolesSection({
                     >
                       <Trash2 size={16} />
                     </button>
+                    )}
                     {isExpanded ? <ChevronUp size={18} className="text-slate-400" /> : <ChevronDown size={18} className="text-slate-400" />}
                   </div>
                 </div>
@@ -2397,17 +2934,23 @@ function ProjectRolesSection({
                   <div className="p-4 space-y-3">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
                       <div>
-                        <label className="block text-xs font-medium mb-1">Название роли</label>
-                        <NoteTextarea
+                        <label className="block text-xs font-medium mb-1">Название роли *</label>
+                        <DebouncedInput
                           value={role.name}
-                          onSave={(val) => handleUpdateRole(role.id, { name: val || "" })}
+                          onSave={(val) => handleUpdateRole(role.id, { name: val })}
+                          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                          placeholder="Название роли..."
+                          required
+                          requiredMessage="Название роли не может быть пустым"
                         />
                       </div>
                       <div>
                         <label className="block text-xs font-medium mb-1">Описание роли</label>
-                        <NoteTextarea
+                        <DebouncedInput
                           value={role.description}
-                          onSave={(val) => handleUpdateRole(role.id, { description: val || "" })}
+                          onSave={(val) => handleUpdateRole(role.id, { description: val })}
+                          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                          placeholder="Краткое описание роли..."
                         />
                       </div>
                     </div>
@@ -2415,29 +2958,33 @@ function ProjectRolesSection({
                     <div>
                       <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Права доступа</p>
                       <div className="space-y-1.5">
-                        {role.permissions.map((perm) => {
-                          const areaDef = areaMap[perm.area];
+                        {permissionAreas.map((areaDef) => {
+                          const permArea = `project.${areaDef.area}`;
+                          const perm = role.permissions.find(p => p.area === permArea);
+                          const currentAccess = perm?.access || (role.isAdmin ? "full" : "none");
+                          const allAccessLevels = [...accessLevels, ...(accessLevels.find(l => l.key === "none") ? [] : [{ key: "none", name: "Нет доступа", description: "" }])];
                           return (
-                            <div key={perm.area} className="flex items-center justify-between p-2.5 bg-slate-50 rounded-lg gap-3">
+                            <div key={areaDef.area} className="flex items-center justify-between p-2.5 bg-slate-50 rounded-lg gap-3">
                               <div className="min-w-0">
-                                <span className="text-sm font-medium">{areaDef?.name || perm.area}</span>
-                                {areaDef?.description && <p className="text-xs text-slate-500 mt-0.5">{areaDef.description}</p>}
+                                <span className="text-sm font-medium">{areaDef.name}</span>
+                                {areaDef.description && <p className="text-xs text-slate-500 mt-0.5">{areaDef.description}</p>}
                               </div>
                               <div className="flex gap-1 shrink-0">
-                                {accessLevels.map((level) => (
+                                {allAccessLevels.map((level) => (
                                   <button
                                     key={level.key}
-                                    onClick={() => handleUpdatePermission(role.id, perm.area, level.key as TemplateRolePermission["access"])}
+                                    onClick={() => !role.isAdmin && handleUpdatePermission(role.id, permArea, level.key as TemplateRolePermission["access"])}
+                                    disabled={role.isAdmin}
                                     className={`px-2.5 py-1 text-xs rounded-md border transition-all ${
-                                      perm.access === level.key
+                                      currentAccess === level.key
                                         ? level.key === "full"
                                           ? "bg-green-600 text-white border-green-600"
                                           : level.key === "view"
                                             ? "bg-amber-500 text-white border-amber-500"
                                             : "bg-slate-500 text-white border-slate-500"
                                         : "border-slate-200 text-slate-600 hover:bg-slate-100"
-                                    }`}
-                                    title={level.description || ""}
+                                    } ${role.isAdmin ? "opacity-60 cursor-not-allowed" : ""}`}
+                                    title={role.isAdmin ? "Права администратора нельзя изменить" : ((level as any).description || level.name)}
                                   >
                                     {level.key === "none" ? <EyeOff size={12} className="inline mr-1" /> : <Eye size={12} className="inline mr-1" />}
                                     {level.name}

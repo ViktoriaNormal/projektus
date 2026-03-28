@@ -468,10 +468,10 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
                   return (
                     <div key={user.id} className={`flex items-center justify-between p-2 rounded-lg border ${isOrganizer ? "bg-amber-50 border-amber-200" : "bg-white border-slate-200"}`}>
                       <div className="flex items-center gap-2">
-                        <UserAvatar user={{ fullName: user.full_name, avatarUrl: user.avatar_url }} size="sm" />
+                        <UserAvatar user={{ fullName: user.fullName, avatarUrl: user.avatarUrl }} size="sm" />
                         <div>
                           <p className="text-sm font-medium flex items-center gap-1.5">
-                            {user.full_name}
+                            {user.fullName}
                             {isOrganizer && (
                               <span className="inline-flex items-center gap-0.5 text-xs text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full font-medium">
                                 <Crown size={10} />
@@ -529,9 +529,9 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
                         onClick={() => addParticipant(user)}
                         className="flex items-center gap-2 p-2 hover:bg-white rounded-lg cursor-pointer transition-colors border border-transparent hover:border-blue-300"
                       >
-                        <UserAvatar user={{ fullName: user.full_name, avatarUrl: user.avatar_url }} size="sm" />
+                        <UserAvatar user={{ fullName: user.fullName, avatarUrl: user.avatarUrl }} size="sm" />
                         <div className="flex-1">
-                          <p className="text-sm font-medium">{user.full_name}</p>
+                          <p className="text-sm font-medium">{user.fullName}</p>
                           <p className="text-xs text-slate-500">{user.email}</p>
                         </div>
                       </div>

@@ -17,20 +17,20 @@ export interface ProjectRoleResponse {
 
 export interface UserProfileResponse extends UserResponse {
   position: string | null;
-  on_vacation: boolean;
-  is_sick: boolean;
-  alternative_contact_channel: string | null;
-  alternative_contact_info: string | null;
+  onVacation: boolean;
+  isSick: boolean;
+  alternativeContactChannel: string | null;
+  alternativeContactInfo: string | null;
 }
 
 export interface UpdateUserProfileData {
-  full_name?: string;
+  fullName?: string;
   email?: string;
   position?: string | null;
-  on_vacation?: boolean;
-  is_sick?: boolean;
-  alternative_contact_channel?: string | null;
-  alternative_contact_info?: string | null;
+  onVacation?: boolean;
+  isSick?: boolean;
+  alternativeContactChannel?: string | null;
+  alternativeContactInfo?: string | null;
 }
 
 export function getUser(userId: string) {

@@ -3,7 +3,7 @@ import { BarChart3, TrendingUp, Calendar, Target, AlertTriangle } from "lucide-r
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from "recharts";
 
 interface KanbanMetricsProps {
-  projectId: number;
+  projectId: string | number;
 }
 
 // Мок-данные для графиков

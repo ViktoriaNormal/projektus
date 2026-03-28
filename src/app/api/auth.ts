@@ -4,8 +4,8 @@ export interface UserResponse {
   id: string;
   username: string;
   email: string;
-  full_name: string;
-  avatar_url: string | null;
+  fullName: string;
+  avatarUrl: string | null;
   position: string | null;
 }
 
@@ -18,8 +18,8 @@ export interface AuthRoleResponse {
 }
 
 export interface AuthResponse {
-  access_token: string;
-  refresh_token: string;
+  accessToken: string;
+  refreshToken: string;
   user: UserResponse;
   roles: AuthRoleResponse[];
 }
@@ -44,7 +44,7 @@ export function register(data: {
   username: string;
   email: string;
   password: string;
-  full_name: string;
+  fullName: string;
 }) {
   return apiRequest<{ user: UserResponse }>('/auth/register', {
     method: 'POST',
@@ -52,21 +52,21 @@ export function register(data: {
   });
 }
 
-export function refreshToken(refresh_token: string) {
-  return apiRequest<{ access_token: string; refresh_token: string }>(
+export function refreshToken(rt: string) {
+  return apiRequest<{ accessToken: string; refreshToken: string }>(
     '/auth/refresh',
     {
       method: 'POST',
-      body: JSON.stringify({ refresh_token }),
+      body: JSON.stringify({ refreshToken: rt }),
     },
   );
 }
 
 
-export function logout(refresh_token: string) {
+export function logout(rt: string) {
   return apiRequest<null>('/auth/logout', {
     method: 'POST',
-    body: JSON.stringify({ refresh_token }),
+    body: JSON.stringify({ refreshToken: rt }),
   });
 }
 
@@ -74,9 +74,9 @@ export function getPasswordPolicy() {
   return apiRequest<PasswordPolicy>('/auth/password-policy');
 }
 
-export function changePassword(old_password: string, new_password: string) {
+export function changePassword(oldPassword: string, newPassword: string) {
   return apiRequest<null>('/auth/change-password', {
     method: 'POST',
-    body: JSON.stringify({ old_password, new_password }),
+    body: JSON.stringify({ oldPassword, newPassword }),
   });
 }

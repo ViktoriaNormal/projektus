@@ -88,18 +88,18 @@ export default function Profile() {
       getPermissionsCatalog().catch(() => [] as PermissionDescriptor[]),
     ]).then(([userData, policyData, sysRoles, projRoles, perms]) => {
       setProfile(userData);
-      setFullName(userData.full_name);
+      setFullName(userData.fullName);
       setEmail(userData.email);
-      setOnVacation(userData.on_vacation ?? false);
-      setIsSick(userData.is_sick ?? false);
-      setAltContactChannel(userData.alternative_contact_channel ?? '');
-      setAltContactInfo(userData.alternative_contact_info ?? '');
+      setOnVacation(userData.onVacation ?? false);
+      setIsSick(userData.isSick ?? false);
+      setAltContactChannel(userData.alternativeContactChannel ?? '');
+      setAltContactInfo(userData.alternativeContactInfo ?? '');
       setPolicy(policyData);
       setSystemRoles(sysRoles);
       setProjectRoles(projRoles);
       setPermCatalog(perms);
     }).catch(() => {
-      setFullName(authUser.full_name || '');
+      setFullName(authUser.fullName || '');
       setEmail(authUser.email || '');
     }).finally(() => setLoading(false));
   }, [authUser]);
@@ -129,17 +129,17 @@ export default function Profile() {
     setProfileSaving(true);
     try {
       const updated = await updateUser(authUser.id, {
-        full_name: fullName.trim(),
+        fullName: fullName.trim(),
         email: email.trim(),
-        on_vacation: onVacation,
-        is_sick: isSick,
-        alternative_contact_channel: altContactChannel.trim() || null,
-        alternative_contact_info: altContactInfo.trim() || null,
+        onVacation: onVacation,
+        isSick: isSick,
+        alternativeContactChannel: altContactChannel.trim() || null,
+        alternativeContactInfo: altContactInfo.trim() || null,
       });
       setProfile(updated);
       const accessToken = localStorage.getItem('access_token') || '';
       const refreshToken = localStorage.getItem('refresh_token') || '';
-      setAuth({ access_token: accessToken, refresh_token: refreshToken, user: updated });
+      setAuth({ accessToken, refreshToken, user: updated, roles: [] });
       setProfileMsg({ type: 'success', text: 'Профиль успешно обновлён' });
     } catch (err) {
       if (err instanceof ApiError) {
@@ -210,7 +210,7 @@ export default function Profile() {
       setProfile(updated);
       const accessToken = localStorage.getItem('access_token') || '';
       const refreshToken = localStorage.getItem('refresh_token') || '';
-      setAuth({ access_token: accessToken, refresh_token: refreshToken, user: updated });
+      setAuth({ accessToken, refreshToken, user: updated, roles: [] });
     } catch {
       setProfileMsg({ type: 'error', text: 'Не удалось загрузить аватар' });
     } finally {
@@ -546,7 +546,7 @@ export default function Profile() {
             <div className="flex flex-col items-center">
               {displayUser && (
                 <UserAvatar
-                  user={{ fullName: displayUser.full_name || '', avatarUrl: displayUser.avatar_url }}
+                  user={{ fullName: displayUser.fullName || '', avatarUrl: displayUser.avatarUrl }}
                   size="xl"
                   className="mb-4 ring-2 ring-slate-200"
                 />

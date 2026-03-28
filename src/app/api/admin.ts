@@ -4,7 +4,9 @@ import type { PasswordPolicy } from './auth';
 // ── Permission Catalog ──────────────────────────────────────
 
 export interface PermissionDescriptor {
-  key: string;
+  code: string;
+  scope: "system" | "project";
+  name: string;
   description: string;
 }
 
@@ -25,6 +27,7 @@ export interface SystemRole {
   id: string;
   name: string;
   description: string;
+  isAdmin: boolean;
   permissions: string[];
 }
 
@@ -62,31 +65,31 @@ export interface AdminUser {
   id: string;
   username: string;
   email: string;
-  full_name: string;
-  avatar_url: string | null;
+  fullName: string;
+  avatarUrl: string | null;
   position: string | null;
-  is_active: boolean;
+  isActive: boolean;
   roles: { id: string; name: string }[];
-  created_at: string;
+  createdAt: string;
 }
 
 export interface CreateUserPayload {
   username: string;
   email: string;
-  full_name: string;
+  fullName: string;
   position: string;
   password: string;
-  is_active: boolean;
-  role_ids: string[];
+  isActive: boolean;
+  roleIds: string[];
 }
 
 export interface UpdateUserPayload {
   username?: string;
   email?: string;
-  full_name?: string;
+  fullName?: string;
   position?: string;
-  is_active?: boolean;
-  role_ids?: string[];
+  isActive?: boolean;
+  roleIds?: string[];
 }
 
 export interface AdminUsersResponse {
@@ -139,17 +142,15 @@ export function updateAdminPasswordPolicy(data: Partial<PasswordPolicy>) {
 // ── Project Templates — Types ────────────────────────────────
 
 export interface TemplateReferences {
-  columnSystemTypes: { key: string; name: string; description: string; order: number }[];
-  taskStatusTypes: { key: string; name: string; description: string; isColumnType: boolean }[];
-  fieldTypes: { key: string; name: string }[];
+  columnSystemTypes: { key: string; name: string; description: string }[];
+  fieldTypes: { key: string; name: string; availableFor?: string[]; allowedScopes?: string[] }[];
   estimationUnits: { key: string; name: string; availableFor: string[] }[];
-  swimlaneGroupOptions: { key: string; name: string; availableFor: string[] }[];
-  swimlaneGroupableFieldTypes: string[];
   priorityTypeOptions: { key: string; name: string; availableFor: string[]; defaultValues: string[] }[];
-  systemTaskFields: { key: string; name: string; fieldType: string; availableFor: string[]; description?: string }[];
+  projectStatuses?: { key: string; name: string }[];
+  systemTaskFields: { key: string; name: string; fieldType: string; isRequired: boolean; availableFor: string[]; description?: string }[];
   systemProjectParams: { key: string; name: string; fieldType: string; isRequired: boolean; options: string[] | null }[];
   permissionAreas: { area: string; name: string; description: string; availableFor: string[] }[];
-  accessLevels: { key: string; name: string; description: string }[];
+  accessLevels: { key: string; name: string }[];
 }
 
 export interface TemplateBoardColumn {
@@ -170,15 +171,10 @@ export interface TemplateBoardSwimlane {
   note: string | null;
 }
 
-export interface TemplateBoardPriorityValue {
-  id: string;
-  value: string;
-  order: number;
-}
-
-export interface TemplateBoardCustomField {
+export interface TemplateBoardField {
   id: string;
   name: string;
+  description: string | null;
   fieldType: string;
   isSystem: boolean;
   isRequired: boolean;
@@ -197,23 +193,13 @@ export interface TemplateBoard {
   swimlaneGroupBy: string | null;
   columns: TemplateBoardColumn[];
   swimlanes: TemplateBoardSwimlane[];
-  priorityValues: TemplateBoardPriorityValue[];
-  customFields: TemplateBoardCustomField[];
-}
-
-export interface ProjectTemplateListItem {
-  id: string;
-  name: string;
-  description: string;
-  projectType: string;
-  boardCount: number;
-  createdAt: string;
-  updatedAt: string;
+  fields: TemplateBoardField[];
 }
 
 export interface TemplateProjectParam {
   id: string;
   name: string;
+  description: string | null;
   fieldType: string;
   isSystem: boolean;
   isRequired: boolean;
@@ -230,7 +216,7 @@ export interface TemplateRole {
   id: string;
   name: string;
   description: string;
-  isDefault: boolean;
+  isAdmin: boolean;
   order: number;
   permissions: TemplateRolePermission[];
 }
@@ -240,10 +226,8 @@ export interface ProjectTemplateDetail {
   name: string;
   description: string;
   projectType: string;
-  createdAt: string;
-  updatedAt: string;
   boards: TemplateBoard[];
-  customProjectParams: TemplateProjectParam[];
+  params: TemplateProjectParam[];
   roles: TemplateRole[];
 }
 
@@ -351,8 +335,18 @@ export function reorderTemplateBoardColumns(templateId: string, boardId: string,
 
 // ── Template Board Swimlanes ─────────────────────────────────
 
+export function createTemplateBoardSwimlane(templateId: string, boardId: string, data: {
+  name: string; wipLimit?: number | null; order?: number;
+}) {
+  return apiRequest<TemplateBoardSwimlane>(`/admin/project-templates/${templateId}/boards/${boardId}/swimlanes`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
 export function updateTemplateBoardSwimlane(templateId: string, boardId: string, swimlaneId: string, data: {
   wipLimit?: number | null;
+  note?: string | null;
 }) {
   return apiRequest<TemplateBoardSwimlane>(`/admin/project-templates/${templateId}/boards/${boardId}/swimlanes/${swimlaneId}`, {
     method: 'PATCH',
@@ -373,43 +367,34 @@ export function reorderTemplateBoardSwimlanes(templateId: string, boardId: strin
   });
 }
 
-// ── Template Board Priority Values ───────────────────────────
+// ── Template Board Fields ────────────────────────────────────
 
-export function replaceTemplateBoardPriorityValues(templateId: string, boardId: string, values: { value: string; order: number }[]) {
-  return apiRequest<TemplateBoardPriorityValue[]>(`/admin/project-templates/${templateId}/boards/${boardId}/priority-values`, {
-    method: 'PUT',
-    body: JSON.stringify(values),
-  });
-}
-
-// ── Template Board Custom Fields ─────────────────────────────
-
-export function createTemplateBoardCustomField(templateId: string, boardId: string, data: {
-  name: string; fieldType: string; isRequired?: boolean; order?: number; options?: string[];
+export function createTemplateBoardField(templateId: string, boardId: string, data: {
+  name: string; description?: string; fieldType: string; isRequired?: boolean; order?: number; options?: string[];
 }) {
-  return apiRequest<TemplateBoardCustomField>(`/admin/project-templates/${templateId}/boards/${boardId}/custom-fields`, {
+  return apiRequest<TemplateBoardField>(`/admin/project-templates/${templateId}/boards/${boardId}/fields`, {
     method: 'POST',
     body: JSON.stringify(data),
   });
 }
 
-export function updateTemplateBoardCustomField(templateId: string, boardId: string, fieldId: string, data: Partial<{
-  name: string; isRequired: boolean; options: string[];
+export function updateTemplateBoardField(templateId: string, boardId: string, fieldId: string, data: Partial<{
+  name: string; description: string; isRequired: boolean; options: string[];
 }>) {
-  return apiRequest<TemplateBoardCustomField>(`/admin/project-templates/${templateId}/boards/${boardId}/custom-fields/${fieldId}`, {
+  return apiRequest<TemplateBoardField>(`/admin/project-templates/${templateId}/boards/${boardId}/fields/${fieldId}`, {
     method: 'PATCH',
     body: JSON.stringify(data),
   });
 }
 
-export function deleteTemplateBoardCustomField(templateId: string, boardId: string, fieldId: string) {
-  return apiRequest<null>(`/admin/project-templates/${templateId}/boards/${boardId}/custom-fields/${fieldId}`, {
+export function deleteTemplateBoardField(templateId: string, boardId: string, fieldId: string) {
+  return apiRequest<null>(`/admin/project-templates/${templateId}/boards/${boardId}/fields/${fieldId}`, {
     method: 'DELETE',
   });
 }
 
-export function reorderTemplateBoardCustomFields(templateId: string, boardId: string, orders: { fieldId: string; order: number }[]) {
-  return apiRequest<null>(`/admin/project-templates/${templateId}/boards/${boardId}/custom-fields/reorder`, {
+export function reorderTemplateBoardFields(templateId: string, boardId: string, orders: { fieldId: string; order: number }[]) {
+  return apiRequest<null>(`/admin/project-templates/${templateId}/boards/${boardId}/fields/reorder`, {
     method: 'PATCH',
     body: JSON.stringify({ orders }),
   });

@@ -148,8 +148,8 @@ export default function Root() {
               to="/profile"
               className="flex items-center gap-2 pl-3 pr-4 py-2 hover:bg-slate-100 rounded-lg transition-colors"
             >
-              <UserAvatar user={{ fullName: user?.full_name || '', avatarUrl: user?.avatar_url }} size="sm" />
-              <span className="hidden md:block font-medium">{user?.full_name}</span>
+              <UserAvatar user={{ fullName: user?.fullName || '', avatarUrl: user?.avatarUrl }} size="sm" />
+              <span className="hidden md:block font-medium">{user?.fullName}</span>
             </Link>
 
             <button

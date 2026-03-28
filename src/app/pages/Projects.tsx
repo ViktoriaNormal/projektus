@@ -45,10 +45,10 @@ const MOCK_PROJECT: ProjectResponse = {
   key: "ECOM",
   name: "Электронная коммерция",
   description: "Разработка нового интернет-магазина с современным UX/UI",
-  project_type: "scrum",
-  owner_id: "mock-owner",
+  projectType: "scrum",
+  ownerId: "mock-owner",
   status: "active",
-  created_at: "2025-01-15T00:00:00Z",
+  createdAt: "2025-01-15T00:00:00Z",
 };
 
 const MOCK_PROJECT_KANBAN: ProjectResponse = {
@@ -56,23 +56,23 @@ const MOCK_PROJECT_KANBAN: ProjectResponse = {
   key: "SUPPORT",
   name: "Техническая поддержка",
   description: "Обработка запросов пользователей",
-  project_type: "kanban",
-  owner_id: "mock-owner",
+  projectType: "kanban",
+  ownerId: "mock-owner",
   status: "active",
-  created_at: "2024-11-10T00:00:00Z",
+  createdAt: "2024-11-10T00:00:00Z",
 };
 
 const MOCK_OWNER: UserProfileResponse = {
   id: "mock-owner",
   username: "demo",
   email: "demo@example.com",
-  full_name: "Демо-пользователь",
-  avatar_url: null,
+  fullName: "Демо-пользователь",
+  avatarUrl: null,
   position: null,
-  on_vacation: false,
-  is_sick: false,
-  alternative_contact_channel: null,
-  alternative_contact_info: null,
+  onVacation: false,
+  isSick: false,
+  alternativeContactChannel: null,
+  alternativeContactInfo: null,
 };
 
 export default function Projects() {
@@ -100,7 +100,7 @@ export default function Projects() {
       const result = await getProjects();
       setProjects([MOCK_PROJECT, MOCK_PROJECT_KANBAN, ...result]);
       // Load owner profiles
-      const uniqueOwnerIds = [...new Set(result.map((p) => p.owner_id).filter(Boolean))];
+      const uniqueOwnerIds = [...new Set(result.map((p) => p.ownerId).filter(Boolean))];
       const profiles: Record<string, UserProfileResponse> = { [MOCK_OWNER.id]: MOCK_OWNER };
       await Promise.all(
         uniqueOwnerIds.map(async (id) => {
@@ -148,8 +148,8 @@ export default function Projects() {
   }, [ownerSearch, createOwner]);
 
   const filteredProjects = projects.filter((project) => {
-    const owner = owners[project.owner_id];
-    const ownerName = owner?.full_name?.toLowerCase() || "";
+    const owner = owners[project.ownerId];
+    const ownerName = owner?.fullName?.toLowerCase() || "";
     const query = searchQuery.toLowerCase();
     const matchesSearch =
       !searchQuery ||
@@ -157,12 +157,12 @@ export default function Projects() {
       project.key.toLowerCase().includes(query) ||
       project.description.toLowerCase().includes(query) ||
       ownerName.includes(query);
-    const matchesType = filterType === "all" || project.project_type === filterType;
+    const matchesType = filterType === "all" || project.projectType === filterType;
     const matchesStatus = filterStatus === "all" || project.status === filterStatus;
     return matchesSearch && matchesType && matchesStatus;
   }).sort((a, b) => {
-    const dateA = new Date(a.created_at).getTime();
-    const dateB = new Date(b.created_at).getTime();
+    const dateA = new Date(a.createdAt).getTime();
+    const dateB = new Date(b.createdAt).getTime();
     return sortOrder === "newest" ? dateB - dateA : dateA - dateB;
   });
 
@@ -248,7 +248,7 @@ export default function Projects() {
       {!loading && (
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
           {filteredProjects.map((project) => {
-            const owner = owners[project.owner_id];
+            const owner = owners[project.ownerId];
 
             return (
               <div
@@ -262,12 +262,12 @@ export default function Projects() {
                   </span>
                   <span
                     className={`px-2 py-0.5 text-xs font-semibold rounded ${
-                      project.project_type === "scrum"
+                      project.projectType === "scrum"
                         ? "bg-blue-100 text-blue-700"
                         : "bg-green-100 text-green-700"
                     }`}
                   >
-                    {project.project_type === "scrum" ? "Scrum" : "Kanban"}
+                    {project.projectType === "scrum" ? "Scrum" : "Kanban"}
                   </span>
                   <span
                     className={`ml-auto px-3 py-1 text-xs font-semibold rounded border ${
@@ -290,18 +290,18 @@ export default function Projects() {
                 <div className="flex items-center gap-2 mb-3">
                   {owner && (
                     <UserAvatar
-                      user={{ fullName: owner.full_name, avatarUrl: owner.avatar_url }}
+                      user={{ fullName: owner.fullName, avatarUrl: owner.avatarUrl }}
                       size="sm"
                     />
                   )}
                   <div className="flex-1">
                     <p className="text-xs text-slate-500">Ответственный</p>
-                    <p className="text-sm font-medium">{owner?.full_name || "—"}</p>
+                    <p className="text-sm font-medium">{owner?.fullName || "—"}</p>
                   </div>
                 </div>
 
                 <p className="text-xs text-slate-400">
-                  Дата создания: {new Date(project.created_at).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" })}
+                  Дата создания: {new Date(project.createdAt).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" })}
                 </p>
 
                 <div className="mt-auto pt-4">
@@ -358,8 +358,8 @@ export default function Projects() {
                   await createProject({
                     name: createName.trim(),
                     description: createDescription.trim() || undefined,
-                    project_type: createType,
-                    owner_id: createOwner.id,
+                    projectType: createType,
+                    ownerId: createOwner.id,
                   });
                   toast.success("Проект создан");
                   setShowCreateModal(false);
@@ -411,9 +411,9 @@ export default function Projects() {
                 {createOwner && (
                   <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg mb-2">
                     <div className="flex items-center gap-2">
-                      <UserAvatar user={{ fullName: createOwner.full_name, avatarUrl: createOwner.avatar_url }} size="sm" />
+                      <UserAvatar user={{ fullName: createOwner.fullName, avatarUrl: createOwner.avatarUrl }} size="sm" />
                       <div>
-                        <p className="text-sm font-medium">{createOwner.full_name}</p>
+                        <p className="text-sm font-medium">{createOwner.fullName}</p>
                         <p className="text-xs text-slate-500">{createOwner.email}</p>
                       </div>
                     </div>
@@ -452,9 +452,9 @@ export default function Projects() {
                             }}
                             className="flex items-center gap-2 p-2 hover:bg-white rounded-lg cursor-pointer transition-colors"
                           >
-                            <UserAvatar user={{ fullName: user.full_name, avatarUrl: user.avatar_url }} size="sm" />
+                            <UserAvatar user={{ fullName: user.fullName, avatarUrl: user.avatarUrl }} size="sm" />
                             <div>
-                              <p className="text-sm font-medium">{user.full_name}</p>
+                              <p className="text-sm font-medium">{user.fullName}</p>
                               <p className="text-xs text-slate-500">{user.email}</p>
                             </div>
                           </div>

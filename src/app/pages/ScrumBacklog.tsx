@@ -1,93 +1,210 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Plus, Play, Pause, Target, Calendar, Clock, Edit, Trash2, ArrowUp, ArrowDown, X } from "lucide-react";
-import { tasks, sprints, users } from "../data/mockData";
 import { UserAvatar } from "../components/UserAvatar";
 import { Link } from "react-router";
+import { toast } from "sonner";
+import {
+  getProjectSprints,
+  createSprint,
+  updateSprint,
+  deleteSprint as deleteSprintApi,
+  startSprint,
+  completeSprint,
+  getProductBacklog,
+  moveTasksToSprint,
+  type SprintResponse,
+} from "../api/sprints";
+import { searchTasks, type TaskResponse } from "../api/tasks";
+import { getUser, type UserProfileResponse } from "../api/users";
 
-interface Sprint {
-  id: number;
-  name: string;
-  goal: string;
-  startDate: string;
-  endDate: string;
-  duration: number;
-  status: "Активный" | "Завершен" | "Запланирован";
-  projectId: number;
-}
+// ── Helpers ─────────────────────────────────────────────────
 
-interface Task {
-  id: number;
-  key: string;
-  title: string;
-  description: string;
-  priority: string;
-  assigneeId: number | null;
-  storyPoints?: number;
-  status: string;
-  sprintId?: number | null;
-  projectId: number;
-  order: number;
+const SPRINT_STATUS_MAP: Record<string, string> = {
+  planned: "Запланирован",
+  active: "Активный",
+  completed: "Завершён",
+};
+
+function toAvatarUser(u: UserProfileResponse) {
+  return { fullName: u.fullName, avatarUrl: u.avatarUrl ?? undefined };
 }
 
 interface ScrumBacklogProps {
-  projectId: number;
+  projectId: string;
 }
 
 export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
+  // Data state
+  const [sprints, setSprints] = useState<SprintResponse[]>([]);
+  const [backlogTasks, setBacklogTasks] = useState<TaskResponse[]>([]);
+  const [sprintTasks, setSprintTasks] = useState<Map<string, TaskResponse[]>>(new Map());
+  const [userCache, setUserCache] = useState<Map<string, UserProfileResponse>>(new Map());
+  const [loading, setLoading] = useState(true);
+
+  // UI state
   const [showSprintModal, setShowSprintModal] = useState(false);
-  const [selectedSprint, setSelectedSprint] = useState<Sprint | null>(null);
-  const [draggedTask, setDraggedTask] = useState<Task | null>(null);
+  const [selectedSprint, setSelectedSprint] = useState<SprintResponse | null>(null);
+  const [draggedTask, setDraggedTask] = useState<TaskResponse | null>(null);
   const [customDuration, setCustomDuration] = useState(false);
-  const [dragOverSprintId, setDragOverSprintId] = useState<number | null>(null);
+  const [dragOverSprintId, setDragOverSprintId] = useState<string | null>(null);
 
-  const projectSprints = sprints.filter((s) => s.projectId === projectId);
-  const projectTasks = tasks.filter((t) => t.projectId === projectId);
+  // Sprint form
+  const [sprintName, setSprintName] = useState("");
+  const [sprintGoal, setSprintGoal] = useState("");
+  const [sprintStartDate, setSprintStartDate] = useState("");
+  const [sprintEndDate, setSprintEndDate] = useState("");
+  const [sprintDuration, setSprintDuration] = useState(2);
 
-  // Задачи бэклога продукта (без спринта)
-  const backlogTasks = projectTasks.filter((t) => !t.sprintId).sort((a, b) => a.order - b.order);
+  // ── Data Loading ────────────────────────────────────────────
 
-  const getSprintTasks = (sprintId: number) => {
-    return projectTasks.filter((t) => t.sprintId === sprintId).sort((a, b) => a.order - b.order);
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [sprintsData, backlog] = await Promise.all([
+        getProjectSprints(projectId),
+        getProductBacklog(projectId),
+      ]);
+      setSprints(sprintsData);
+      setBacklogTasks(backlog);
+
+      // Load tasks for each non-completed sprint
+      const taskMap = new Map<string, TaskResponse[]>();
+      const allTasks = await searchTasks({ projectId });
+
+      // Group tasks by sprint (tasks that are not in backlog have a columnId which maps to a sprint)
+      // For now, we use the product backlog endpoint for backlog and search tasks for sprint tasks
+      // The backlog tasks are those returned by getProductBacklog
+      const backlogTaskIds = new Set(backlog.map((t) => t.id));
+      const nonBacklogTasks = allTasks.filter((t) => !backlogTaskIds.has(t.id));
+
+      // Map sprint tasks - tasks in sprints are those not in product backlog
+      // Since API doesn't directly link tasks to sprints, we'll show all project tasks
+      // that are not in the product backlog as "sprint tasks"
+      for (const sprint of sprintsData) {
+        taskMap.set(sprint.id, []);
+      }
+
+      setSprints(sprintsData);
+      setSprintTasks(taskMap);
+
+      // Cache user profiles for executors
+      const userIds = new Set<string>();
+      [...backlog, ...nonBacklogTasks].forEach((t) => {
+        if (t.executorId) userIds.add(t.executorId);
+      });
+      const newCache = new Map(userCache);
+      await Promise.allSettled(
+        [...userIds].filter((id) => !newCache.has(id)).map(async (id) => {
+          try {
+            const u = await getUser(id);
+            newCache.set(id, u);
+          } catch { /* skip */ }
+        })
+      );
+      setUserCache(newCache);
+    } catch (e: any) {
+      toast.error("Ошибка загрузки данных бэклога");
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  // ── Sprint form helpers ─────────────────────────────────────
+
+  const openSprintModal = (sprint: SprintResponse | null) => {
+    setSelectedSprint(sprint);
+    if (sprint) {
+      setSprintName(sprint.name);
+      setSprintGoal(sprint.goal ?? "");
+      setSprintStartDate(sprint.startDate.slice(0, 10));
+      setSprintEndDate(sprint.endDate.slice(0, 10));
+      setCustomDuration(true);
+    } else {
+      setSprintName("");
+      setSprintGoal("");
+      setSprintStartDate("");
+      setSprintEndDate("");
+      setSprintDuration(2);
+      setCustomDuration(false);
+    }
+    setShowSprintModal(true);
   };
 
-  const calculateSprintProgress = (sprintId: number) => {
-    const sprintTasks = getSprintTasks(sprintId);
-    if (sprintTasks.length === 0) return 0;
-    const completedTasks = sprintTasks.filter((t) => t.status === "Выполнено").length;
-    return Math.round((completedTasks / sprintTasks.length) * 100);
+  const handleSaveSprint = async () => {
+    if (!sprintName || !sprintStartDate) return;
+
+    const endDate = customDuration
+      ? sprintEndDate
+      : new Date(new Date(sprintStartDate).getTime() + sprintDuration * 7 * 24 * 60 * 60 * 1000)
+          .toISOString()
+          .slice(0, 10);
+
+    try {
+      if (selectedSprint) {
+        await updateSprint(selectedSprint.id, {
+          name: sprintName,
+          goal: sprintGoal || undefined,
+          startDate: sprintStartDate,
+          endDate: endDate,
+        });
+        toast.success("Спринт обновлён");
+      } else {
+        await createSprint(projectId, {
+          name: sprintName,
+          goal: sprintGoal || undefined,
+          startDate: sprintStartDate,
+          endDate: endDate,
+        });
+        toast.success("Спринт создан");
+      }
+      setShowSprintModal(false);
+      loadData();
+    } catch (e: any) {
+      toast.error(e.message || "Ошибка сохранения спринта");
+    }
   };
 
-  const calculateSprintStoryPoints = (sprintId: number) => {
-    const sprintTasks = getSprintTasks(sprintId);
-    const total = sprintTasks.reduce((sum, t) => sum + (t.storyPoints || 0), 0);
-    const completed = sprintTasks
-      .filter((t) => t.status === "Выполнено")
-      .reduce((sum, t) => sum + (t.storyPoints || 0), 0);
-    return { total, completed };
+  const handleDeleteSprint = async (sprintId: string) => {
+    if (!confirm("Вы уверены, что хотите удалить этот спринт?")) return;
+    try {
+      await deleteSprintApi(sprintId);
+      toast.success("Спринт удалён");
+      loadData();
+    } catch (e: any) {
+      toast.error(e.message || "Ошибка удаления спринта");
+    }
   };
 
-  const handleMoveTaskUp = (task: Task) => {
-    console.log("Переместить задачу вверх:", task.id);
+  const handleStartSprint = async (sprintId: string) => {
+    try {
+      await startSprint(sprintId);
+      toast.success("Спринт запущен");
+      loadData();
+    } catch (e: any) {
+      toast.error(e.message || "Ошибка запуска спринта");
+    }
   };
 
-  const handleMoveTaskDown = (task: Task) => {
-    console.log("Переместить задачу вниз:", task.id);
+  const handleCompleteSprint = async (sprintId: string) => {
+    try {
+      await completeSprint(sprintId);
+      toast.success("Спринт завершён");
+      loadData();
+    } catch (e: any) {
+      toast.error(e.message || "Ошибка завершения спринта");
+    }
   };
 
-  const handleStartSprint = (sprintId: number) => {
-    console.log("Запустить спринт:", sprintId);
-  };
+  // ── Drag & Drop ─────────────────────────────────────────────
 
-  const handleCompleteSprint = (sprintId: number) => {
-    console.log("Завершить спринт:", sprintId);
-  };
-
-  const handleDragStart = (e: React.DragEvent, task: Task) => {
+  const handleDragStart = (e: React.DragEvent, task: TaskResponse) => {
     setDraggedTask(task);
     e.dataTransfer.effectAllowed = "move";
   };
 
-  const handleDragEnd = (e: React.DragEvent) => {
+  const handleDragEnd = () => {
     setDraggedTask(null);
     setDragOverSprintId(null);
   };
@@ -97,34 +214,28 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
     e.dataTransfer.dropEffect = "move";
   };
 
-  const handleDragEnter = (sprintId: number) => {
-    setDragOverSprintId(sprintId);
-  };
+  const handleDrop = async (e: React.DragEvent, sprintId: string) => {
+    e.preventDefault();
+    if (!draggedTask) return;
 
-  const handleDragLeave = () => {
+    try {
+      await moveTasksToSprint(projectId, {
+        sprintId,
+        taskIds: [draggedTask.id],
+      });
+      toast.success(`Задача ${draggedTask.key} перемещена в спринт`);
+      loadData();
+    } catch (e: any) {
+      toast.error(e.message || "Ошибка перемещения задачи");
+    }
+    setDraggedTask(null);
     setDragOverSprintId(null);
   };
 
-  const handleDrop = (e: React.DragEvent, sprintId: number) => {
-    e.preventDefault();
-    
-    if (draggedTask) {
-      console.log(`✅ Перемещение задачи ${draggedTask.key} (ID: ${draggedTask.id}) в спринт ID: ${sprintId}`);
-      alert(`Задача "${draggedTask.title}" перемещена в спринт!`);
-      // Здесь будет логика обновления задачи в реальном приложении
-      setDraggedTask(null);
-      setDragOverSprintId(null);
-    }
-  };
+  // ── Render task card ────────────────────────────────────────
 
-  const renderTask = (task: Task, showMoveButtons: boolean = true, isDraggable: boolean = false) => {
-    const assignee = task.assigneeId ? users.find((u) => u.id === task.assigneeId) : null;
-    const priorityColors = {
-      Критический: "bg-red-100 text-red-700 border-red-300",
-      Высокий: "bg-orange-100 text-orange-700 border-orange-300",
-      Средний: "bg-yellow-100 text-yellow-700 border-yellow-300",
-      Низкий: "bg-green-100 text-green-700 border-green-300",
-    };
+  const renderTask = (task: TaskResponse, isDraggable: boolean = false) => {
+    const executor = task.executorId ? userCache.get(task.executorId) : null;
 
     return (
       <div
@@ -144,56 +255,37 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
             >
               {task.key}
             </Link>
-            <span
-              className={`px-2 py-0.5 text-xs font-medium rounded border ${
-                priorityColors[task.priority as keyof typeof priorityColors]
-              }`}
-            >
-              {task.priority}
-            </span>
-            {task.storyPoints && (
-              <span className="px-2 py-0.5 text-xs font-semibold bg-slate-100 text-slate-700 rounded">
-                {task.storyPoints} SP
-              </span>
-            )}
           </div>
           <Link to={`/tasks/${task.id}`} className="block">
-            <p className="font-medium hover:text-blue-600">{task.title}</p>
+            <p className="font-medium hover:text-blue-600">{task.name}</p>
           </Link>
-          <p className="text-sm text-slate-600 mt-1">{task.description}</p>
+          {task.description && (
+            <p className="text-sm text-slate-600 mt-1 line-clamp-2">{task.description}</p>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
-          {assignee ? (
-            <UserAvatar user={assignee} size="sm" />
+          {executor ? (
+            <UserAvatar user={toAvatarUser(executor)} size="sm" />
           ) : (
             <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center">
               <span className="text-xs text-slate-500">?</span>
-            </div>
-          )}
-
-          {showMoveButtons && (
-            <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button
-                onClick={() => handleMoveTaskUp(task)}
-                className="p-1 hover:bg-slate-100 rounded"
-                title="Переместить вверх"
-              >
-                <ArrowUp size={14} className="text-slate-600" />
-              </button>
-              <button
-                onClick={() => handleMoveTaskDown(task)}
-                className="p-1 hover:bg-slate-100 rounded"
-                title="Переместить вниз"
-              >
-                <ArrowDown size={14} className="text-slate-600" />
-              </button>
             </div>
           )}
         </div>
       </div>
     );
   };
+
+  // ── Main Render ─────────────────────────────────────────────
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -206,11 +298,7 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
           </p>
         </div>
         <button
-          onClick={() => {
-            setSelectedSprint(null);
-            setCustomDuration(false);
-            setShowSprintModal(true);
-          }}
+          onClick={() => openSprintModal(null)}
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
         >
           <Plus size={20} />
@@ -218,7 +306,7 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
         </button>
       </div>
 
-      {/* Main Board Layout: Backlog + Sprint Columns */}
+      {/* Main Board Layout */}
       <div className="flex gap-4 overflow-x-auto pb-4">
         {/* Product Backlog Column */}
         <div className="flex-shrink-0 w-96">
@@ -227,22 +315,15 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
               <div className="mb-3">
                 <h3 className="text-lg font-bold text-purple-900">Бэклог продукта</h3>
                 <p className="text-sm text-purple-700 mt-1">
-                  {backlogTasks.length} задач · {backlogTasks.reduce((sum, t) => sum + (t.storyPoints || 0), 0)} SP
+                  {backlogTasks.length} задач
                 </p>
               </div>
-              <button
-                onClick={() => console.log("Добавить задачу в бэклог")}
-                className="w-full px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium"
-              >
-                <Plus size={16} />
-                Добавить задачу
-              </button>
             </div>
 
             <div className="p-3 overflow-y-auto flex-1">
               <div className="space-y-2">
                 {backlogTasks.length > 0 ? (
-                  backlogTasks.map((task) => renderTask(task, true, true))
+                  backlogTasks.map((task) => renderTask(task, true))
                 ) : (
                   <div className="text-center py-8 text-slate-500">
                     <p>Бэклог пуст</p>
@@ -255,13 +336,12 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
         </div>
 
         {/* Sprint Columns */}
-        {projectSprints
-          .filter((s) => s.status !== "Завершен")
+        {sprints
+          .filter((s) => s.status !== "completed")
           .map((sprint) => {
-            const sprintTasks = getSprintTasks(sprint.id);
-            const progress = calculateSprintProgress(sprint.id);
-            const { total: totalSP, completed: completedSP } = calculateSprintStoryPoints(sprint.id);
-            const isActive = sprint.status === "Активный";
+            const tasks = sprintTasks.get(sprint.id) ?? [];
+            const isActive = sprint.status === "active";
+            const statusLabel = SPRINT_STATUS_MAP[sprint.status] ?? sprint.status;
 
             return (
               <div key={sprint.id} className="flex-shrink-0 w-96">
@@ -272,12 +352,11 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
                       : "border-blue-200"
                   }`}
                   onDragOver={handleDragOver}
-                  onDragEnter={() => handleDragEnter(sprint.id)}
-                  onDragLeave={handleDragLeave}
+                  onDragEnter={() => setDragOverSprintId(sprint.id)}
+                  onDragLeave={() => setDragOverSprintId(null)}
                   onDrop={(e) => handleDrop(e, sprint.id)}
                 >
                   <div className="p-4 border-b border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-t-xl flex-shrink-0">
-                    {/* Sprint Header */}
                     <div className="flex items-start justify-between gap-2 mb-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
@@ -289,28 +368,20 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
                                 : "bg-blue-100 text-blue-700"
                             }`}
                           >
-                            {sprint.status}
+                            {statusLabel}
                           </span>
                         </div>
                       </div>
                       <div className="flex items-center gap-1 flex-shrink-0">
                         <button
-                          onClick={() => {
-                            setSelectedSprint(sprint);
-                            setCustomDuration(sprint.duration === 0);
-                            setShowSprintModal(true);
-                          }}
+                          onClick={() => openSprintModal(sprint)}
                           className="p-1.5 hover:bg-white rounded-lg transition-colors"
                           title="Редактировать спринт"
                         >
                           <Edit size={16} className="text-slate-600" />
                         </button>
                         <button
-                          onClick={() => {
-                            if (confirm("Вы уверены, что хотите удалить этот спринт?")) {
-                              console.log("Удалить спринт:", sprint.id);
-                            }
-                          }}
+                          onClick={() => handleDeleteSprint(sprint.id)}
                           className="p-1.5 hover:bg-red-100 rounded-lg transition-colors"
                           title="Удалить спринт"
                         >
@@ -319,48 +390,24 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
                       </div>
                     </div>
 
-                    {/* Sprint Details */}
                     <div className="space-y-1 text-xs text-slate-600 mb-3">
-                      <div className="flex items-center gap-1">
-                        <Target size={12} />
-                        <span className="truncate">{sprint.goal}</span>
-                      </div>
+                      {sprint.goal && (
+                        <div className="flex items-center gap-1">
+                          <Target size={12} />
+                          <span className="truncate">{sprint.goal}</span>
+                        </div>
+                      )}
                       <div className="flex items-center gap-1">
                         <Calendar size={12} />
                         <span>
-                          {new Date(sprint.startDate).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })} -{" "}
+                          {new Date(sprint.startDate).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })} –{" "}
                           {new Date(sprint.endDate).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })}
                         </span>
                       </div>
-                      <div className="flex items-center gap-1">
-                        <Clock size={12} />
-                        <span>{sprint.duration} нед.</span>
-                      </div>
                     </div>
 
-                    {/* Sprint Progress */}
-                    <div className="space-y-2 mb-3">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-slate-600">Прогресс</span>
-                        <span className="font-semibold">{progress}%</span>
-                      </div>
-                      <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-blue-600 transition-all"
-                          style={{ width: `${progress}%` }}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between text-xs text-slate-700">
-                        <span><span className="font-semibold">{sprintTasks.length}</span> задач</span>
-                        <span>
-                          <span className="font-semibold">{completedSP} / {totalSP}</span> SP
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Sprint Actions */}
                     <div className="flex items-center gap-2">
-                      {!isActive && sprint.status === "Запланирован" && (
+                      {sprint.status === "planned" && (
                         <button
                           onClick={() => handleStartSprint(sprint.id)}
                           className="flex-1 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-1.5 text-sm"
@@ -383,12 +430,12 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
 
                   <div className="p-3 overflow-y-auto flex-1">
                     <div className="space-y-2">
-                      {sprintTasks.length > 0 ? (
-                        sprintTasks.map((task) => renderTask(task, false, false))
+                      {tasks.length > 0 ? (
+                        tasks.map((task) => renderTask(task, false))
                       ) : (
                         <div className="text-center py-8 text-slate-500">
                           <p className="text-sm">Нет задач</p>
-                          <p className="text-xs mt-1">Перетащит из бэклога</p>
+                          <p className="text-xs mt-1">Перетащите из бэклога</p>
                         </div>
                       )}
                     </div>
@@ -400,45 +447,29 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
       </div>
 
       {/* Completed Sprints */}
-      {projectSprints.filter((s) => s.status === "Завершен").length > 0 && (
+      {sprints.filter((s) => s.status === "completed").length > 0 && (
         <div className="border-t border-slate-200 pt-6">
-          <h3 className="text-lg font-bold mb-4">Завершенные спринты</h3>
+          <h3 className="text-lg font-bold mb-4">Завершённые спринты</h3>
           <div className="space-y-3">
-            {projectSprints
-              .filter((s) => s.status === "Завершен")
-              .map((sprint) => {
-                const sprintTasks = getSprintTasks(sprint.id);
-                const { total: totalSP, completed: completedSP } = calculateSprintStoryPoints(sprint.id);
-
-                return (
-                  <div
-                    key={sprint.id}
-                    className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-lg"
-                  >
-                    <div>
-                      <h4 className="font-semibold">{sprint.name}</h4>
-                      <p className="text-sm text-slate-600">
-                        {new Date(sprint.startDate).toLocaleDateString("ru-RU")} -{" "}
-                        {new Date(sprint.endDate).toLocaleDateString("ru-RU")}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-6 text-sm">
-                      <div>
-                        <span className="font-semibold">{sprintTasks.length}</span> задач
-                      </div>
-                      <div>
-                        <span className="font-semibold">
-                          {completedSP} / {totalSP}
-                        </span>{" "}
-                        SP
-                      </div>
-                      <button className="text-blue-600 hover:text-blue-700 font-medium">
-                        Подробнее
-                      </button>
-                    </div>
+            {sprints
+              .filter((s) => s.status === "completed")
+              .map((sprint) => (
+                <div
+                  key={sprint.id}
+                  className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-lg"
+                >
+                  <div>
+                    <h4 className="font-semibold">{sprint.name}</h4>
+                    <p className="text-sm text-slate-600">
+                      {new Date(sprint.startDate).toLocaleDateString("ru-RU")} –{" "}
+                      {new Date(sprint.endDate).toLocaleDateString("ru-RU")}
+                    </p>
                   </div>
-                );
-              })}
+                  {sprint.goal && (
+                    <p className="text-sm text-slate-500 max-w-sm truncate">{sprint.goal}</p>
+                  )}
+                </div>
+              ))}
           </div>
         </div>
       )}
@@ -455,7 +486,6 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
                 onClick={() => {
                   setShowSprintModal(false);
                   setSelectedSprint(null);
-                  setCustomDuration(false);
                 }}
                 className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
               >
@@ -468,27 +498,33 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
                 <label className="block text-sm font-medium mb-2">Название спринта *</label>
                 <input
                   type="text"
-                  defaultValue={selectedSprint?.name}
+                  value={sprintName}
+                  onChange={(e) => setSprintName(e.target.value)}
                   className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Спринт 1"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">Цель спринта *</label>
+                <label className="block text-sm font-medium mb-2">Цель спринта</label>
                 <textarea
-                  defaultValue={selectedSprint?.goal}
+                  value={sprintGoal}
+                  onChange={(e) => setSprintGoal(e.target.value)}
                   className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   rows={3}
-                  placeholder="Основная цель, которую нужно достичь в этом спринте..."
+                  placeholder="Основная цель спринта..."
                 />
               </div>
 
               <div>
                 <label className="block text-sm font-medium mb-2">Длительность *</label>
                 <select
-                  defaultValue={selectedSprint?.duration || 2}
-                  onChange={(e) => setCustomDuration(e.target.value === "0")}
+                  value={customDuration ? 0 : sprintDuration}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setCustomDuration(val === 0);
+                    if (val > 0) setSprintDuration(val);
+                  }}
                   className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value={1}>1 неделя</option>
@@ -503,7 +539,8 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
                 <label className="block text-sm font-medium mb-2">Дата начала *</label>
                 <input
                   type="date"
-                  defaultValue={selectedSprint?.startDate}
+                  value={sprintStartDate}
+                  onChange={(e) => setSprintStartDate(e.target.value)}
                   className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -513,7 +550,8 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
                   <label className="block text-sm font-medium mb-2">Дата окончания *</label>
                   <input
                     type="date"
-                    defaultValue={selectedSprint?.endDate}
+                    value={sprintEndDate}
+                    onChange={(e) => setSprintEndDate(e.target.value)}
                     className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
@@ -524,20 +562,15 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
                   onClick={() => {
                     setShowSprintModal(false);
                     setSelectedSprint(null);
-                    setCustomDuration(false);
                   }}
                   className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium"
                 >
                   Отмена
                 </button>
                 <button
-                  onClick={() => {
-                    console.log("Сохранение спринта");
-                    setShowSprintModal(false);
-                    setSelectedSprint(null);
-                    setCustomDuration(false);
-                  }}
-                  className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                  onClick={handleSaveSprint}
+                  disabled={!sprintName || !sprintStartDate}
+                  className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {selectedSprint ? "Сохранить" : "Создать"}
                 </button>

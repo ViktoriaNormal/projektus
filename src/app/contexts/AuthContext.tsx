@@ -26,8 +26,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [permissions, setPermissions] = useState<string[]>([]);
 
   const setAuth = useCallback((data: AuthResponse) => {
-    localStorage.setItem('access_token', data.access_token);
-    localStorage.setItem('refresh_token', data.refresh_token);
+    localStorage.setItem('access_token', data.accessToken);
+    localStorage.setItem('refresh_token', data.refreshToken);
     if (data.user) {
       localStorage.setItem('user', JSON.stringify(data.user));
       setUser(data.user);
@@ -70,8 +70,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } else if (rt) {
       refreshTokenApi(rt)
         .then((data) => {
-          localStorage.setItem('access_token', data.access_token);
-          localStorage.setItem('refresh_token', data.refresh_token);
+          localStorage.setItem('access_token', data.accessToken);
+          localStorage.setItem('refresh_token', data.refreshToken);
           const u = localStorage.getItem('user');
           if (u) {
             try {
@@ -96,7 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [user]);
 
-  // Refresh token periodically (every 25 minutes)
+  // Refresh token periodically (every 10 minutes, token expires in 15)
   useEffect(() => {
     if (!user) return;
 
@@ -105,12 +105,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (rt) {
         refreshTokenApi(rt)
           .then((data) => {
-            localStorage.setItem('access_token', data.access_token);
-            localStorage.setItem('refresh_token', data.refresh_token);
+            localStorage.setItem('access_token', data.accessToken);
+            localStorage.setItem('refresh_token', data.refreshToken);
           })
           .catch(() => clearAuth());
       }
-    }, 25 * 60 * 1000);
+    }, 10 * 60 * 1000);
 
     return () => clearInterval(interval);
   }, [user, clearAuth]);

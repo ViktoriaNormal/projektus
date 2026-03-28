@@ -62,8 +62,10 @@ export default function AdminRoles() {
     }
   }
 
-  function permDescription(key: string): string {
-    return permCatalog.find((p) => p.key === key)?.description || key;
+  const systemPerms = permCatalog.filter((p) => p.scope === 'system');
+
+  function permDescription(code: string): string {
+    return permCatalog.find((p) => p.code === code)?.name || code;
   }
 
   function openCreate() {
@@ -213,21 +215,30 @@ export default function AdminRoles() {
                     <h3 className="text-xl font-bold">{role.name}</h3>
                   </div>
                 </div>
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => openEdit(role)}
-                    className="p-2 hover:bg-blue-100 text-blue-600 rounded-lg transition-colors"
-                    title="Редактировать"
-                  >
-                    <Edit size={18} />
-                  </button>
-                  <button
-                    onClick={() => setDeleteTarget(role)}
-                    className="p-2 hover:bg-red-100 text-red-600 rounded-lg transition-colors"
-                    title="Удалить"
-                  >
-                    <Trash2 size={18} />
-                  </button>
+                <div className="flex items-center gap-1">
+                  {role.isAdmin && (
+                    <span className="px-2 py-1 bg-amber-100 text-amber-700 text-xs font-medium rounded-md mr-1">
+                      Администратор системы
+                    </span>
+                  )}
+                  {!role.isAdmin && (
+                    <>
+                      <button
+                        onClick={() => openEdit(role)}
+                        className="p-2 hover:bg-blue-100 text-blue-600 rounded-lg transition-colors"
+                        title="Редактировать"
+                      >
+                        <Edit size={18} />
+                      </button>
+                      <button
+                        onClick={() => setDeleteTarget(role)}
+                        className="p-2 hover:bg-red-100 text-red-600 rounded-lg transition-colors"
+                        title="Удалить"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -239,14 +250,18 @@ export default function AdminRoles() {
                 <p className="text-sm font-semibold text-slate-700 mb-2">Права доступа:</p>
                 {role.permissions.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5">
-                    {role.permissions.map((perm) => (
-                      <span
-                        key={perm}
-                        className="px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-md"
-                      >
-                        {permDescription(perm)}
-                      </span>
-                    ))}
+                    {role.permissions.map((perm) => {
+                      const descriptor = permCatalog.find((p) => p.code === perm);
+                      return (
+                        <span
+                          key={perm}
+                          className="px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-md"
+                          title={descriptor?.description}
+                        >
+                          {descriptor?.name || perm}
+                        </span>
+                      );
+                    })}
                   </div>
                 ) : (
                   <p className="text-sm text-slate-400 italic">Нет назначенных прав</p>
@@ -308,25 +323,31 @@ export default function AdminRoles() {
 
               <div>
                 <label className="block text-sm font-medium mb-2">Права доступа</label>
-                <div className="border border-slate-200 rounded-lg p-3 space-y-1">
-                  {permCatalog.map((perm) => (
-                    <label
-                      key={perm.key}
-                      className="flex items-center gap-3 p-2.5 hover:bg-slate-50 rounded-lg cursor-pointer transition-colors"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={form.permissions.includes(perm.key)}
-                        onChange={() => togglePermission(perm.key)}
-                        className="w-4 h-4 text-purple-600 rounded focus:ring-2 focus:ring-purple-500"
-                      />
-                      <div>
-                        <span className="text-sm font-medium">{perm.description}</span>
-                        <span className="text-xs text-slate-400 ml-2">{perm.key}</span>
-                      </div>
-                    </label>
-                  ))}
-                </div>
+                {editingRole?.isAdmin ? (
+                  <p className="text-sm text-slate-500 italic">
+                    Администратор системы имеет все права. Изменение прав недоступно.
+                  </p>
+                ) : (
+                  <div className="border border-slate-200 rounded-lg p-3 space-y-1">
+                    {systemPerms.map((perm) => (
+                      <label
+                        key={perm.code}
+                        className="flex items-start gap-3 p-2.5 hover:bg-slate-50 rounded-lg cursor-pointer transition-colors"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={form.permissions.includes(perm.code)}
+                          onChange={() => togglePermission(perm.code)}
+                          className="w-4 h-4 text-purple-600 rounded focus:ring-2 focus:ring-purple-500 mt-0.5"
+                        />
+                        <div className="flex flex-col">
+                          <span className="text-sm font-semibold">{perm.name}</span>
+                          <span className="text-xs text-slate-500">{perm.description}</span>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="flex gap-3 pt-4">

@@ -1,14 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link, useParams, useNavigate } from "react-router";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import {
   Users,
-  CheckSquare,
   Settings,
-  Activity,
   TrendingUp,
-  Clock,
   Plus,
   X,
   Trash2,
@@ -18,32 +15,50 @@ import {
   FileText,
   Menu,
   Copy,
-  ChevronDown,
   ChevronUp,
+  Loader2,
+  Search,
 } from "lucide-react";
-import {
-  projects,
-  users,
-  tasks,
-  sprints,
-  projectMembers,
-  projectRoles,
-  boards,
-  boardColumns,
-  boardSwimlanes,
-} from "../data/mockData";
 import { UserAvatar } from "../components/UserAvatar";
 import Board from "./Board";
 import BoardSettingsModal from "../components/modals/BoardSettingsModal";
 import ScrumBacklog from "./ScrumBacklog";
 import KanbanMetrics from "./KanbanMetrics";
 import ProjectOverview from "./ProjectOverview";
+import ProjectParamsSection from "../components/project/ProjectParamsSection";
+import ProjectRolesSection from "../components/project/ProjectRolesSection";
+import { getProject, updateProject, deleteProject as deleteProjectApi, type ProjectResponse } from "../api/projects";
+import { getProjectMembers, addProjectMember, updateMemberRoles, removeMember, type ProjectMemberResponse } from "../api/projects";
+import { getProjectBoards, createBoard, updateBoard, deleteBoard as deleteBoardApi, getBoardColumns, getBoardSwimlanes, getProjectReferences, type BoardResponse, type ColumnResponse, type SwimlaneResponse, type ProjectReferences } from "../api/boards";
+import { getProjectRoles, type ProjectRole } from "../api/project-roles";
+import { getProjectParams, type ProjectParam } from "../api/project-params";
+import { searchUsers, getUser, type UserProfileResponse } from "../api/users";
+import { toast } from "sonner";
+
+// ── Helpers ─────────────────────────────────────────────────
+
+const STATUS_MAP: Record<string, string> = {
+  active: "Активный",
+  archived: "Архивирован",
+  paused: "Приостановлен",
+};
+
+const STATUS_REVERSE: Record<string, "active" | "archived" | "paused"> = {
+  "Активный": "active",
+  "Архивирован": "archived",
+  "Приостановлен": "paused",
+};
+
+function toAvatarUser(u: UserProfileResponse) {
+  return { fullName: u.fullName, avatarUrl: u.avatarUrl ?? undefined };
+}
+
+// ── Draggable Board Tab ─────────────────────────────────────
 
 interface BoardTab {
-  id: number;
+  id: string;
   name: string;
-  description: string;
-  isDefault: boolean;
+  description: string | null;
   order: number;
 }
 
@@ -52,9 +67,9 @@ interface DraggableBoardTabProps {
   index: number;
   isActive: boolean;
   moveBoard: (dragIndex: number, hoverIndex: number) => void;
-  onSelect: (id: number) => void;
+  onSelect: (id: string) => void;
   onEdit: (board: BoardTab) => void;
-  onDelete: (id: number) => void;
+  onDelete: (id: string) => void;
 }
 
 const DraggableBoardTab = ({
@@ -97,12 +112,7 @@ const DraggableBoardTab = ({
             : "bg-slate-50 text-slate-700 border-transparent hover:bg-slate-100"
         }`}
       >
-        <div className="flex items-center gap-2">
-          <span>{board.name}</span>
-          {board.isDefault && (
-            <span className="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded">по умолчанию</span>
-          )}
-        </div>
+        <span>{board.name}</span>
         {board.description && (
           <div className="text-xs opacity-75 mt-1 font-normal">{board.description}</div>
         )}
@@ -127,31 +137,307 @@ const DraggableBoardTab = ({
   );
 };
 
+// ── Main Component ──────────────────────────────────────────
+
 export default function ProjectDetail() {
-  const { id } = useParams();
+  const { id: projectId } = useParams();
   const navigate = useNavigate();
-  const project = projects.find((p) => p.id === Number(id));
-  
+
+  // Data state
+  const [project, setProject] = useState<ProjectResponse | null>(null);
+  const [owner, setOwner] = useState<UserProfileResponse | null>(null);
+  const [boardTabs, setBoardTabs] = useState<BoardTab[]>([]);
+  const [members, setMembers] = useState<ProjectMemberResponse[]>([]);
+  const [memberUsers, setMemberUsers] = useState<Map<string, UserProfileResponse>>(new Map());
+  const [boardColumns, setBoardColumns] = useState<ColumnResponse[]>([]);
+  const [boardSwimlanes, setBoardSwimlanes] = useState<SwimlaneResponse[]>([]);
+  const [refs, setRefs] = useState<ProjectReferences | null>(null);
+  const [projectRoles, setProjectRoles] = useState<ProjectRole[]>([]);
+  const [projectParams, setProjectParams] = useState<ProjectParam[]>([]);
+
+  // UI state
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"overview" | "boards" | "backlog" | "metrics" | "params">("overview");
-  const [activeBoardId, setActiveBoardId] = useState<number | null>(null);
+  const [activeBoardId, setActiveBoardId] = useState<string | null>(null);
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [showEditMemberModal, setShowEditMemberModal] = useState(false);
   const [showBoardSettingsModal, setShowBoardSettingsModal] = useState(false);
-  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
-  const [selectedRoleId, setSelectedRoleId] = useState<number>(3);
-  const [selectedMember, setSelectedMember] = useState<any>(null);
-  const [selectedBoard, setSelectedBoard] = useState<any>(null);
-  const [boardTabs, setBoardTabs] = useState<BoardTab[]>([]);
+  const [selectedBoard, setSelectedBoard] = useState<BoardTab | null>(null);
+  const [selectedMember, setSelectedMember] = useState<ProjectMemberResponse | null>(null);
+  const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showDeleteProject, setShowDeleteProject] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
+
+  // Add member modal state
+  const [userSearchQuery, setUserSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<UserProfileResponse[]>([]);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [newMemberRoles, setNewMemberRoles] = useState<string[]>([]);
+
+  // Params tab state
+  const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editStatus, setEditStatus] = useState<"active" | "archived" | "paused">("active");
+  const [savingProject, setSavingProject] = useState(false);
+
+  // ── Data Loading ────────────────────────────────────────────
+
+  const loadProject = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      setLoading(true);
+      const p = await getProject(projectId);
+      setProject(p);
+      setEditName(p.name);
+      setEditDescription(p.description);
+      setEditStatus(p.status);
+
+      // Load owner
+      try {
+        const o = await getUser(p.ownerId);
+        setOwner(o);
+      } catch { /* owner may not be accessible */ }
+    } catch {
+      setProject(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
+
+  const loadBoards = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const b = await getProjectBoards(projectId);
+      const sorted = [...b].sort((a, c) => a.order - c.order);
+      setBoardTabs(sorted.map((x) => ({
+        id: x.id,
+        name: x.name,
+        description: x.description,
+        order: x.order,
+      })));
+      if (sorted.length > 0 && !activeBoardId) {
+        setActiveBoardId(sorted[0].id);
+      }
+    } catch { /* silently */ }
+  }, [projectId, activeBoardId]);
+
+  const loadMembers = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const m = await getProjectMembers(projectId);
+      setMembers(m);
+
+      // Load user profiles for members
+      const userMap = new Map<string, UserProfileResponse>();
+      await Promise.allSettled(
+        m.map(async (member) => {
+          try {
+            const u = await getUser(member.userId);
+            userMap.set(member.userId, u);
+          } catch { /* skip */ }
+        })
+      );
+      setMemberUsers(userMap);
+    } catch { /* silently */ }
+  }, [projectId]);
+
+  const loadBoardDetails = useCallback(async () => {
+    if (!activeBoardId) {
+      setBoardColumns([]);
+      setBoardSwimlanes([]);
+      return;
+    }
+    try {
+      const [cols, swims] = await Promise.all([
+        getBoardColumns(activeBoardId),
+        getBoardSwimlanes(activeBoardId),
+      ]);
+      setBoardColumns(cols.sort((a, b) => a.order - b.order));
+      setBoardSwimlanes(swims.sort((a, b) => a.order - b.order));
+    } catch { /* silently */ }
+  }, [activeBoardId]);
+
+  const loadRefs = useCallback(async () => {
+    try {
+      const r = await getProjectReferences();
+      setRefs(r);
+    } catch { /* silently */ }
+  }, []);
+
+  const loadProjectRoles = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const r = await getProjectRoles(projectId);
+      setProjectRoles(r.sort((a, b) => a.order - b.order));
+    } catch { /* silently */ }
+  }, [projectId]);
+
+  const loadProjectParams = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const p = await getProjectParams(projectId);
+      setProjectParams(p.sort((a, b) => a.order - b.order));
+    } catch { /* silently */ }
+  }, [projectId]);
+
+  useEffect(() => { loadProject(); }, [loadProject]);
+  useEffect(() => { loadRefs(); }, []);
+  useEffect(() => { if (project) loadBoards(); }, [project?.id]);
+  useEffect(() => { if (project) loadMembers(); }, [project?.id]);
+  useEffect(() => { if (project) loadProjectRoles(); }, [project?.id]);
+  useEffect(() => { if (project) loadProjectParams(); }, [project?.id]);
+  useEffect(() => { loadBoardDetails(); }, [activeBoardId]);
+
+  // ── Handlers ────────────────────────────────────────────────
+
+  const handleSaveProject = async () => {
+    if (!project) return;
+    setSavingProject(true);
+    try {
+      const updated = await updateProject(project.id, {
+        name: editName,
+        description: editDescription,
+        status: editStatus,
+      });
+      setProject(updated);
+      toast.success("Проект сохранён");
+    } catch (e: any) {
+      toast.error(e.message || "Ошибка сохранения проекта");
+    } finally {
+      setSavingProject(false);
+    }
+  };
+
+  const handleDeleteProject = async () => {
+    if (!project) return;
+    try {
+      await deleteProjectApi(project.id);
+      toast.success("Проект удалён");
+      navigate("/projects");
+    } catch (e: any) {
+      toast.error(e.message || "Ошибка удаления проекта");
+    }
+  };
+
+  const handleAddMember = async () => {
+    if (!project || !selectedUserId) return;
+    try {
+      await addProjectMember(project.id, {
+        userId: selectedUserId,
+        roles: newMemberRoles.length > 0 ? newMemberRoles : undefined,
+      });
+      toast.success("Участник добавлен");
+      setShowAddMemberModal(false);
+      setSelectedUserId(null);
+      setNewMemberRoles([]);
+      setUserSearchQuery("");
+      setSearchResults([]);
+      loadMembers();
+    } catch (e: any) {
+      toast.error(e.message || "Ошибка добавления участника");
+    }
+  };
+
+  const handleEditMember = async () => {
+    if (!project || !selectedMember) return;
+    try {
+      await updateMemberRoles(project.id, selectedMember.id, selectedRoles);
+      toast.success("Роли участника обновлены");
+      setShowEditMemberModal(false);
+      setSelectedMember(null);
+      setSelectedRoles([]);
+      loadMembers();
+    } catch (e: any) {
+      toast.error(e.message || "Ошибка обновления участника");
+    }
+  };
+
+  const handleRemoveMember = async (memberId: string) => {
+    if (!project) return;
+    if (!confirm("Вы уверены, что хотите удалить этого участника из проекта?")) return;
+    try {
+      await removeMember(project.id, memberId);
+      toast.success("Участник удалён");
+      loadMembers();
+    } catch (e: any) {
+      toast.error(e.message || "Ошибка удаления участника");
+    }
+  };
+
+  const handleCreateBoard = async (name: string, description: string) => {
+    if (!project) return;
+    try {
+      const newBoard = await createBoard({
+        projectId: project.id,
+        name,
+        description,
+        order: boardTabs.length + 1,
+      });
+      toast.success("Доска создана");
+      await loadBoards();
+      setActiveBoardId(newBoard.id);
+    } catch (e: any) {
+      toast.error(e.message || "Ошибка создания доски");
+    }
+  };
+
+  const handleDeleteBoard = async (boardId: string) => {
+    if (!confirm("Вы уверены, что хотите удалить эту доску?")) return;
+    try {
+      await deleteBoardApi(boardId);
+      toast.success("Доска удалена");
+      if (activeBoardId === boardId) {
+        setActiveBoardId(null);
+      }
+      loadBoards();
+    } catch (e: any) {
+      toast.error(e.message || "Ошибка удаления доски");
+    }
+  };
+
+  const moveBoard = (dragIndex: number, hoverIndex: number) => {
+    const newBoards = [...boardTabs];
+    const [dragged] = newBoards.splice(dragIndex, 1);
+    newBoards.splice(hoverIndex, 0, dragged);
+    newBoards.forEach((board, idx) => (board.order = idx + 1));
+    setBoardTabs(newBoards);
+    // Persist order via API
+    newBoards.forEach((board) => {
+      updateBoard(board.id, { order: board.order }).catch(() => {});
+    });
+  };
+
+  const handleSearchUsers = async (q: string) => {
+    setUserSearchQuery(q);
+    if (q.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    try {
+      const results = await searchUsers(q);
+      // Filter out already-added members
+      const memberUserIds = new Set(members.map((m) => m.userId));
+      setSearchResults(results.filter((u) => !memberUserIds.has(u.id)));
+    } catch { /* silently */ }
+  };
+
+  // ── Loading / Error ─────────────────────────────────────────
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <Loader2 size={40} className="animate-spin text-blue-600" />
+      </div>
+    );
+  }
 
   if (!project) {
     return (
       <div className="flex items-center justify-center h-96">
         <div className="text-center">
           <h2 className="text-2xl font-bold text-slate-700 mb-2">Проект не найден</h2>
-          <p className="text-slate-500">Проект с ID {id} не существует</p>
+          <p className="text-slate-500">Проект с ID {projectId} не существует</p>
           <Link
             to="/projects"
             className="mt-4 inline-block px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
@@ -163,75 +449,22 @@ export default function ProjectDetail() {
     );
   }
 
-  const owner = users.find((u) => u.id === project.ownerId);
-  const projectTasks = tasks.filter((t) => t.projectId === project.id);
-  const projectSprints = sprints.filter((s) => s.projectId === project.id);
-  const members = projectMembers.filter((pm) => pm.projectId === project.id);
+  // ── Derived state ───────────────────────────────────────────
 
-  // Инициализация досок при монтировании
-  useEffect(() => {
-    const projectBoards = boards
-      .filter((b) => b.projectId === project.id)
-      .sort((a, b) => a.order - b.order);
-    
-    setBoardTabs(projectBoards);
-    
-    if (projectBoards.length > 0 && activeBoardId === null) {
-      setActiveBoardId(projectBoards[0].id);
-    }
-  }, [project.id, activeBoardId]);
-
-  const activeBoard = boardTabs.find((b) => b.id === activeBoardId);
-  const boardCols = boardColumns.filter((c) => c.boardId === activeBoardId).sort((a, b) => a.order - b.order);
-  const boardSwims = boardSwimlanes.filter((s) => s.boardId === activeBoardId).sort((a, b) => a.order - b.order);
-
-  // Пользователи, которых можно добавить в проект
-  const availableUsers = users.filter(
-    (u) => u.isActive && !members.some((m) => m.userId === u.id)
-  );
-
-  const handleAddMember = () => {
-    if (!selectedUserId) return;
-    console.log("Добавление участника:", { userId: selectedUserId, roleId: selectedRoleId });
-    setShowAddMemberModal(false);
-    setSelectedUserId(null);
-    setSelectedRoleId(3);
-  };
-
-  const handleEditMember = () => {
-    if (!selectedMember) return;
-    console.log("Изменение участника:", { userId: selectedMember.userId, roleId: selectedRoleId });
-    setShowEditMemberModal(false);
-    setSelectedMember(null);
-    setSelectedRoleId(3);
-  };
-
-  const handleRemoveMember = (memberId: number) => {
-    console.log("Удаление участника:", memberId);
-  };
-
-  const handleDeleteBoard = (boardId: number) => {
-    if (confirm("Вы уверены, что хотите удалить эту доску?")) {
-      console.log("Удаление доски:", boardId);
-    }
-  };
-
-  const moveBoard = (dragIndex: number, hoverIndex: number) => {
-    const draggedBoard = boardTabs[dragIndex];
-    const newBoards = [...boardTabs];
-    newBoards.splice(dragIndex, 1);
-    newBoards.splice(hoverIndex, 0, draggedBoard);
-    newBoards.forEach((board, idx) => (board.order = idx + 1));
-    setBoardTabs(newBoards);
-  };
+  const statusLabel = STATUS_MAP[project.status] ?? project.status;
+  const projectType = project.projectType;
 
   const tabs = [
     { id: "overview", label: "Обзор проекта", icon: BarChart3 },
     { id: "boards", label: "Доски задач", icon: Layout },
-    ...(project.type === "scrum" ? [{ id: "backlog", label: "Бэклог и спринты", icon: FileText }] : []),
-    ...(project.type === "kanban" ? [{ id: "metrics", label: "Метрики Kanban", icon: TrendingUp }] : []),
-    { id: "params", label: "Параметры проекта", icon: Settings },
+    ...(projectType === "scrum" ? [{ id: "backlog", label: "Бэклог и спринты", icon: FileText }] : []),
+    ...(projectType === "kanban" ? [{ id: "metrics", label: "Метрики Kanban", icon: TrendingUp }] : []),
+    { id: "params", label: "Параметры и участники проекта", icon: Settings },
   ];
+
+  const activeBoard = boardTabs.find((b) => b.id === activeBoardId);
+
+  // ── Render ──────────────────────────────────────────────────
 
   return (
     <div className="max-w-[1600px] mx-auto space-y-6">
@@ -256,18 +489,18 @@ export default function ProjectDetail() {
           </div>
           <h1 className="text-2xl font-bold">{project.name}</h1>
           <span className="px-3 py-1 bg-slate-100 text-slate-700 text-sm font-semibold rounded">
-            {project.type === "scrum" ? "Scrum" : "Kanban"}
+            {projectType === "scrum" ? "Scrum" : "Kanban"}
           </span>
           <span
             className={`px-3 py-1 text-sm font-semibold rounded ${
-              project.status === "Активный"
+              project.status === "active"
                 ? "bg-green-100 text-green-700"
-                : project.status === "Приостановлен"
+                : project.status === "paused"
                 ? "bg-yellow-100 text-yellow-700"
                 : "bg-slate-100 text-slate-700"
             }`}
           >
-            {project.status}
+            {statusLabel}
           </span>
           <div className="ml-auto">
             <button
@@ -275,7 +508,11 @@ export default function ProjectDetail() {
               className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
               title={showDeleteProject ? "Скрыть" : "Удалить проект"}
             >
-              {showDeleteProject ? <ChevronUp size={20} className="text-slate-600" /> : <Trash2 size={20} className="text-red-600" />}
+              {showDeleteProject ? (
+                <ChevronUp size={20} className="text-slate-600" />
+              ) : (
+                <Trash2 size={20} className="text-red-600" />
+              )}
             </button>
           </div>
         </div>
@@ -286,10 +523,7 @@ export default function ProjectDetail() {
             </p>
             <div className="flex gap-2">
               <button
-                onClick={() => {
-                  console.log("Удаление проекта:", project.id);
-                  navigate("/projects");
-                }}
+                onClick={handleDeleteProject}
                 className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium"
               >
                 Да, удалить проект
@@ -305,7 +539,7 @@ export default function ProjectDetail() {
         )}
       </div>
 
-      {/* Tabs in two rows */}
+      {/* Tabs */}
       <div className="bg-white rounded-xl shadow-md border border-slate-100">
         {/* Desktop tabs */}
         <div className="border-b border-slate-200 p-4 hidden md:block">
@@ -391,18 +625,18 @@ export default function ProjectDetail() {
                         {project.key}
                       </span>
                       <span className="px-3 py-1 bg-white/20 backdrop-blur-sm text-white text-sm font-semibold rounded">
-                        {project.type === "scrum" ? "Scrum" : "Kanban"}
+                        {projectType === "scrum" ? "Scrum" : "Kanban"}
                       </span>
                       <span
                         className={`px-3 py-1 text-sm font-semibold rounded ${
-                          project.status === "Активный"
+                          project.status === "active"
                             ? "bg-green-500/30 text-white"
-                            : project.status === "Приостановлен"
+                            : project.status === "paused"
                             ? "bg-yellow-500/30 text-white"
                             : "bg-slate-500/30 text-white"
                         }`}
                       >
-                        {project.status}
+                        {statusLabel}
                       </span>
                     </div>
                     <h1 className="text-4xl font-bold mb-2">{project.name}</h1>
@@ -411,8 +645,8 @@ export default function ProjectDetail() {
                 </div>
                 <div className="flex items-center gap-6 text-blue-100">
                   <div className="flex items-center gap-2">
-                    {owner && <UserAvatar user={owner} size="sm" />}
-                    <span>Ответственный: {owner?.fullName}</span>
+                    {owner && <UserAvatar user={toAvatarUser(owner)} size="sm" />}
+                    <span>Ответственный: {owner?.fullName ?? "—"}</span>
                   </div>
                   <span>•</span>
                   <span>Создан: {new Date(project.createdAt).toLocaleDateString("ru-RU")}</span>
@@ -420,14 +654,18 @@ export default function ProjectDetail() {
               </div>
 
               {/* Overview Content */}
-              <ProjectOverview projectId={project.id} projectType={project.type} />
+              <ProjectOverview
+                projectId={project.id}
+                projectType={projectType}
+                members={members}
+                memberUsers={memberUsers}
+              />
             </div>
           )}
 
           {/* Boards Tab */}
           {activeTab === "boards" && (
             <div className="space-y-6 overflow-hidden">
-              {/* Board Tabs */}
               <DndProvider backend={HTML5Backend}>
                 <div className="border-b border-slate-200 bg-slate-50 -mx-6 px-6">
                   <div className="flex items-center gap-2 overflow-x-auto pb-0">
@@ -447,15 +685,8 @@ export default function ProjectDetail() {
                       />
                     ))}
                     <button
-                      onClick={() => {
-                        setSelectedBoard({
-                          id: null,
-                          name: "",
-                          description: "",
-                          isDefault: false,
-                          order: boardTabs.length + 1
-                        });
-                        setShowBoardSettingsModal(true);
+                      onClick={async () => {
+                        await handleCreateBoard("Новая доска", "");
                       }}
                       className="px-4 py-2 border border-dashed border-slate-300 rounded-t-lg hover:border-blue-400 hover:text-blue-600 hover:bg-white transition-all flex items-center gap-2 text-slate-600 whitespace-nowrap"
                     >
@@ -471,11 +702,11 @@ export default function ProjectDetail() {
                 <div className="flex items-center justify-between bg-slate-50 p-4 rounded-lg">
                   <div className="flex items-center gap-4 text-sm text-slate-600">
                     <div>
-                      <span className="font-semibold">Колонок:</span> {boardCols.length}
+                      <span className="font-semibold">Колонок:</span> {boardColumns.length}
                     </div>
-                    {boardSwims.length > 0 && (
+                    {boardSwimlanes.length > 0 && (
                       <div>
-                        <span className="font-semibold">Дорожек:</span> {boardSwims.length}
+                        <span className="font-semibold">Дорожек:</span> {boardSwimlanes.length}
                       </div>
                     )}
                   </div>
@@ -484,22 +715,13 @@ export default function ProjectDetail() {
 
               {/* Board Content */}
               {activeBoard ? (
-                <Board boardId={activeBoardId} />
+                <Board boardId={activeBoardId} projectId={project.id} />
               ) : (
                 <div className="text-center py-12 bg-slate-50 rounded-xl border-2 border-dashed border-slate-300">
                   <Layout size={48} className="mx-auto text-slate-400 mb-4" />
                   <p className="text-slate-600 mb-4">Нет досок задач</p>
                   <button
-                    onClick={() => {
-                      setSelectedBoard({
-                        id: null,
-                        name: "",
-                        description: "",
-                        isDefault: false,
-                        order: 1
-                      });
-                      setShowBoardSettingsModal(true);
-                    }}
+                    onClick={() => handleCreateBoard("Основная доска", "")}
                     className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                   >
                     Создать первую доску
@@ -523,164 +745,86 @@ export default function ProjectDetail() {
             </div>
           )}
 
-          {/* Members Tab */}
-          {activeTab === "members" && (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-bold">Участники проекта</h3>
-                  <p className="text-sm text-slate-600">
-                    Всего участников: {members.length}
-                  </p>
-                </div>
-                <button
-                  onClick={() => setShowAddMemberModal(true)}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-                >
-                  <Plus size={20} />
-                  Добавить участника
-                </button>
-              </div>
-
-              <div className="space-y-3">
-                {members.map((member) => {
-                  const user = users.find((u) => u.id === member.userId);
-                  const role = projectRoles.find((r) => r.id === member.roleId);
-                  if (!user) return null;
-
-                  return (
-                    <div
-                      key={member.id}
-                      className="flex items-center justify-between p-4 border border-slate-200 rounded-lg hover:border-blue-300 transition-colors"
-                    >
-                      <div className="flex items-center gap-3 flex-1">
-                        <UserAvatar user={user} size="md" />
-                        <div className="flex-1">
-                          <p className="font-medium">{user.fullName}</p>
-                          <p className="text-sm text-slate-600">{user.email}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <div className="text-right">
-                          <p className="text-sm font-medium text-slate-700">{role?.name}</p>
-                          <p className="text-xs text-slate-500">
-                            С {new Date(member.joinedAt).toLocaleDateString("ru-RU")}
-                          </p>
-                        </div>
-                        {member.userId !== project.ownerId && (
-                          <>
-                            <button
-                              onClick={() => {
-                                setSelectedMember(member);
-                                setSelectedRoleId(member.roleId);
-                                setShowEditMemberModal(true);
-                              }}
-                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                              title="Редактировать"
-                            >
-                              <Edit size={18} />
-                            </button>
-                            <button
-                              onClick={() => handleRemoveMember(member.id)}
-                              className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                              title="Удалить"
-                            >
-                              <Trash2 size={18} />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Settings Tab */}
+          {/* Params & Members Tab */}
           {activeTab === "params" && (
-            <div className="space-y-6">
-              {/* Настройки */}
-              <div>
+            <div className="space-y-8">
+              {/* Настройки проекта */}
+              <div className="bg-white rounded-xl shadow-md border border-slate-100 p-6">
                 <h3 className="text-lg font-bold mb-4">Настройки проекта</h3>
                 <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Название проекта</label>
-                    <input
-                      type="text"
-                      defaultValue={project.name}
-                      className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Название проекта</label>
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Ключ проекта (неизменяемый)</label>
+                      <input type="text" value={project.key} className="w-full px-4 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-500" disabled />
+                    </div>
                   </div>
-
-                  <div>
-                    <label className="block text-sm font-medium mb-2">
-                      Ключ проекта (неизменяемый)
-                    </label>
-                    <input
-                      type="text"
-                      value={project.key}
-                      className="w-full px-4 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-500"
-                      disabled
-                    />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Тип проекта (неизменяемый)</label>
+                      <input type="text" value={projectType === "scrum" ? "Scrum" : "Kanban"} className="w-full px-4 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-500" disabled />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Статус проекта</label>
+                      <select
+                        value={editStatus}
+                        onChange={(e) => setEditStatus(e.target.value as "active" | "archived" | "paused")}
+                        className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="active">Активный</option>
+                        <option value="paused">Приостановлен</option>
+                        <option value="archived">Архивирован</option>
+                      </select>
+                    </div>
                   </div>
-
-                  <div>
-                    <label className="block text-sm font-medium mb-2">
-                      Тип проекта (неизменяемый)
-                    </label>
-                    <input
-                      type="text"
-                      value={project.type === "scrum" ? "Scrum" : "Kanban"}
-                      className="w-full px-4 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-500"
-                      disabled
-                    />
-                  </div>
-
                   <div>
                     <label className="block text-sm font-medium mb-2">Описание</label>
                     <textarea
-                      defaultValue={project.description}
+                      value={editDescription}
+                      onChange={(e) => setEditDescription(e.target.value)}
                       className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      rows={4}
+                      rows={3}
                     />
                   </div>
-
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Ответственный</label>
-                    <select
-                      defaultValue={project.ownerId}
-                      className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      {users
-                        .filter((u) => u.isActive)
-                        .map((user) => (
-                          <option key={user.id} value={user.id}>
-                            {user.fullName}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Статус проекта</label>
-                    <select
-                      defaultValue={project.status}
-                      className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="Активный">Активный</option>
-                      <option value="Приостановлен">Приостановлен</option>
-                      <option value="Архивирован">Архивирован</option>
-                    </select>
-                  </div>
-
-                  <div className="pt-4">
-                    <button className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
-                      Сохранить изменения
-                    </button>
-                  </div>
+                  <button
+                    onClick={handleSaveProject}
+                    disabled={savingProject}
+                    className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                  >
+                    {savingProject ? "Сохранение..." : "Сохранить изменения"}
+                  </button>
                 </div>
               </div>
+
+              {/* Параметры проекта (из шаблона + кастомные) */}
+              {refs && (
+                <ProjectParamsSection
+                  projectId={project.id}
+                  projectType={projectType}
+                  refs={refs}
+                  params={projectParams}
+                  onReload={loadProjectParams}
+                />
+              )}
+
+              {/* Роли на проекте (из шаблона + кастомные) */}
+              {refs && (
+                <ProjectRolesSection
+                  projectId={project.id}
+                  projectType={projectType}
+                  refs={refs}
+                  roles={projectRoles}
+                  onReload={loadProjectRoles}
+                />
+              )}
 
               {/* Участники проекта */}
               <div className="border-t border-slate-200 pt-6">
@@ -702,8 +846,7 @@ export default function ProjectDetail() {
 
                 <div className="space-y-3">
                   {members.map((member) => {
-                    const user = users.find((u) => u.id === member.userId);
-                    const role = projectRoles.find((r) => r.id === member.roleId);
+                    const user = memberUsers.get(member.userId);
                     if (!user) return null;
 
                     return (
@@ -712,7 +855,7 @@ export default function ProjectDetail() {
                         className="flex items-center justify-between p-4 border border-slate-200 rounded-lg hover:border-blue-300 transition-colors"
                       >
                         <div className="flex items-center gap-3 flex-1">
-                          <UserAvatar user={user} size="md" />
+                          <UserAvatar user={toAvatarUser(user)} size="md" />
                           <div className="flex-1">
                             <p className="font-medium">{user.fullName}</p>
                             <p className="text-sm text-slate-600">{user.email}</p>
@@ -720,28 +863,38 @@ export default function ProjectDetail() {
                         </div>
                         <div className="flex items-center gap-4">
                           <div className="text-right">
-                            <p className="text-sm font-medium text-slate-700">{role?.name}</p>
-                            <p className="text-xs text-slate-500">
-                              С {new Date(member.joinedAt).toLocaleDateString("ru-RU")}
-                            </p>
+                            {member.roles.length > 0 ? (
+                              <div className="flex flex-wrap gap-1 justify-end">
+                                {member.roles.map((role) => (
+                                  <span
+                                    key={role}
+                                    className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded"
+                                  >
+                                    {role}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-sm text-slate-500">Без роли</p>
+                            )}
                           </div>
                           {member.userId !== project.ownerId && (
                             <>
                               <button
                                 onClick={() => {
                                   setSelectedMember(member);
-                                  setSelectedRoleId(member.roleId);
+                                  setSelectedRoles([...member.roles]);
                                   setShowEditMemberModal(true);
                                 }}
                                 className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                title="Редактировать"
+                                title="Редактировать роли"
                               >
                                 <Edit size={18} />
                               </button>
                               <button
                                 onClick={() => handleRemoveMember(member.id)}
                                 className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                title="Удалить"
+                                title="Удалить из проекта"
                               >
                                 <Trash2 size={18} />
                               </button>
@@ -758,7 +911,7 @@ export default function ProjectDetail() {
         </div>
       </div>
 
-      {/* Modals */}
+      {/* Add Member Modal */}
       {showAddMemberModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 max-w-md w-full">
@@ -768,7 +921,9 @@ export default function ProjectDetail() {
                 onClick={() => {
                   setShowAddMemberModal(false);
                   setSelectedUserId(null);
-                  setSelectedRoleId(3);
+                  setNewMemberRoles([]);
+                  setUserSearchQuery("");
+                  setSearchResults([]);
                 }}
                 className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
               >
@@ -778,34 +933,52 @@ export default function ProjectDetail() {
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-2">Пользователь *</label>
-                <select
-                  value={selectedUserId || ""}
-                  onChange={(e) => setSelectedUserId(Number(e.target.value))}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Выберите пользователя</option>
-                  {availableUsers.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.fullName} ({user.email})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">Роль в проекте *</label>
-                <select
-                  value={selectedRoleId}
-                  onChange={(e) => setSelectedRoleId(Number(e.target.value))}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {projectRoles.map((role) => (
-                    <option key={role.id} value={role.id}>
-                      {role.name}
-                    </option>
-                  ))}
-                </select>
+                <label className="block text-sm font-medium mb-2">Поиск пользователя *</label>
+                <div className="relative">
+                  <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={userSearchQuery}
+                    onChange={(e) => handleSearchUsers(e.target.value)}
+                    placeholder="Введите имя или email..."
+                    className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                {searchResults.length > 0 && !selectedUserId && (
+                  <div className="mt-2 border border-slate-200 rounded-lg max-h-48 overflow-y-auto">
+                    {searchResults.map((user) => (
+                      <button
+                        key={user.id}
+                        onClick={() => {
+                          setSelectedUserId(user.id);
+                          setUserSearchQuery(user.fullName);
+                          setSearchResults([]);
+                        }}
+                        className="w-full flex items-center gap-3 px-3 py-2 hover:bg-slate-50 transition-colors text-left"
+                      >
+                        <UserAvatar user={toAvatarUser(user)} size="sm" />
+                        <div>
+                          <p className="text-sm font-medium">{user.fullName}</p>
+                          <p className="text-xs text-slate-500">{user.email}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {selectedUserId && (
+                  <div className="mt-2 flex items-center gap-2 p-2 bg-blue-50 rounded-lg">
+                    <span className="text-sm text-blue-700 flex-1">{userSearchQuery}</span>
+                    <button
+                      onClick={() => {
+                        setSelectedUserId(null);
+                        setUserSearchQuery("");
+                      }}
+                      className="text-blue-500 hover:text-blue-700"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="flex gap-3 pt-4">
@@ -813,7 +986,9 @@ export default function ProjectDetail() {
                   onClick={() => {
                     setShowAddMemberModal(false);
                     setSelectedUserId(null);
-                    setSelectedRoleId(3);
+                    setNewMemberRoles([]);
+                    setUserSearchQuery("");
+                    setSearchResults([]);
                   }}
                   className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium"
                 >
@@ -832,16 +1007,17 @@ export default function ProjectDetail() {
         </div>
       )}
 
+      {/* Edit Member Modal */}
       {showEditMemberModal && selectedMember && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 max-w-md w-full">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">Изменить участника</h2>
+              <h2 className="text-xl font-bold">Изменить роли участника</h2>
               <button
                 onClick={() => {
                   setShowEditMemberModal(false);
                   setSelectedMember(null);
-                  setSelectedRoleId(3);
+                  setSelectedRoles([]);
                 }}
                 className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
               >
@@ -851,34 +1027,40 @@ export default function ProjectDetail() {
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-2">Пользователь *</label>
-                <select
-                  value={selectedMember.userId}
-                  onChange={(e) => setSelectedUserId(Number(e.target.value))}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Выберите пользователя</option>
-                  {availableUsers.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.fullName} ({user.email})
-                    </option>
-                  ))}
-                </select>
+                <label className="block text-sm font-medium mb-2">Участник</label>
+                <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+                  {memberUsers.get(selectedMember.userId) && (
+                    <>
+                      <UserAvatar
+                        user={toAvatarUser(memberUsers.get(selectedMember.userId)!)}
+                        size="sm"
+                      />
+                      <span className="font-medium">
+                        {memberUsers.get(selectedMember.userId)!.fullName}
+                      </span>
+                    </>
+                  )}
+                </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">Роль в проекте *</label>
-                <select
-                  value={selectedRoleId}
-                  onChange={(e) => setSelectedRoleId(Number(e.target.value))}
+                <label className="block text-sm font-medium mb-2">
+                  Роли (через запятую)
+                </label>
+                <input
+                  type="text"
+                  value={selectedRoles.join(", ")}
+                  onChange={(e) =>
+                    setSelectedRoles(
+                      e.target.value
+                        .split(",")
+                        .map((r) => r.trim())
+                        .filter(Boolean)
+                    )
+                  }
                   className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {projectRoles.map((role) => (
-                    <option key={role.id} value={role.id}>
-                      {role.name}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Например: Разработчик, Тестировщик"
+                />
               </div>
 
               <div className="flex gap-3 pt-4">
@@ -886,7 +1068,7 @@ export default function ProjectDetail() {
                   onClick={() => {
                     setShowEditMemberModal(false);
                     setSelectedMember(null);
-                    setSelectedRoleId(3);
+                    setSelectedRoles([]);
                   }}
                   className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium"
                 >
@@ -894,8 +1076,7 @@ export default function ProjectDetail() {
                 </button>
                 <button
                   onClick={handleEditMember}
-                  disabled={!selectedUserId}
-                  className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
                 >
                   Сохранить
                 </button>
@@ -905,66 +1086,27 @@ export default function ProjectDetail() {
         </div>
       )}
 
-      {showBoardSettingsModal && selectedBoard && (() => {
-        // Генерируем доступные значения для дорожек на основе задач
-        const swimlaneGroupBy = "priority"; // В реальном приложении это берется из настроек доски
-        const availableSwimlaneValues: string[] = [];
-        
-        if (swimlaneGroupBy === "priority") {
-          const priorities = Array.from(new Set(tasks.filter(t => t.projectId === project?.id).map(t => t.priority)));
-          availableSwimlaneValues.push(...priorities);
-        } else if (swimlaneGroupBy === "assignee") {
-          const assigneeIds = Array.from(new Set(tasks.filter(t => t.projectId === project?.id && t.assigneeId).map(t => t.assigneeId)));
-          availableSwimlaneValues.push(...assigneeIds.map(id => users.find(u => u.id === id)?.fullName || ""));
-        } else if (swimlaneGroupBy === "type") {
-          const statuses = Array.from(new Set(tasks.filter(t => t.projectId === project?.id).map(t => t.status)));
-          availableSwimlaneValues.push(...statuses);
-        } else if (swimlaneGroupBy === "tags") {
-          const allTags = tasks.filter(t => t.projectId === project?.id).flatMap(t => t.tags || []);
-          const uniqueTags = Array.from(new Set(allTags));
-          availableSwimlaneValues.push(...uniqueTags);
-        }
-        
-        // Генерируем начальные дорожки (в реальном приложении это берется из настроек доски)
-        const initialSwimlanes = availableSwimlaneValues.map((value, index) => ({
-          id: index + 1,
-          name: value,
-          value: value,
-          wipLimit: null,
-          order: index + 1,
-        }));
-        
-        return (
-          <BoardSettingsModal
-            isOpen={showBoardSettingsModal}
-            onClose={() => {
-              setShowBoardSettingsModal(false);
-              setSelectedBoard(null);
-            }}
-            boardName={selectedBoard.name}
-            boardDescription={selectedBoard.description}
-            columns={boardCols}
-            swimlaneGroupBy={swimlaneGroupBy}
-            swimlanes={initialSwimlanes}
-            availableSwimlaneValues={availableSwimlaneValues}
-            onSave={(cols, newSwimlaneGroupBy, swimlanes, selectedSystemFields, customFields, boardName, boardDescription) => {
-              console.log("Saving board settings:", { 
-                columns: cols, 
-                swimlaneGroupBy: newSwimlaneGroupBy,
-                swimlanes,
-                taskTemplate: {
-                  systemFields: selectedSystemFields,
-                  customFields
-                },
-                boardName,
-                boardDescription
-              });
-              setShowBoardSettingsModal(false);
-              setSelectedBoard(null);
-            }}
-          />
-        );
-      })()}
+      {/* Board Settings Modal */}
+      {showBoardSettingsModal && selectedBoard && selectedBoard.id && (
+        <BoardSettingsModal
+          isOpen={showBoardSettingsModal}
+          onClose={() => {
+            setShowBoardSettingsModal(false);
+            setSelectedBoard(null);
+            loadBoards();
+            loadBoardDetails();
+          }}
+          boardId={selectedBoard.id}
+          boardName={selectedBoard.name}
+          boardDescription={selectedBoard.description ?? ""}
+          projectType={projectType}
+          refs={refs}
+          onBoardUpdated={() => {
+            loadBoards();
+            loadBoardDetails();
+          }}
+        />
+      )}
     </div>
   );
 }

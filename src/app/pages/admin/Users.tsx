@@ -15,21 +15,21 @@ import { UserAvatar } from '../../components/UserAvatar';
 interface UserForm {
   username: string;
   email: string;
-  full_name: string;
+  fullName: string;
   position: string;
   password: string;
-  is_active: boolean;
-  role_ids: string[];
+  isActive: boolean;
+  roleIds: string[];
 }
 
 const emptyForm: UserForm = {
   username: '',
   email: '',
-  full_name: '',
+  fullName: '',
   position: '',
   password: '',
-  is_active: true,
-  role_ids: [],
+  isActive: true,
+  roleIds: [],
 };
 
 export default function AdminUsers() {
@@ -118,13 +118,13 @@ export default function AdminUsers() {
     const q = searchQuery.toLowerCase();
     const matchesSearch =
       !q ||
-      user.full_name.toLowerCase().includes(q) ||
+      user.fullName.toLowerCase().includes(q) ||
       user.email.toLowerCase().includes(q) ||
       user.username.toLowerCase().includes(q);
     const matchesStatus =
       filterStatus === 'all' ||
-      (filterStatus === 'active' && user.is_active) ||
-      (filterStatus === 'inactive' && !user.is_active);
+      (filterStatus === 'active' && user.isActive) ||
+      (filterStatus === 'inactive' && !user.isActive);
     const matchesRole =
       filterRole === 'all' ||
       user.roles.some((r) => r.id === filterRole);
@@ -132,8 +132,8 @@ export default function AdminUsers() {
   });
 
   const totalCount = users.length;
-  const activeCount = users.filter((u) => u.is_active).length;
-  const inactiveCount = users.filter((u) => !u.is_active).length;
+  const activeCount = users.filter((u) => u.isActive).length;
+  const inactiveCount = users.filter((u) => !u.isActive).length;
 
   const passwordChecks = policy
     ? [
@@ -158,11 +158,11 @@ export default function AdminUsers() {
     setForm({
       username: user.username,
       email: user.email,
-      full_name: user.full_name,
+      fullName: user.fullName,
       position: user.position || '',
       password: '',
-      is_active: user.is_active,
-      role_ids: user.roles.map((r) => r.id),
+      isActive: user.isActive,
+      roleIds: user.roles.map((r) => r.id),
     });
     setModalError('');
     setModalOpen(true);
@@ -179,7 +179,7 @@ export default function AdminUsers() {
       setModalError('Введите email');
       return;
     }
-    if (!form.full_name.trim()) {
+    if (!form.fullName.trim()) {
       setModalError('Введите полное имя');
       return;
     }
@@ -194,23 +194,23 @@ export default function AdminUsers() {
         await updateAdminUser(editingUser.id, {
           username: form.username.trim(),
           email: form.email.trim(),
-          full_name: form.full_name.trim(),
+          fullName: form.fullName.trim(),
           position: form.position.trim(),
-          is_active: form.is_active,
-          role_ids: form.role_ids,
+          isActive: form.isActive,
+          roleIds: form.roleIds,
         });
-        setMsg({ type: 'success', text: `Пользователь "${form.full_name.trim()}" обновлён` });
+        setMsg({ type: 'success', text: `Пользователь "${form.fullName.trim()}" обновлён` });
       } else {
         await createAdminUser({
           username: form.username.trim(),
           email: form.email.trim(),
-          full_name: form.full_name.trim(),
+          fullName: form.fullName.trim(),
           position: form.position.trim(),
           password: form.password,
-          is_active: form.is_active,
-          role_ids: form.role_ids,
+          isActive: form.isActive,
+          roleIds: form.roleIds,
         });
-        setMsg({ type: 'success', text: `Пользователь "${form.full_name.trim()}" создан` });
+        setMsg({ type: 'success', text: `Пользователь "${form.fullName.trim()}" создан` });
       }
       setModalOpen(false);
       await loadUsers();
@@ -230,7 +230,7 @@ export default function AdminUsers() {
     setDeleting(true);
     try {
       await deleteAdminUser(deleteTarget.id);
-      setMsg({ type: 'success', text: `Пользователь "${deleteTarget.full_name}" удалён` });
+      setMsg({ type: 'success', text: `Пользователь "${deleteTarget.fullName}" удалён` });
       setDeleteTarget(null);
       await loadUsers();
     } catch (err) {
@@ -404,17 +404,17 @@ export default function AdminUsers() {
                       <UserAvatar
                         user={{
                           id: user.id,
-                          fullName: user.full_name,
-                          avatarUrl: user.avatar_url || '',
+                          fullName: user.fullName,
+                          avatarUrl: user.avatarUrl || '',
                           username: user.username,
                           email: user.email,
-                          isActive: user.is_active,
+                          isActive: user.isActive,
                           role: user.roles[0]?.name || '',
                         }}
                         size="md"
                       />
                       <div>
-                        <p className="font-semibold">{user.full_name}</p>
+                        <p className="font-semibold">{user.fullName}</p>
                         <p className="text-sm text-slate-500">@{user.username}</p>
                       </div>
                     </div>
@@ -441,12 +441,12 @@ export default function AdminUsers() {
                   <td className="px-6 py-4">
                     <span
                       className={`px-3 py-1 text-sm font-semibold rounded-full ${
-                        user.is_active
+                        user.isActive
                           ? 'bg-green-100 text-green-700'
                           : 'bg-red-100 text-red-700'
                       }`}
                     >
-                      {user.is_active ? 'Активен' : 'Заблокирован'}
+                      {user.isActive ? 'Активен' : 'Заблокирован'}
                     </span>
                   </td>
                   <td className="px-6 py-4">
@@ -543,8 +543,8 @@ export default function AdminUsers() {
                 </label>
                 <input
                   type="text"
-                  value={form.full_name}
-                  onChange={(e) => setForm({ ...form, full_name: e.target.value })}
+                  value={form.fullName}
+                  onChange={(e) => setForm({ ...form, fullName: e.target.value })}
                   className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                   placeholder="Фамилия Имя Отчество"
                 />
@@ -571,13 +571,13 @@ export default function AdminUsers() {
                     >
                       <input
                         type="checkbox"
-                        checked={form.role_ids.includes(role.id)}
+                        checked={form.roleIds.includes(role.id)}
                         onChange={() => {
                           setForm((prev) => ({
                             ...prev,
-                            role_ids: prev.role_ids.includes(role.id)
-                              ? prev.role_ids.filter((id) => id !== role.id)
-                              : [...prev.role_ids, role.id],
+                            roleIds: prev.roleIds.includes(role.id)
+                              ? prev.roleIds.filter((id) => id !== role.id)
+                              : [...prev.roleIds, role.id],
                           }));
                         }}
                         className="w-4 h-4 text-purple-600 rounded focus:ring-2 focus:ring-purple-500"
@@ -662,8 +662,8 @@ export default function AdminUsers() {
                 <input
                   type="checkbox"
                   id="active"
-                  checked={form.is_active}
-                  onChange={(e) => setForm({ ...form, is_active: e.target.checked })}
+                  checked={form.isActive}
+                  onChange={(e) => setForm({ ...form, isActive: e.target.checked })}
                   className="w-4 h-4 text-purple-600 rounded focus:ring-2 focus:ring-purple-500"
                 />
                 <label htmlFor="active" className="text-sm font-medium">
@@ -704,7 +704,7 @@ export default function AdminUsers() {
           <div className="bg-white rounded-2xl p-6 max-w-md w-full">
             <h2 className="text-xl font-bold mb-2">Удалить пользователя</h2>
             <p className="text-slate-600 mb-6">
-              Вы уверены, что хотите удалить пользователя <strong>"{deleteTarget.full_name}"</strong>?
+              Вы уверены, что хотите удалить пользователя <strong>"{deleteTarget.fullName}"</strong>?
               Это действие нельзя отменить.
             </p>
             <div className="flex gap-3">

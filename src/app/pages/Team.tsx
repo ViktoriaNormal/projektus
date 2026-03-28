@@ -140,28 +140,28 @@ export default function Team() {
               className={`bg-white rounded-xl p-6 shadow-md border ${
                 isMe
                   ? 'border-blue-300 ring-1 ring-blue-200'
-                  : user.on_vacation || user.is_sick
+                  : user.onVacation || user.isSick
                     ? 'border-orange-200'
                     : 'border-slate-100'
               }`}
             >
               <div className="flex flex-col items-center text-center">
                 <UserAvatar
-                  user={{ fullName: user.full_name, avatarUrl: user.avatar_url }}
+                  user={{ fullName: user.fullName, avatarUrl: user.avatarUrl }}
                   size="xl"
                   className="mb-4"
                 />
 
                 {/* Status badges */}
-                {(user.on_vacation || user.is_sick) && (
+                {(user.onVacation || user.isSick) && (
                   <div className="flex flex-wrap gap-1.5 mb-2 justify-center">
-                    {user.on_vacation && (
+                    {user.onVacation && (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-50 border border-green-200 text-green-700 text-xs font-medium rounded-full">
                         <Palmtree size={12} />
                         В отпуске
                       </span>
                     )}
-                    {user.is_sick && (
+                    {user.isSick && (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-50 border border-red-200 text-red-700 text-xs font-medium rounded-full">
                         <Thermometer size={12} />
                         Болею
@@ -171,8 +171,8 @@ export default function Team() {
                 )}
 
                 <div className="flex items-center gap-1.5 mb-1">
-                  <h3 className="font-bold text-lg">{user.full_name}</h3>
-                  <CopyButton text={user.full_name} />
+                  <h3 className="font-bold text-lg">{user.fullName}</h3>
+                  <CopyButton text={user.fullName} />
                 </div>
 
                 {user.position && (
@@ -200,14 +200,14 @@ export default function Team() {
                     <CopyButton text={user.email} />
                   </div>
 
-                  {user.alternative_contact_channel && user.alternative_contact_info && (
+                  {user.alternativeContactChannel && user.alternativeContactInfo && (
                     <div className="flex items-center gap-2 justify-center">
                       <MessageCircle size={14} className="text-slate-400" />
                       <span>
-                        <span className="text-slate-500">{user.alternative_contact_channel}:</span>{' '}
-                        <span className="font-medium text-slate-700">{user.alternative_contact_info}</span>
+                        <span className="text-slate-500">{user.alternativeContactChannel}:</span>{' '}
+                        <span className="font-medium text-slate-700">{user.alternativeContactInfo}</span>
                       </span>
-                      <CopyButton text={user.alternative_contact_info} />
+                      <CopyButton text={user.alternativeContactInfo} />
                     </div>
                   )}
                 </div>
