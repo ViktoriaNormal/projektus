@@ -9,7 +9,6 @@ export interface ProjectParam {
   fieldType: string;
   isSystem: boolean;
   isRequired: boolean;
-  order: number;
   options: string[] | null;
   value: string | null;
 }
@@ -24,7 +23,6 @@ export function createProjectParam(projectId: string, data: {
   name: string;
   fieldType: string;
   isRequired?: boolean;
-  order?: number;
   options?: string[] | null;
   value?: string | null;
 }) {
@@ -52,9 +50,3 @@ export function deleteProjectParam(projectId: string, paramId: string) {
   });
 }
 
-export function reorderProjectParams(projectId: string, orders: { paramId: string; order: number }[]) {
-  return apiRequest<null>(`/projects/${projectId}/params/reorder`, {
-    method: 'PATCH',
-    body: JSON.stringify({ orders }),
-  });
-}

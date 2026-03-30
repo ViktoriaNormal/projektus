@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Link } from "react-router";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
@@ -12,9 +12,16 @@ import {
   Trash2,
   Search,
   Loader2,
+  Settings,
+  Check,
+  AlertCircle,
 } from "lucide-react";
+import { toast } from "sonner";
 import { UserAvatar } from "../components/UserAvatar";
-import { getBoardColumns, getBoardSwimlanes, type ColumnResponse, type SwimlaneResponse } from "../api/boards";
+import {
+  getBoardColumns, getBoardSwimlanes, createColumn, updateColumn, deleteColumn, reorderColumns,
+  type ColumnResponse, type SwimlaneResponse,
+} from "../api/boards";
 import { searchTasks, type TaskResponse } from "../api/tasks";
 import { getUser, type UserProfileResponse } from "../api/users";
 
@@ -27,6 +34,8 @@ const ItemType = {
 interface BoardProps {
   boardId: string | null;
   projectId?: string;
+  projectType?: string;
+  onBoardChanged?: () => void;
 }
 
 interface Filters {
@@ -35,8 +44,42 @@ interface Filters {
   tags: string[];
 }
 
+const COLUMN_TYPE_LABELS: Record<string, string> = {
+  initial: "Начальный",
+  in_progress: "В работе",
+  completed: "Завершено",
+};
+
 function toAvatarUser(u: UserProfileResponse) {
   return { fullName: u.fullName, avatarUrl: u.avatarUrl ?? undefined };
+}
+
+// ── Validation (same as BoardSettingsModal) ─────────────────
+
+function validateColumnOrder(cols: ColumnResponse[]): string | null {
+  if (cols.length === 0) return null;
+  const countInitial = cols.filter(c => c.systemType === "initial").length;
+  const countInProgress = cols.filter(c => c.systemType === "in_progress").length;
+  const countCompleted = cols.filter(c => c.systemType === "completed").length;
+  if (countInitial === 0) return `Должна быть минимум одна колонка с типом «${COLUMN_TYPE_LABELS["initial"]}».`;
+  if (countInProgress === 0) return `Должна быть минимум одна колонка с типом «${COLUMN_TYPE_LABELS["in_progress"]}».`;
+  if (countCompleted === 0) return `Должна быть минимум одна колонка с типом «${COLUMN_TYPE_LABELS["completed"]}».`;
+  let phase: "early" | "middle" | "final" = "early";
+  let lastPhaseCol: ColumnResponse | null = null;
+  for (const col of cols) {
+    const st = col.systemType || "";
+    if (st === "initial") {
+      if (phase === "middle" || phase === "final")
+        return `Колонка «${col.name}» (тип «${COLUMN_TYPE_LABELS[st]}») не может стоять после колонки «${lastPhaseCol?.name}» (тип «${COLUMN_TYPE_LABELS[lastPhaseCol?.systemType || ""]}»).`;
+    } else if (st === "in_progress") {
+      if (phase === "final")
+        return `Колонка «${col.name}» (тип «${COLUMN_TYPE_LABELS[st]}») не может стоять после колонки «${lastPhaseCol?.name}» (тип «${COLUMN_TYPE_LABELS[lastPhaseCol?.systemType || ""]}»).`;
+      phase = "middle"; lastPhaseCol = col;
+    } else if (st === "completed") {
+      phase = "final"; lastPhaseCol = col;
+    }
+  }
+  return null;
 }
 
 // ── Task Card ───────────────────────────────────────────────
@@ -121,15 +164,21 @@ function DropZone({
   );
 }
 
-// ── Draggable Column Header ─────────────────────────────────
+// ── Column Header with inline editing ───────────────────────
 
-function DraggableColumnHeader({
-  column, index, moveColumn, taskCount,
+function ColumnHeader({
+  column, index, columns, moveColumn, taskCount, isScrum,
+  onUpdate, onAddAfter, onRemove,
 }: {
   column: ColumnResponse;
   index: number;
+  columns: ColumnResponse[];
   moveColumn: (dragIndex: number, hoverIndex: number) => void;
   taskCount: number;
+  isScrum: boolean;
+  onUpdate: (colId: string, field: string, value: any) => void;
+  onAddAfter: (afterIndex: number) => void;
+  onRemove: (colId: string) => void;
 }) {
   const [{ isDragging }, drag] = useDrag({
     type: ItemType.COLUMN,
@@ -144,25 +193,110 @@ function DraggableColumnHeader({
     },
   });
 
+  const [showMenu, setShowMenu] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameVal, setNameVal] = useState(column.name);
+  const [editingWip, setEditingWip] = useState(false);
+  const [wipVal, setWipVal] = useState(column.wipLimit != null ? String(column.wipLimit) : "");
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const wipInputRef = useRef<HTMLInputElement>(null);
+
+  const locked = !!column.isLocked;
+  const showWip = !isScrum && column.systemType !== "completed";
+
+  function saveName() {
+    const trimmed = nameVal.trim();
+    if (trimmed && trimmed !== column.name) onUpdate(column.id, "name", trimmed);
+    else setNameVal(column.name);
+    setEditingName(false);
+  }
+
+  function saveWip() {
+    const parsed = wipVal.trim() === "" ? null : parseInt(wipVal, 10);
+    if (parsed !== null && isNaN(parsed)) { setWipVal(column.wipLimit != null ? String(column.wipLimit) : ""); }
+    else if (parsed !== column.wipLimit) onUpdate(column.id, "wipLimit", parsed);
+    setEditingWip(false);
+  }
+
   return (
     <th
       ref={(node) => drag(drop(node))}
       className={`p-4 text-left font-semibold min-w-[280px] border-b-2 border-slate-300 bg-slate-100 ${isDragging ? "opacity-50" : ""}`}
     >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 flex-1">
-          <GripVertical size={18} className="text-slate-400 cursor-move" />
-          <div className="flex-1">
-            <div className="flex items-center gap-2">
-              <span className="text-slate-700">{column.name}</span>
-              <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-slate-200 text-slate-600">{taskCount}</span>
-            </div>
-            {column.wipLimit && (
-              <div className="text-xs text-slate-500 font-normal mt-1">
-                WIP: {taskCount} / {column.wipLimit}
-              </div>
+      <div className="flex items-center gap-2">
+        <GripVertical size={18} className="text-slate-400 cursor-move shrink-0" />
+        <div className="flex-1 min-w-0">
+          {/* Name */}
+          <div className="flex items-center gap-2">
+            {editingName ? (
+              <input ref={nameInputRef} autoFocus value={nameVal} onChange={e => setNameVal(e.target.value)}
+                onBlur={saveName} onKeyDown={e => { if (e.key === "Enter") saveName(); if (e.key === "Escape") { setNameVal(column.name); setEditingName(false); } }}
+                className="text-slate-700 text-sm font-semibold bg-white border border-blue-400 rounded px-1.5 py-0.5 w-full focus:outline-none focus:ring-1 focus:ring-blue-500" />
+            ) : (
+              <span className="text-slate-700 truncate cursor-pointer hover:text-blue-600" onClick={() => { if (!locked) { setEditingName(true); } }}>
+                {column.name}
+              </span>
             )}
+            <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-slate-200 text-slate-600 shrink-0">{taskCount}</span>
           </div>
+          {/* WIP */}
+          {showWip && column.wipLimit != null && !editingWip && (
+            <div className="text-xs text-slate-500 font-normal mt-1 cursor-pointer hover:text-blue-600"
+              onClick={() => { setWipVal(column.wipLimit != null ? String(column.wipLimit) : ""); setEditingWip(true); }}>
+              WIP: {taskCount} / {column.wipLimit}
+            </div>
+          )}
+          {showWip && editingWip && (
+            <div className="flex items-center gap-1 mt-1">
+              <span className="text-xs text-slate-500">WIP:</span>
+              <input ref={wipInputRef} autoFocus value={wipVal} onChange={e => setWipVal(e.target.value)}
+                onBlur={saveWip} onKeyDown={e => { if (e.key === "Enter") saveWip(); if (e.key === "Escape") { setWipVal(column.wipLimit != null ? String(column.wipLimit) : ""); setEditingWip(false); } }}
+                className="w-12 text-xs bg-white border border-blue-400 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                placeholder="∞" />
+            </div>
+          )}
+        </div>
+        {/* Actions */}
+        <div className="flex items-center gap-0.5 shrink-0">
+          <button onClick={() => onAddAfter(index)} className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Добавить колонку после">
+            <Plus size={14} />
+          </button>
+          {!locked && (
+            <div className="relative">
+              <button onClick={() => setShowMenu(!showMenu)} className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded transition-colors" title="Настройки колонки">
+                <Settings size={14} />
+              </button>
+              {showMenu && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
+                  <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-20 py-1 min-w-[180px]">
+                    <div className="px-3 py-2 border-b border-slate-100">
+                      <label className="text-xs font-medium text-slate-500">Системный тип</label>
+                      <select value={column.systemType || ""} onChange={e => { onUpdate(column.id, "systemType", e.target.value); setShowMenu(false); }}
+                        className="w-full mt-1 px-2 py-1 text-sm border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        {Object.entries(COLUMN_TYPE_LABELS).map(([val, label]) => (
+                          <option key={val} value={val}>{label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {showWip && (
+                      <div className="px-3 py-2 border-b border-slate-100">
+                        <label className="text-xs font-medium text-slate-500">WIP-лимит</label>
+                        <input type="number" min="0" value={wipVal} onChange={e => setWipVal(e.target.value)}
+                          onBlur={() => { saveWip(); }}
+                          className="w-full mt-1 px-2 py-1 text-sm border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          placeholder="Без лимита" />
+                      </div>
+                    )}
+                    <button onClick={() => { onRemove(column.id); setShowMenu(false); }}
+                      className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2">
+                      <Trash2 size={14} /> Удалить колонку
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </th>
@@ -285,13 +419,16 @@ function FilterDropdown({
 
 // ── Main Board Component ────────────────────────────────────
 
-export default function Board({ boardId, projectId }: BoardProps) {
+export default function Board({ boardId, projectId, projectType, onBoardChanged }: BoardProps) {
   const [columns, setColumns] = useState<ColumnResponse[]>([]);
   const [swimlanes, setSwimlanes] = useState<SwimlaneResponse[]>([]);
   const [tasks, setTasks] = useState<TaskResponse[]>([]);
   const [userCache, setUserCache] = useState<Map<string, UserProfileResponse>>(new Map());
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState<Filters>({ assignees: [], priorities: [], tags: [] });
+  const [columnError, setColumnError] = useState<{ message: string; dismissible: boolean } | null>(null);
+
+  const isScrum = projectType === "scrum";
 
   const loadData = useCallback(async () => {
     if (!boardId) return;
@@ -308,11 +445,9 @@ export default function Board({ boardId, projectId }: BoardProps) {
       if (projectId) {
         try {
           const t = await searchTasks({ projectId });
-          // Filter to tasks on this board's columns
           const colIds = new Set(cols.map((c) => c.id));
           setTasks(t.filter((task) => colIds.has(task.columnId)));
 
-          // Cache user profiles
           const userIds = new Set<string>();
           t.forEach((task) => { if (task.executorId) userIds.add(task.executorId); });
           const cache = new Map<string, UserProfileResponse>();
@@ -322,7 +457,7 @@ export default function Board({ boardId, projectId }: BoardProps) {
             })
           );
           setUserCache(cache);
-        } catch { /* tasks might fail if no tasks exist yet */ }
+        } catch { /**/ }
       }
     } catch { /**/ } finally {
       setLoading(false);
@@ -331,17 +466,80 @@ export default function Board({ boardId, projectId }: BoardProps) {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  const reloadColumns = useCallback(async () => {
+    if (!boardId) return;
+    try {
+      const cols = await getBoardColumns(boardId);
+      setColumns(cols.sort((a, b) => a.order - b.order));
+    } catch { /**/ }
+    onBoardChanged?.();
+  }, [boardId, onBoardChanged]);
+
+  // ── Column management ───────────────────────────────────────
+
+  async function handleAddColumnAfter(afterIndex: number) {
+    if (!boardId) return;
+    const systemType = (afterIndex >= 0 && columns[afterIndex])
+      ? columns[afterIndex].systemType || "initial"
+      : "initial";
+    const order = afterIndex + 2;
+    try {
+      await createColumn(boardId, { name: "Новая колонка", systemType, order });
+      setColumnError(null);
+      await reloadColumns();
+    } catch (e: any) {
+      setColumnError({ message: e.message || "Ошибка создания колонки", dismissible: true });
+    }
+  }
+
+  async function handleUpdateColumn(colId: string, field: string, value: any) {
+    if (!boardId) return;
+    if (field === "systemType") {
+      const testCols = columns.map(c => c.id === colId ? { ...c, systemType: value } : c);
+      const err = validateColumnOrder(testCols);
+      if (err) { setColumnError({ message: err, dismissible: true }); return; }
+      setColumnError(null);
+    }
+    if (field === "name" && typeof value === "string" && !value.trim()) {
+      setColumnError({ message: "Название колонки не может быть пустым", dismissible: false }); return;
+    }
+    if (field === "name") setColumnError(null);
+    try {
+      await updateColumn(boardId, colId, { [field]: value });
+      await reloadColumns();
+    } catch (e: any) { setColumnError({ message: e.message || "Ошибка обновления колонки", dismissible: true }); }
+  }
+
+  async function handleRemoveColumn(colId: string) {
+    if (!boardId) return;
+    const remaining = columns.filter(c => c.id !== colId);
+    const err = validateColumnOrder(remaining);
+    if (err) { setColumnError({ message: err, dismissible: true }); return; }
+    try {
+      await deleteColumn(boardId, colId);
+      setColumnError(null);
+      await reloadColumns();
+    } catch (e: any) { setColumnError({ message: e.message || "Ошибка удаления колонки", dismissible: true }); }
+  }
+
   const moveTask = (taskId: string, columnId: string, swimlaneId: string | null) => {
     setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, columnId, swimlaneId } : t));
     // TODO: call updateTask API
   };
 
   const moveColumn = (dragIndex: number, hoverIndex: number) => {
+    if (isScrum && (dragIndex === 0 || hoverIndex === 0)) return;
     const newCols = [...columns];
     const [dragged] = newCols.splice(dragIndex, 1);
     newCols.splice(hoverIndex, 0, dragged);
+    const err = validateColumnOrder(newCols);
+    if (err) return; // silently reject invalid drag
     newCols.forEach((c, i) => (c.order = i + 1));
     setColumns(newCols);
+    if (boardId) {
+      const orders = newCols.map((c, i) => ({ columnId: c.id, order: i + 1 }));
+      reorderColumns(boardId, orders).then(() => onBoardChanged?.()).catch(() => reloadColumns());
+    }
   };
 
   const getColumnTaskCount = (columnId: string) => tasks.filter((t) => t.columnId === columnId).length;
@@ -389,7 +587,7 @@ export default function Board({ boardId, projectId }: BoardProps) {
 
   return (
     <DndProvider backend={HTML5Backend}>
-      <div className="space-y-4 overflow-hidden">
+      <div className="space-y-4 min-w-0">
         {/* Filters */}
         {tasks.length > 0 && (
           <div className="bg-white border border-slate-200 rounded-lg p-4">
@@ -427,22 +625,38 @@ export default function Board({ boardId, projectId }: BoardProps) {
           </div>
         )}
 
+        {/* Column error */}
+        {columnError && (
+          <div className="flex items-center gap-2 p-4 bg-red-50 border border-red-300 rounded-xl text-red-800 text-sm" style={{ overflowAnchor: "none" }}>
+            <AlertCircle size={18} className="shrink-0" />
+            <span className="flex-1">{columnError.message}</span>
+            {columnError.dismissible && (
+              <button onClick={() => setColumnError(null)} className="p-0.5 hover:bg-red-100 rounded shrink-0"><X size={16} /></button>
+            )}
+          </div>
+        )}
+
         {/* Board */}
-        <div className="overflow-x-auto">
+        <div className="w-full overflow-x-auto">
           <div className="bg-white rounded-xl shadow-md border border-slate-100">
-            <table className="border-collapse w-full">
+            <table className="border-collapse">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50">
                   {swimlanes.length > 0 && (
                     <th className="p-4 text-left font-semibold text-slate-700 w-48 sticky left-0 bg-slate-50 z-10" />
                   )}
                   {columns.map((column, index) => (
-                    <DraggableColumnHeader
+                    <ColumnHeader
                       key={column.id}
                       column={column}
                       index={index}
+                      columns={columns}
                       moveColumn={moveColumn}
                       taskCount={getColumnTaskCount(column.id)}
+                      isScrum={isScrum}
+                      onUpdate={handleUpdateColumn}
+                      onAddAfter={handleAddColumnAfter}
+                      onRemove={handleRemoveColumn}
                     />
                   ))}
                 </tr>

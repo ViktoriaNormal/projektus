@@ -79,7 +79,6 @@ interface TaskField {
   type: "text" | "number" | "datetime" | "select" | "multiselect" | "checkbox" | "user";
   isSystem: boolean;
   isRequired: boolean;
-  order: number;
   options?: string[];
 }
 
@@ -799,21 +798,22 @@ function TemplateEditor({
 
     // Phase ordering
     let phase: "early" | "middle" | "final" = "early";
+    let lastPhaseCol: TemplateBoardColumn | null = null;
 
     for (const col of columns) {
       const st = col.systemType;
 
       if (PHASE_EARLY.has(st)) {
         if (phase === "middle" || phase === "final") {
-          return `Колонка «${col.name || "без названия"}» (тип «${COLUMN_SYSTEM_TYPE_LABELS[st]}») не может стоять после колонок с типом «${phase === "middle" ? "В работе" : "Выполнено"}».`;
+          return `Колонка «${col.name || "без названия"}» (тип «${COLUMN_SYSTEM_TYPE_LABELS[st]}») не может стоять после колонки «${lastPhaseCol?.name || "без названия"}» (тип «${COLUMN_SYSTEM_TYPE_LABELS[lastPhaseCol?.systemType || ""]}»).`;
         }
       } else if (PHASE_MIDDLE.has(st)) {
         if (phase === "final") {
-          return `Колонка «${col.name || "без названия"}» (тип «${COLUMN_SYSTEM_TYPE_LABELS[st]}») не может стоять после колонок с типом «Выполнено».`;
+          return `Колонка «${col.name || "без названия"}» (тип «${COLUMN_SYSTEM_TYPE_LABELS[st]}») не может стоять после колонки «${lastPhaseCol?.name || "без названия"}» (тип «${COLUMN_SYSTEM_TYPE_LABELS[lastPhaseCol?.systemType || ""]}»).`;
         }
-        phase = "middle";
+        phase = "middle"; lastPhaseCol = col;
       } else if (PHASE_FINAL.has(st)) {
-        phase = "final";
+        phase = "final"; lastPhaseCol = col;
       }
     }
 
@@ -831,7 +831,7 @@ function TemplateEditor({
     const order = afterIndex + 2;
     try {
       await createTemplateBoardColumn(templateId, board.id, {
-        name: `Колонка ${board.columns.length + 1}`,
+        name: "Новая колонка",
         systemType,
         wipLimit: null,
         order,
@@ -1513,7 +1513,7 @@ function BoardColumnsTab({
                       ))}
                     </select>
                   </div>
-                  {!isScrum && (
+                  {!isScrum && column.systemType !== "completed" && (
                     <WipLimitInput
                       value={column.wipLimit}
                       onSave={(val) => onUpdate(column.id, "wipLimit", val)}
@@ -1584,6 +1584,12 @@ function BoardColumnsTab({
             </div>
           ))}
         </div>
+        {!isScrum && (
+          <p className="text-xs text-slate-500 mt-2">
+            WIP-лимиты (лимиты незавершённой работы) можно задать только для колонок с типами «{columnSystemTypeLabels["initial"]}» и «{columnSystemTypeLabels["in_progress"]}».
+            Для колонок с типом «{columnSystemTypeLabels["completed"]}» WIP-лимит не устанавливается, так как задачи в них уже завершены.
+          </p>
+        )}
       </div>
     </div>
   );
@@ -1807,7 +1813,6 @@ function BoardTaskTemplateTab({
         name: newName.trim(),
         fieldType: newType,
         isRequired: newRequired,
-        order: customFields.length + 1,
         options: ["select", "multiselect"].includes(newType) ? newOptions : undefined,
       });
       setNewName("");
@@ -2433,7 +2438,6 @@ function ProjectParamsSection({ templateId, isScrum, refs, params, onReload }: {
         name: newName.trim(),
         fieldType: newType,
         isRequired: newRequired,
-        order: customParams.length + 1,
         options: ["select", "multiselect"].includes(newType) ? newOptions : null,
       });
       setNewName("");

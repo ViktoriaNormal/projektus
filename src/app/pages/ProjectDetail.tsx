@@ -21,6 +21,7 @@ import {
   Search,
   Info,
   AlertCircle,
+  Layers,
 } from "lucide-react";
 import { UserAvatar } from "../components/UserAvatar";
 import Board from "./Board";
@@ -33,7 +34,7 @@ import type { ParamValidationError } from "../components/project/ProjectParamsSe
 import ProjectRolesSection from "../components/project/ProjectRolesSection";
 import { getProject, updateProject, deleteProject as deleteProjectApi, type ProjectResponse } from "../api/projects";
 import { getProjectMembers, addProjectMember, updateMemberRoles, removeMember, type ProjectMemberResponse } from "../api/projects";
-import { getProjectBoards, createBoard, updateBoard, deleteBoard as deleteBoardApi, getBoardColumns, getBoardSwimlanes, getProjectReferences, type BoardResponse, type ColumnResponse, type SwimlaneResponse, type ProjectReferences } from "../api/boards";
+import { getProjectBoards, createBoard, updateBoard, deleteBoard as deleteBoardApi, getBoardColumns, getBoardSwimlanes, getBoardFields, getBoard, getProjectReferences, createSwimlane, deleteSwimlane, type BoardResponse, type BoardField, type ColumnResponse, type SwimlaneResponse, type ProjectReferences } from "../api/boards";
 import { getProjectRoles, type ProjectRole } from "../api/project-roles";
 import { getProjectParams, type ProjectParam } from "../api/project-params";
 import { searchUsers, getUser, type UserProfileResponse } from "../api/users";
@@ -64,6 +65,7 @@ interface BoardTab {
   name: string;
   description: string | null;
   order: number;
+  isDefault: boolean;
 }
 
 interface DraggableBoardTabProps {
@@ -116,7 +118,12 @@ const DraggableBoardTab = ({
             : "bg-slate-50 text-slate-700 border-transparent hover:bg-slate-100"
         }`}
       >
-        <span>{board.name}</span>
+        <span className="flex items-center gap-1.5">
+          {board.name}
+          {board.isDefault && (
+            <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded font-normal">по умолчанию</span>
+          )}
+        </span>
         {board.description && (
           <div className="text-xs opacity-75 mt-1 font-normal">{board.description}</div>
         )}
@@ -129,13 +136,15 @@ const DraggableBoardTab = ({
         >
           <Settings size={14} className="text-slate-600" />
         </button>
-        <button
-          onClick={() => onDelete(board.id)}
-          className="p-1.5 hover:bg-red-100 rounded transition-all"
-          title="Удалить доску"
-        >
-          <Trash2 size={14} className="text-red-600" />
-        </button>
+        {!board.isDefault && (
+          <button
+            onClick={() => onDelete(board.id)}
+            className="p-1.5 hover:bg-red-100 rounded transition-all"
+            title="Удалить доску"
+          >
+            <Trash2 size={14} className="text-red-600" />
+          </button>
+        )}
       </div>
     </div>
   );
@@ -155,6 +164,9 @@ export default function ProjectDetail() {
   const [memberUsers, setMemberUsers] = useState<Map<string, UserProfileResponse>>(new Map());
   const [boardColumns, setBoardColumns] = useState<ColumnResponse[]>([]);
   const [boardSwimlanes, setBoardSwimlanes] = useState<SwimlaneResponse[]>([]);
+  const [boardFields, setBoardFields] = useState<BoardField[]>([]);
+  const [swimlaneGroupBy, setSwimlaneGroupBy] = useState<string>("");
+  const [currentPriorityType, setCurrentPriorityType] = useState<string>("");
   const [refs, setRefs] = useState<ProjectReferences | null>(null);
   const [projectRoles, setProjectRoles] = useState<ProjectRole[]>([]);
   const [projectParams, setProjectParams] = useState<ProjectParam[]>([]);
@@ -166,6 +178,7 @@ export default function ProjectDetail() {
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [showEditMemberModal, setShowEditMemberModal] = useState(false);
   const [showBoardSettingsModal, setShowBoardSettingsModal] = useState(false);
+  const [boardRefreshKey, setBoardRefreshKey] = useState(0);
   const [selectedBoard, setSelectedBoard] = useState<BoardTab | null>(null);
   const [selectedMember, setSelectedMember] = useState<ProjectMemberResponse | null>(null);
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
@@ -235,6 +248,7 @@ export default function ProjectDetail() {
         name: x.name,
         description: x.description,
         order: x.order,
+        isDefault: x.isDefault ?? false,
       })));
       if (sorted.length > 0 && !activeBoardId) {
         setActiveBoardId(sorted[0].id);
@@ -264,17 +278,21 @@ export default function ProjectDetail() {
 
   const loadBoardDetails = useCallback(async () => {
     if (!activeBoardId) {
-      setBoardColumns([]);
-      setBoardSwimlanes([]);
+      setBoardColumns([]); setBoardSwimlanes([]); setBoardFields([]); setSwimlaneGroupBy("");
       return;
     }
     try {
-      const [cols, swims] = await Promise.all([
+      const [cols, swims, fields, boardMeta] = await Promise.all([
         getBoardColumns(activeBoardId),
         getBoardSwimlanes(activeBoardId),
+        getBoardFields(activeBoardId),
+        getBoard(activeBoardId),
       ]);
       setBoardColumns(cols.sort((a, b) => a.order - b.order));
       setBoardSwimlanes(swims.sort((a, b) => a.order - b.order));
+      setBoardFields(fields);
+      setSwimlaneGroupBy(boardMeta.swimlaneGroupBy || "");
+      setCurrentPriorityType(boardMeta.priorityType || "");
     } catch { /* silently */ }
   }, [activeBoardId]);
 
@@ -297,7 +315,7 @@ export default function ProjectDetail() {
     if (!projectId) return;
     try {
       const p = await getProjectParams(projectId);
-      setProjectParams(p.sort((a, b) => a.order - b.order));
+      setProjectParams(p);
     } catch { /* silently */ }
   }, [projectId]);
 
@@ -422,6 +440,8 @@ export default function ProjectDetail() {
   };
 
   const handleDeleteBoard = async (boardId: string) => {
+    const board = boardTabs.find(b => b.id === boardId);
+    if (board?.isDefault) return;
     if (!confirm("Вы уверены, что хотите удалить эту доску?")) return;
     try {
       await deleteBoardApi(boardId);
@@ -433,6 +453,39 @@ export default function ProjectDetail() {
     } catch (e: any) {
       toast.error(e.message || "Ошибка удаления доски");
     }
+  };
+
+  const handleSetSwimlaneGroupBy = async (val: string) => {
+    if (!activeBoardId) return;
+    try {
+      // Delete existing swimlanes
+      for (const sw of boardSwimlanes) {
+        try { await deleteSwimlane(activeBoardId, sw.id); } catch { /**/ }
+      }
+      await updateBoard(activeBoardId, { swimlaneGroupBy: val || null });
+      setSwimlaneGroupBy(val);
+
+      // Auto-create swimlanes if group-by is set
+      if (val) {
+        const freshFields = await getBoardFields(activeBoardId);
+        const field = freshFields.find(f => f.id === val);
+        let expectedValues: string[] | null = null;
+        if (field) {
+          if (field.fieldType === "checkbox") {
+            expectedValues = [`${field.name}: да`, `${field.name}: нет`];
+          } else if (field.fieldType === "select" || field.fieldType === "priority") {
+            expectedValues = (field.options && field.options.length > 0) ? field.options : null;
+          }
+        }
+        if (expectedValues && expectedValues.length > 0) {
+          for (let i = 0; i < expectedValues.length; i++) {
+            try { await createSwimlane(activeBoardId, { name: expectedValues[i], order: i + 1 }); } catch { /**/ }
+          }
+        }
+      }
+      await loadBoardDetails();
+      setBoardRefreshKey(k => k + 1);
+    } catch (e: any) { toast.error(e.message || "Ошибка"); }
   };
 
   const moveBoard = (dragIndex: number, hoverIndex: number) => {
@@ -598,7 +651,7 @@ export default function ProjectDetail() {
       )}
 
       {/* Tabs */}
-      <div className="bg-white rounded-xl shadow-md border border-slate-100">
+      <div className="bg-white rounded-xl shadow-md border border-slate-100 min-w-0">
         {/* Desktop tabs */}
         <div className="border-b border-slate-200 p-4 hidden md:block">
           <div className="flex flex-wrap gap-2">
@@ -670,7 +723,7 @@ export default function ProjectDetail() {
           </div>
         </div>
 
-        <div className="p-6">
+        <div className="p-6 min-w-0">
           {/* Overview Tab */}
           {activeTab === "overview" && (
             <div className="space-y-6">
@@ -723,7 +776,7 @@ export default function ProjectDetail() {
 
           {/* Boards Tab */}
           {activeTab === "boards" && (
-            <div className="space-y-6 overflow-hidden">
+            <div className="space-y-6">
               <DndProvider backend={HTML5Backend}>
                 <div className="border-b border-slate-200 bg-slate-50 -mx-6 px-6">
                   <div className="flex items-center gap-2 overflow-x-auto pb-0">
@@ -756,24 +809,49 @@ export default function ProjectDetail() {
               </DndProvider>
 
               {/* Board Controls */}
-              {activeBoard && (
-                <div className="flex items-center justify-between bg-slate-50 p-4 rounded-lg">
-                  <div className="flex items-center gap-4 text-sm text-slate-600">
-                    <div>
-                      <span className="font-semibold">Колонок:</span> {boardColumns.length}
-                    </div>
-                    {boardSwimlanes.length > 0 && (
-                      <div>
-                        <span className="font-semibold">Дорожек:</span> {boardSwimlanes.length}
+              {activeBoard && (() => {
+                const priorityTypeLabel = (refs?.priorityTypeOptions || []).find(o => o.key === currentPriorityType)?.name;
+                const priorityFieldId = boardFields.find(f => f.isSystem && (f.fieldType === "priority" || f.description?.toLowerCase().includes("приоритизаци") || f.name.toLowerCase().includes("приоритизаци")))?.id;
+                function getFieldDisplayName(f: BoardField): string {
+                  if (f.id === priorityFieldId && priorityTypeLabel) return priorityTypeLabel;
+                  return f.name;
+                }
+                const selectedField = boardFields.find(f => f.id === swimlaneGroupBy);
+                return (
+                  <div className="bg-slate-50 p-4 rounded-lg space-y-3">
+                    <div className="flex items-center gap-4 text-sm text-slate-600">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-semibold">Колонок:</span> {boardColumns.length}
+                        <div className="relative group">
+                          <Info size={14} className="text-slate-400 cursor-help" />
+                          <div className="absolute left-0 bottom-full mb-2 w-80 p-3 bg-slate-800 text-white text-xs rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-30">
+                            <p className="font-medium mb-1">Правила колонок:</p>
+                            <p>Минимум по одной колонке типов «Начальный», «В работе» и «Завершено».</p>
+                            <p className="mt-1">Порядок: Начальный → В работе → Завершено.</p>
+                            <div className="absolute left-3 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-slate-800" />
+                          </div>
+                        </div>
                       </div>
-                    )}
+                      <div><span className="font-semibold">Дорожек:</span> {boardSwimlanes.length}</div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Группировать задачи по:</label>
+                      <select value={swimlaneGroupBy} onChange={e => handleSetSwimlaneGroupBy(e.target.value)}
+                        className="w-full max-w-md px-4 py-3 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white">
+                        <option value="">Без дорожек</option>
+                        {boardFields.map(f => (
+                          <option key={f.id} value={f.id}>{getFieldDisplayName(f)}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Board Content */}
               {activeBoard ? (
-                <Board boardId={activeBoardId} projectId={project.id} />
+                <Board key={`${activeBoardId}-${boardRefreshKey}`} boardId={activeBoardId} projectId={project.id} projectType={projectType}
+                  onBoardChanged={() => { loadBoards(); loadBoardDetails(); }} />
               ) : (
                 <div className="text-center py-12 bg-slate-50 rounded-xl border-2 border-dashed border-slate-300">
                   <Layout size={48} className="mx-auto text-slate-400 mb-4" />
@@ -1165,6 +1243,7 @@ export default function ProjectDetail() {
             setSelectedBoard(null);
             loadBoards();
             loadBoardDetails();
+            setBoardRefreshKey(k => k + 1);
           }}
           boardId={selectedBoard.id}
           boardName={selectedBoard.name}
@@ -1174,6 +1253,7 @@ export default function ProjectDetail() {
           onBoardUpdated={() => {
             loadBoards();
             loadBoardDetails();
+            setBoardRefreshKey(k => k + 1);
           }}
         />
       )}

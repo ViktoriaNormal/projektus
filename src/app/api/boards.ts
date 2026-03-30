@@ -21,7 +21,6 @@ export interface BoardField {
   fieldType: string;
   isSystem: boolean;
   isRequired: boolean;
-  order: number;
   options: string[] | null;
 }
 
@@ -236,7 +235,6 @@ export function createBoardField(boardId: string, data: {
   description?: string;
   fieldType: string;
   isRequired?: boolean;
-  order?: number;
   options?: string[];
 }) {
   return apiRequest<BoardField>(`/boards/${boardId}/fields`, {
@@ -260,13 +258,6 @@ export function updateBoardField(boardId: string, fieldId: string, data: Partial
 export function deleteBoardField(boardId: string, fieldId: string) {
   return apiRequest<null>(`/boards/${boardId}/fields/${fieldId}`, {
     method: 'DELETE',
-  });
-}
-
-export function reorderBoardFields(boardId: string, orders: { fieldId: string; order: number }[]) {
-  return apiRequest<null>(`/boards/${boardId}/fields/reorder`, {
-    method: 'PATCH',
-    body: JSON.stringify({ orders }),
   });
 }
 

@@ -183,7 +183,6 @@ export interface TemplateBoardField {
   fieldType: string;
   isSystem: boolean;
   isRequired: boolean;
-  order: number;
   options: string[] | null;
 }
 
@@ -208,7 +207,6 @@ export interface TemplateProjectParam {
   fieldType: string;
   isSystem: boolean;
   isRequired: boolean;
-  order: number;
   options: string[] | null;
 }
 
@@ -375,7 +373,7 @@ export function reorderTemplateBoardSwimlanes(templateId: string, boardId: strin
 // ── Template Board Fields ────────────────────────────────────
 
 export function createTemplateBoardField(templateId: string, boardId: string, data: {
-  name: string; description?: string; fieldType: string; isRequired?: boolean; order?: number; options?: string[];
+  name: string; description?: string; fieldType: string; isRequired?: boolean; options?: string[];
 }) {
   return apiRequest<TemplateBoardField>(`/admin/project-templates/${templateId}/boards/${boardId}/fields`, {
     method: 'POST',
@@ -398,17 +396,10 @@ export function deleteTemplateBoardField(templateId: string, boardId: string, fi
   });
 }
 
-export function reorderTemplateBoardFields(templateId: string, boardId: string, orders: { fieldId: string; order: number }[]) {
-  return apiRequest<null>(`/admin/project-templates/${templateId}/boards/${boardId}/fields/reorder`, {
-    method: 'PATCH',
-    body: JSON.stringify({ orders }),
-  });
-}
-
 // ── Template Project Params ──────────────────────────────────
 
 export function createTemplateProjectParam(templateId: string, data: {
-  name: string; fieldType: string; isRequired?: boolean; order?: number; options?: string[] | null;
+  name: string; fieldType: string; isRequired?: boolean; options?: string[] | null;
 }) {
   return apiRequest<TemplateProjectParam>(`/admin/project-templates/${templateId}/project-params`, {
     method: 'POST',
@@ -428,13 +419,6 @@ export function updateTemplateProjectParam(templateId: string, paramId: string, 
 export function deleteTemplateProjectParam(templateId: string, paramId: string) {
   return apiRequest<null>(`/admin/project-templates/${templateId}/project-params/${paramId}`, {
     method: 'DELETE',
-  });
-}
-
-export function reorderTemplateProjectParams(templateId: string, orders: { paramId: string; order: number }[]) {
-  return apiRequest<null>(`/admin/project-templates/${templateId}/project-params/reorder`, {
-    method: 'PATCH',
-    body: JSON.stringify({ orders }),
   });
 }
 

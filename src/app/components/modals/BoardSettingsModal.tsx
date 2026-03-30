@@ -290,7 +290,7 @@ export default function BoardSettingsModal({
 
   const loadBoardFields = useCallback(async () => {
     if (!boardId) return;
-    try { const f = await getBoardFields(boardId); setBoardFields(f.sort((a, b) => a.order - b.order)); } catch { /**/ }
+    try { const f = await getBoardFields(boardId); setBoardFields(f); } catch { /**/ }
   }, [boardId]);
 
   const loadNotes = useCallback(async () => {
@@ -383,17 +383,18 @@ export default function BoardSettingsModal({
     if (countCompleted === 0) return `Должна быть минимум одна колонка с типом «${COLUMN_TYPE_LABELS["completed"]}».`;
     // Phase ordering
     let phase: "early" | "middle" | "final" = "early";
+    let lastPhaseCol: ColumnResponse | null = null;
     for (const col of cols) {
       const st = col.systemType || "";
       if (st === "initial") {
         if (phase === "middle" || phase === "final")
-          return `Колонка «${col.name}» (тип «${COLUMN_TYPE_LABELS["initial"]}») не может стоять после колонок с типом «${phase === "middle" ? COLUMN_TYPE_LABELS["in_progress"] : COLUMN_TYPE_LABELS["completed"]}».`;
+          return `Колонка «${col.name}» (тип «${COLUMN_TYPE_LABELS[st]}») не может стоять после колонки «${lastPhaseCol?.name}» (тип «${COLUMN_TYPE_LABELS[lastPhaseCol?.systemType || ""]}»).`;
       } else if (st === "in_progress") {
         if (phase === "final")
-          return `Колонка «${col.name}» (тип «${COLUMN_TYPE_LABELS["in_progress"]}») не может стоять после колонок с типом «${COLUMN_TYPE_LABELS["completed"]}».`;
-        phase = "middle";
+          return `Колонка «${col.name}» (тип «${COLUMN_TYPE_LABELS[st]}») не может стоять после колонки «${lastPhaseCol?.name}» (тип «${COLUMN_TYPE_LABELS[lastPhaseCol?.systemType || ""]}»).`;
+        phase = "middle"; lastPhaseCol = col;
       } else if (st === "completed") {
-        phase = "final";
+        phase = "final"; lastPhaseCol = col;
       }
     }
     return null;
@@ -790,7 +791,7 @@ function BoardColumnsTab({
                       ))}
                     </select>
                   </div>
-                  {!isScrum && (
+                  {!isScrum && col.systemType !== "completed" && (
                     <WipLimitInput value={col.wipLimit} onSave={(val) => onUpdate(col.id, "wipLimit", val)} />
                   )}
                   <div className="flex items-end gap-1">
@@ -833,6 +834,12 @@ function BoardColumnsTab({
             <div key={t.key}><span className="font-medium">{t.name}</span> — {t.description}</div>
           ))}
         </div>
+        {!isScrum && (
+          <p className="text-xs text-slate-500 mt-2">
+            WIP-лимиты (лимиты незавершённой работы) можно задать только для колонок с типами «{columnSystemTypeLabels["initial"]}» и «{columnSystemTypeLabels["in_progress"]}».
+            Для колонок с типом «{columnSystemTypeLabels["completed"]}» WIP-лимит не устанавливается, так как задачи в них уже завершены.
+          </p>
+        )}
       </div>
     </div>
   );
@@ -1091,7 +1098,6 @@ function BoardTaskTemplateTab({
     try {
       await createBoardField(boardId, {
         name: newName.trim(), fieldType: newType, isRequired: newRequired,
-        order: customFields.length + 1,
         options: ["select", "multiselect"].includes(newType) ? newOptions : undefined,
       });
       setNewName(""); setNewType("text"); setNewRequired(false); setNewOptions([]); setShowAddForm(false);

@@ -528,7 +528,6 @@ export default function ProjectParamsSection({
     try {
       await createProjectParam(projectId, {
         name: newName.trim(), fieldType: newType, isRequired: newRequired,
-        order: customParams.length + 1,
         options: ["select", "multiselect"].includes(newType) ? newOptions : null,
       });
       setNewName(""); setNewType("text"); setNewRequired(false); setNewOptions([]);
