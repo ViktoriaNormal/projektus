@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { Settings, Lock, Plus, Trash2, X, Info, AlertCircle, Copy, Check, Edit, Search } from "lucide-react";
+import { useBodyScrollLock } from "../../hooks/useBodyScrollLock";
+import { Settings, Lock, Plus, Trash2, X, Info, AlertCircle, Copy, Check, Edit, Search, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import {
   createProjectParam,
@@ -280,38 +281,62 @@ function UserPicker({ value, onSave, multiple }: {
     onSave(updated.length > 0 ? updated.map(u => u.id).join(",") : null);
   }
 
-  // Single user: searchable select (one input field)
+  // Single user: searchable dropdown select
   if (!multiple) {
     const selectedUser = selectedUsers[0] ?? null;
-    const isOpen = !selectedUser && showDropdown && results.length > 0;
+    const [open, setOpen] = useState(false);
+
+    function toggleOpen() { setOpen(o => !o); setQuery(""); setResults([]); }
+
     return (
-      <div className="relative">
-        <input
-          type="text"
-          value={selectedUser ? selectedUser.name : query}
-          readOnly={!!selectedUser}
-          onChange={e => { if (!selectedUser) handleSearch(e.target.value); }}
-          onFocus={() => { if (!selectedUser && results.length > 0) setShowDropdown(true); }}
-          onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
-          placeholder="Поиск пользователя..."
-          className={`w-full px-3 py-2 pr-8 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 ${selectedUser ? "bg-slate-50" : ""}`}
-        />
-        {selectedUser && (
-          <button onClick={() => removeUser(selectedUser.id)}
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-red-600 transition-colors" title="Очистить">
-            <X size={14} />
-          </button>
-        )}
-        {isOpen && (
-          <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
-            {results.map(user => (
-              <button key={user.id} onClick={() => selectUser(user)}
-                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-left text-sm"
-              >
-                <span className="font-medium">{user.fullName}</span>
-                <span className="text-slate-400 text-xs">{user.email}</span>
+      <div className="relative w-96">
+        {/* Trigger — looks like a select */}
+        <button type="button" onClick={toggleOpen}
+          className="w-full flex items-center justify-between px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-purple-500 text-left">
+          <span className={selectedUser ? "text-slate-800" : "text-slate-400"}>
+            {selectedUser ? selectedUser.name : "Выберите пользователя..."}
+          </span>
+          <ChevronDown size={14} className={`text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
+        </button>
+
+        {/* Dropdown */}
+        {open && (
+          <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg"
+            onMouseDown={e => e.preventDefault()}>
+            {/* Search input inside dropdown */}
+            <div className="p-2 border-b border-slate-100">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input type="text" autoFocus value={query} onChange={e => handleSearch(e.target.value)}
+                  placeholder="Поиск..."
+                  className="w-full pl-8 pr-3 py-1.5 text-sm border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-purple-500"
+                  onBlur={() => setTimeout(() => setOpen(false), 200)}
+                />
+              </div>
+            </div>
+
+            {/* "Clear" option */}
+            {selectedUser && (
+              <button onClick={() => { removeUser(selectedUser.id); setOpen(false); }}
+                className="w-full px-3 py-2 text-left text-sm text-slate-400 hover:bg-slate-50 border-b border-slate-100">
+                Не выбрано
               </button>
-            ))}
+            )}
+
+            {/* Results */}
+            <div className="max-h-40 overflow-y-auto">
+              {results.length > 0 ? results.map(user => (
+                <button key={user.id} onClick={() => { selectUser(user); setOpen(false); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-left text-sm">
+                  <span className="font-medium">{user.fullName}</span>
+                  <span className="text-slate-400 text-xs">{user.email}</span>
+                </button>
+              )) : query.length >= 2 ? (
+                <p className="px-3 py-2 text-xs text-slate-400">Ничего не найдено</p>
+              ) : (
+                <p className="px-3 py-2 text-xs text-slate-400">Введите минимум 2 символа</p>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -402,6 +427,7 @@ export default function ProjectParamsSection({
 
   // Edit modal for custom params
   const [editingParamId, setEditingParamId] = useState<string | null>(null);
+  useBodyScrollLock(!!editingParamId);
   const editingParam = editingParamId ? customParams.find(p => p.id === editingParamId) || null : null;
   const [editParamOptionInput, setEditParamOptionInput] = useState("");
 

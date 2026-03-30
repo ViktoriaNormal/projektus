@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import {
   Plus, Trash2, Shield, Loader2, AlertCircle, CheckCircle2,
   Users, ChevronUp, ChevronDown, Eye, EyeOff,
@@ -82,6 +83,7 @@ export default function AdminRoles() {
   // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState<SystemRole | null>(null);
   const [deleting, setDeleting] = useState(false);
+  useBodyScrollLock(deleteTarget !== null);
 
   const systemPerms = permCatalog.filter((p) => p.scope === 'system');
 

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
 import { Link, useParams, useNavigate, useBlocker } from "react-router";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
@@ -192,6 +193,7 @@ export default function ProjectDetail() {
   // Block route navigation when params tab has errors
   const blocker = useBlocker(hasParamErrors);
   const [showBlockerModal, setShowBlockerModal] = useState(false);
+  useBodyScrollLock(showAddMemberModal || showEditMemberModal || showBoardSettingsModal || showBlockerModal);
 
   useEffect(() => {
     if (blocker.state === "blocked") {

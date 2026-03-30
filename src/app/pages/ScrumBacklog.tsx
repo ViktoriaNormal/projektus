@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
 import { Plus, Play, Pause, Target, Calendar, Clock, Edit, Trash2, ArrowUp, ArrowDown, X } from "lucide-react";
 import { UserAvatar } from "../components/UserAvatar";
 import { Link } from "react-router";
@@ -43,6 +44,7 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
 
   // UI state
   const [showSprintModal, setShowSprintModal] = useState(false);
+  useBodyScrollLock(showSprintModal);
   const [selectedSprint, setSelectedSprint] = useState<SprintResponse | null>(null);
   const [draggedTask, setDraggedTask] = useState<TaskResponse | null>(null);
   const [customDuration, setCustomDuration] = useState(false);

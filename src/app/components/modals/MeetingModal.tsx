@@ -1,5 +1,6 @@
 import { X, Calendar as CalendarIcon, Clock, MapPin, Users, Save, Search, Plus, UserPlus, Loader2, Crown } from "lucide-react";
 import { useState, useEffect } from "react";
+import { useBodyScrollLock } from "../../hooks/useBodyScrollLock";
 import { toast } from "sonner";
 import { projects } from "../../data/mockData";
 import { UserAvatar } from "../UserAvatar";
@@ -45,6 +46,7 @@ function plusOneHour(dateTimeLocal: string): string {
 }
 
 export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCancel, mode, defaultStartDate }: MeetingModalProps) {
+  useBodyScrollLock(isOpen);
   const { user: authUser } = useAuth();
   const organizerId = meeting?.organizerId || authUser?.id || null;
 

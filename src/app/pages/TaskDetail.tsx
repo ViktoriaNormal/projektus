@@ -21,6 +21,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { useState } from "react";
+import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
 import { useParams, Link, useNavigate } from "react-router";
 import {
   tasks,
@@ -49,7 +50,8 @@ export default function TaskDetail() {
   const [showAttachmentModal, setShowAttachmentModal] = useState(false);
   const [showLinkModal, setShowLinkModal] = useState(false);
   const [showTagModal, setShowTagModal] = useState(false);
-  
+  useBodyScrollLock(showDeleteModal || showChecklistModal || showAttachmentModal || showLinkModal || showTagModal);
+
   // Form states
   const [checklistTitle, setChecklistTitle] = useState("");
   const [selectedTask, setSelectedTask] = useState<number | null>(null);

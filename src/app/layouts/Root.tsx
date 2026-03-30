@@ -19,6 +19,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { useState } from "react";
+import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
 import { notifications } from "../data/mockData";
 import { UserAvatar } from "../components/UserAvatar";
 import { useAuth } from "../contexts/AuthContext";
@@ -28,6 +29,7 @@ export default function Root() {
   const { user, isAuthenticated, isLoading, isAdmin, hasPermission, clearAuth } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  useBodyScrollLock(sidebarOpen);
 
   if (isLoading) {
     return (

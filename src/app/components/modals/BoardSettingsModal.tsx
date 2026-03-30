@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useBodyScrollLock } from "../../hooks/useBodyScrollLock";
 import {
   X,
   Plus,
@@ -247,11 +248,12 @@ interface BoardSettingsModalProps {
 export default function BoardSettingsModal({
   isOpen, onClose, boardId, boardName, boardDescription, projectType, refs, onBoardUpdated,
 }: BoardSettingsModalProps) {
+  useBodyScrollLock(isOpen);
   const [activeTab, setActiveTab] = useState<"params" | "columns" | "swimlanes" | "template">("params");
 
   // Columns
   const [columns, setColumns] = useState<ColumnResponse[]>([]);
-  const [columnError, setColumnError] = useState("");
+  const [columnError, setColumnError] = useState<{ colId: string; message: string } | null>(null);
 
   // Swimlanes
   const [swimlanes, setSwimlanes] = useState<SwimlaneResponse[]>([]);
@@ -369,20 +371,64 @@ export default function BoardSettingsModal({
     } catch { /**/ }
   }
 
+  // ── Column order validation (same rules as templates) ────────
+  function validateColumnOrder(cols: ColumnResponse[]): string | null {
+    if (cols.length === 0) return null;
+    // Minimum 1 column of each system type
+    const countInitial = cols.filter(c => c.systemType === "initial").length;
+    const countInProgress = cols.filter(c => c.systemType === "in_progress").length;
+    const countCompleted = cols.filter(c => c.systemType === "completed").length;
+    if (countInitial === 0) return `Должна быть минимум одна колонка с типом «${COLUMN_TYPE_LABELS["initial"]}».`;
+    if (countInProgress === 0) return `Должна быть минимум одна колонка с типом «${COLUMN_TYPE_LABELS["in_progress"]}».`;
+    if (countCompleted === 0) return `Должна быть минимум одна колонка с типом «${COLUMN_TYPE_LABELS["completed"]}».`;
+    // Phase ordering
+    let phase: "early" | "middle" | "final" = "early";
+    for (const col of cols) {
+      const st = col.systemType || "";
+      if (st === "initial") {
+        if (phase === "middle" || phase === "final")
+          return `Колонка «${col.name}» (тип «${COLUMN_TYPE_LABELS["initial"]}») не может стоять после колонок с типом «${phase === "middle" ? COLUMN_TYPE_LABELS["in_progress"] : COLUMN_TYPE_LABELS["completed"]}».`;
+      } else if (st === "in_progress") {
+        if (phase === "final")
+          return `Колонка «${col.name}» (тип «${COLUMN_TYPE_LABELS["in_progress"]}») не может стоять после колонок с типом «${COLUMN_TYPE_LABELS["completed"]}».`;
+        phase = "middle";
+      } else if (st === "completed") {
+        phase = "final";
+      }
+    }
+    return null;
+  }
+
   async function addColumnAfter(afterIndex: number) {
+    const systemType = (afterIndex >= 0 && columns[afterIndex])
+      ? columns[afterIndex].systemType || "initial"
+      : "initial";
     const order = afterIndex + 2;
     try {
-      await createColumn(boardId, { name: "Новая колонка", systemType: "in_progress", order });
+      await createColumn(boardId, { name: "Новая колонка", systemType, order });
+      setColumnError(null);
       await loadColumns();
-    } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    } catch (e: any) {
+      if (e.code === "INVALID_COLUMN_ORDER") setColumnError({ colId: columns[afterIndex]?.id || "", message: e.message });
+      else toast.error(e.message || "Ошибка");
+    }
   }
 
   async function updateCol(colId: string, field: string, value: any) {
+    if (field === "systemType") {
+      const testCols = columns.map(c => c.id === colId ? { ...c, systemType: value } : c);
+      const err = validateColumnOrder(testCols);
+      if (err) { setColumnError({ colId, message: err }); return; }
+      setColumnError(null);
+    }
     try { await updateColumn(boardId, colId, { [field]: value }); await loadColumns(); } catch (e: any) { toast.error(e.message || "Ошибка"); }
   }
 
   async function removeCol(colId: string) {
-    try { await deleteColumn(boardId, colId); await loadColumns(); } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    const remaining = columns.filter(c => c.id !== colId);
+    const err = validateColumnOrder(remaining);
+    if (err) { setColumnError({ colId, message: err }); return; }
+    try { await deleteColumn(boardId, colId); setColumnError(null); await loadColumns(); } catch (e: any) { toast.error(e.message || "Ошибка"); }
   }
 
   async function moveCol(colId: string, dir: "up" | "down") {
@@ -390,26 +436,87 @@ export default function BoardSettingsModal({
     if (idx < 0) return;
     const newIdx = dir === "up" ? idx - 1 : idx + 1;
     if (newIdx < 0 || newIdx >= columns.length) return;
+    if (isScrum && (idx === 0 || newIdx === 0)) return;
     const newCols = [...columns];
     [newCols[idx], newCols[newIdx]] = [newCols[newIdx], newCols[idx]];
+    const err = validateColumnOrder(newCols);
+    if (err) { setColumnError({ colId, message: err }); return; }
+    setColumnError(null);
     const orders = newCols.map((c, i) => ({ columnId: c.id, order: i + 1 }));
     setColumns(newCols.map((c, i) => ({ ...c, order: i + 1 })));
-    try { await reorderColumns(boardId, orders); } catch { /**/ }
+    try { await reorderColumns(boardId, orders); } catch (e: any) { toast.error(e.message || "Не удалось переместить колонку"); await loadColumns(); }
   }
 
   // ── Swimlane handlers ───────────────────────────────────────
 
   async function handleSetSwimlaneGroupBy(val: string) {
     try {
+      // Delete existing swimlanes when changing or clearing group-by
+      if (swimlanes.length > 0) {
+        for (const sw of swimlanes) {
+          try { await deleteSwimlane(boardId, sw.id); } catch { /**/ }
+        }
+      }
+
       await updateBoard(boardId, { swimlaneGroupBy: val || null });
       setCurrentSwimlaneGroupBy(val);
       onBoardUpdated();
+
+      // Reload fields + swimlanes to get fresh state
+      await loadBoardFields();
+      const freshSwimlanes = await getBoardSwimlanes(boardId);
+      const freshFields = await getBoardFields(boardId);
+
+      // Auto-create swimlanes if group-by is set and no swimlanes exist
+      if (val && freshSwimlanes.length === 0) {
+        const field = freshFields.find(f => f.id === val);
+        let expectedValues: string[] | null = null;
+        if (field) {
+          if (field.fieldType === "checkbox") {
+            expectedValues = [`${field.name}: да`, `${field.name}: нет`];
+          } else if (field.fieldType === "select" || field.fieldType === "priority") {
+            const priorityFieldId = freshFields.find(f => f.isSystem && (f.fieldType === "priority" || f.description?.toLowerCase().includes("приоритизаци")))?.id;
+            if (field.id === priorityFieldId) {
+              const defaults = (refs?.priorityTypeOptions || []).find(o => o.key === currentPriorityType)?.defaultValues || [];
+              expectedValues = (field.options && field.options.length > 0) ? field.options : defaults.length > 0 ? defaults : null;
+            } else {
+              expectedValues = (field.options && field.options.length > 0) ? field.options : null;
+            }
+          }
+        }
+        if (expectedValues && expectedValues.length > 0) {
+          for (let i = 0; i < expectedValues.length; i++) {
+            try { await createSwimlane(boardId, { name: expectedValues[i], order: i + 1 }); } catch { /**/ }
+          }
+        }
+      }
+
       await loadSwimlanes();
     } catch (e: any) { toast.error(e.message || "Ошибка"); }
   }
 
   async function updateSwim(swId: string, field: string, value: any) {
     try { await updateSwimlane(boardId, swId, { [field]: value }); await loadSwimlanes(); } catch (e: any) { toast.error(e.message || "Ошибка"); }
+  }
+
+  // Sync swimlanes with field options (add missing, remove extras)
+  async function syncSwimlanesWithOptions(expectedValues: string[]) {
+    if (!currentSwimlaneGroupBy) return;
+    const currentNames = new Set(swimlanes.map(s => s.name));
+    const expectedSet = new Set(expectedValues);
+    // Add missing swimlanes
+    for (const val of expectedValues) {
+      if (!currentNames.has(val)) {
+        try { await createSwimlane(boardId, { name: val, order: swimlanes.length + 1 }); } catch { /**/ }
+      }
+    }
+    // Remove extra swimlanes
+    for (const sw of swimlanes) {
+      if (!expectedSet.has(sw.name)) {
+        try { await deleteSwimlane(boardId, sw.id); } catch { /**/ }
+      }
+    }
+    await loadSwimlanes();
   }
 
   async function moveSwim(swId: string, dir: "up" | "down") {
@@ -476,7 +583,7 @@ export default function BoardSettingsModal({
               columns={columns}
               isScrum={isScrum}
               error={columnError}
-              onDismissError={() => setColumnError("")}
+              onDismissError={() => setColumnError(null)}
               onAddAfter={addColumnAfter}
               onUpdate={updateCol}
               onRemove={removeCol}
@@ -509,10 +616,12 @@ export default function BoardSettingsModal({
               boardFields={boardFields}
               currentPriorityType={currentPriorityType}
               currentEstimationUnit={currentEstimationUnit}
+              currentSwimlaneGroupBy={currentSwimlaneGroupBy}
               refs={refs}
-              onReload={async () => { await loadBoardFields(); await loadBoardMeta(); }}
+              onReload={async () => { await loadBoardFields(); await loadBoardMeta(); await loadSwimlanes(); }}
               onBoardUpdated={onBoardUpdated}
               onClearSwimlaneGroupBy={() => handleSetSwimlaneGroupBy("")}
+              onSyncSwimlanes={syncSwimlanesWithOptions}
               setCurrentPriorityType={setCurrentPriorityType}
               setCurrentEstimationUnit={setCurrentEstimationUnit}
             />
@@ -589,7 +698,7 @@ function BoardColumnsTab({
 }: {
   columns: ColumnResponse[];
   isScrum: boolean;
-  error: string;
+  error: { colId: string; message: string } | null;
   onDismissError: () => void;
   onAddAfter: (afterIndex: number) => void;
   onUpdate: (id: string, field: string, value: any) => void;
@@ -618,23 +727,17 @@ function BoardColumnsTab({
         <div className="flex items-start gap-3">
           <Info size={18} className="text-amber-600 shrink-0 mt-0.5" />
           <div className="text-sm text-amber-800">
-            <p className="font-medium mb-1">Правило порядка колонок:</p>
+            <p className="font-medium mb-1">Правила колонок:</p>
             <p>
-              Колонки с системным типом <strong>«{columnSystemTypeLabels["initial"]}»</strong> должны располагаться перед колонками с системным типом <strong>«{columnSystemTypeLabels["in_progress"]}»</strong>,
-              а те — перед колонками с системным типом <strong>«{columnSystemTypeLabels["completed"]}»</strong>.
-              Между колонками с системными типами «{columnSystemTypeLabels["initial"]}» и «{columnSystemTypeLabels["completed"]}» обязательно должна быть хотя бы одна колонка с системным типом «{columnSystemTypeLabels["in_progress"]}».
+              На доске обязательно должна быть минимум одна колонка каждого системного типа: <strong>«{columnSystemTypeLabels["initial"]}»</strong>, <strong>«{columnSystemTypeLabels["in_progress"]}»</strong> и <strong>«{columnSystemTypeLabels["completed"]}»</strong>.
+            </p>
+            <p className="mt-1">
+              Колонки с типом «{columnSystemTypeLabels["initial"]}» должны располагаться перед колонками с типом «{columnSystemTypeLabels["in_progress"]}»,
+              а те — перед колонками с типом «{columnSystemTypeLabels["completed"]}».
             </p>
           </div>
         </div>
       </div>
-
-      {error && (
-        <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-xl text-red-800 text-sm">
-          <AlertCircle size={18} className="shrink-0 mt-0.5" />
-          <span className="flex-1">{error}</span>
-          <button onClick={onDismissError} className="p-0.5 hover:bg-red-100 rounded"><X size={16} /></button>
-        </div>
-      )}
 
       <div>
         <p className="text-sm text-slate-600">
@@ -651,9 +754,10 @@ function BoardColumnsTab({
       <div className="space-y-1">
         {columns.map((col, index) => {
           const locked = !!col.isLocked;
+          const colErr = error?.colId === col.id ? error.message : null;
           return (
             <div key={col.id}>
-              <div className={`p-4 border rounded-lg ${locked ? "border-purple-200 bg-purple-50/50" : "border-slate-200 bg-slate-50"}`}>
+              <div className={`p-4 border rounded-lg ${colErr ? "border-red-400 ring-2 ring-red-100" : locked ? "border-purple-200 bg-purple-50/50" : "border-slate-200 bg-slate-50"}`}>
                 <div className={`grid grid-cols-1 gap-3 ${isScrum ? "md:grid-cols-5" : "md:grid-cols-6"}`}>
                   <div className="md:col-span-2">
                     <label className="block text-xs font-medium mb-1">
@@ -706,21 +810,19 @@ function BoardColumnsTab({
                   <label className="block text-xs font-medium mb-1 text-slate-500">Заметка</label>
                   <NoteTextarea value={getNote(col.id)} onSave={(val) => onSaveNote(col.id, val)} />
                 </div>
+                {colErr && (
+                  <div className="flex items-center gap-2 mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">
+                    <AlertCircle size={16} className="shrink-0" />
+                    <span className="flex-1">{colErr}</span>
+                    <button onClick={onDismissError} className="p-0.5 hover:bg-red-100 rounded shrink-0"><X size={14} /></button>
+                  </div>
+                )}
               </div>
               {addButton(index)}
             </div>
           );
         })}
 
-        {columns.length === 0 && (
-          <div className="text-center py-12 bg-slate-50 rounded-xl border-2 border-dashed border-slate-300">
-            <Columns size={48} className="mx-auto text-slate-400 mb-4" />
-            <p className="text-slate-600 mb-4">Нет колонок</p>
-            <button onClick={() => onAddAfter(-1)} className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
-              Добавить первую колонку
-            </button>
-          </div>
-        )}
       </div>
 
       {/* System types reference */}
@@ -756,6 +858,7 @@ function BoardSwimlanesTab({
   getNote: (swId: string) => string | null;
   onSaveNote: (swId: string, val: string | null) => void;
 }) {
+  const isScrum = projectType === "scrum";
   const priorityTypeLabel = (refs.priorityTypeOptions || []).find(o => o.key === currentPriorityType)?.name;
   const priorityFieldId = boardFields.find(f => f.isSystem && (f.description?.toLowerCase().includes("приоритизаци") || f.name.toLowerCase().includes("приоритизаци")))?.id;
 
@@ -835,7 +938,9 @@ function BoardSwimlanesTab({
                     className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-slate-100 text-slate-600"
                   />
                 </div>
-                <WipLimitInput value={sw.wipLimit} onSave={(val) => onUpdate(sw.id, "wipLimit", val)} />
+                {!isScrum && (
+                  <WipLimitInput value={sw.wipLimit} onSave={(val) => onUpdate(sw.id, "wipLimit", val)} />
+                )}
                 <div className="flex items-end gap-1">
                   <button onClick={() => onMove(sw.id, "up")} disabled={index === 0} className="p-2 text-slate-600 hover:bg-slate-200 rounded disabled:opacity-30 disabled:cursor-not-allowed"><ArrowUp size={16} /></button>
                   <button onClick={() => onMove(sw.id, "down")} disabled={index === swimlanes.length - 1} className="p-2 text-slate-600 hover:bg-slate-200 rounded disabled:opacity-30 disabled:cursor-not-allowed"><ArrowDown size={16} /></button>
@@ -859,18 +964,20 @@ function BoardSwimlanesTab({
 
 function BoardTaskTemplateTab({
   isScrum, boardId, boardFields, currentPriorityType, currentEstimationUnit,
-  refs, onReload, onBoardUpdated, onClearSwimlaneGroupBy,
-  setCurrentPriorityType, setCurrentEstimationUnit,
+  currentSwimlaneGroupBy, refs, onReload, onBoardUpdated, onClearSwimlaneGroupBy,
+  onSyncSwimlanes, setCurrentPriorityType, setCurrentEstimationUnit,
 }: {
   isScrum: boolean;
   boardId: string;
   boardFields: BoardField[];
   currentPriorityType: string;
   currentEstimationUnit: string;
+  currentSwimlaneGroupBy: string;
   refs: ProjectReferences;
   onReload: () => Promise<void>;
   onBoardUpdated: () => void;
   onClearSwimlaneGroupBy: () => void;
+  onSyncSwimlanes: (expectedValues: string[]) => Promise<void>;
   setCurrentPriorityType: (v: string) => void;
   setCurrentEstimationUnit: (v: string) => void;
 }) {
@@ -929,9 +1036,11 @@ function BoardTaskTemplateTab({
     const trimmed = valueInput.trim();
     const current = getCurrentPriorityValues();
     if (current.includes(trimmed)) { toast.info("Такое значение уже есть"); return; }
+    const newOpts = [...current, trimmed];
     try {
-      await updateBoardField(boardId, priorityField.id, { options: [...current, trimmed] });
-      setValueInput(""); toast.success("Значение добавлено"); await onReload();
+      await updateBoardField(boardId, priorityField.id, { options: newOpts });
+      setValueInput(""); await onReload();
+      if (currentSwimlaneGroupBy === priorityField.id) await onSyncSwimlanes(newOpts);
     } catch (e: any) { toast.error(e.message || "Не удалось добавить значение"); }
   }
 
@@ -942,7 +1051,8 @@ function BoardTaskTemplateTab({
     if (updated.length === 0) { toast.error("Нельзя удалить последнее значение"); return; }
     try {
       await updateBoardField(boardId, priorityField.id, { options: updated });
-      toast.success("Значение удалено"); await onReload();
+      await onReload();
+      if (currentSwimlaneGroupBy === priorityField.id) await onSyncSwimlanes(updated);
     } catch (e: any) { toast.error(e.message || "Не удалось удалить значение"); }
   }
 
@@ -955,8 +1065,13 @@ function BoardTaskTemplateTab({
     if (priorityField && defaults.length > 0) {
       try { await updateBoardField(boardId, priorityField.id, { options: defaults }); } catch { /**/ }
     }
-    onBoardUpdated();
-    await onReload();
+    // Reset swimlanes if they were grouped by the priority field
+    if (priorityField && currentSwimlaneGroupBy === priorityField.id) {
+      onClearSwimlaneGroupBy();
+    } else {
+      onBoardUpdated();
+      await onReload();
+    }
   }
 
   async function handleEstimationUnitChange(unit: string) {
@@ -985,7 +1100,15 @@ function BoardTaskTemplateTab({
   }
 
   async function removeCustomField(fieldId: string) {
-    try { await deleteBoardField(boardId, fieldId); await onReload(); } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    const needClearSwimlanes = currentSwimlaneGroupBy === fieldId;
+    try {
+      await deleteBoardField(boardId, fieldId);
+      if (needClearSwimlanes) {
+        onClearSwimlaneGroupBy();
+      } else {
+        await onReload();
+      }
+    } catch (e: any) { toast.error(e.message || "Ошибка"); }
   }
 
   async function handleUpdateCustomField(fieldId: string, updates: Partial<{ name: string; isRequired: boolean; options: string[] }>) {
@@ -996,7 +1119,11 @@ function BoardTaskTemplateTab({
         toast.error(`Параметр задачи с названием «${trimmed}» уже существует`); return;
       }
     }
-    try { await updateBoardField(boardId, fieldId, updates); await onReload(); } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    try {
+      await updateBoardField(boardId, fieldId, updates);
+      await onReload();
+      if (updates.options && currentSwimlaneGroupBy === fieldId) await onSyncSwimlanes(updates.options);
+    } catch (e: any) { toast.error(e.message || "Ошибка"); }
   }
 
   const LockedField = ({ name, description, isRequired }: { name: string; description?: string; isRequired?: boolean }) => (

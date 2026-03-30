@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
 import { Link } from "react-router";
 import { Plus, Search, Loader2, X, Save, Copy, Check } from "lucide-react";
 import { toast } from "sonner";
@@ -51,6 +52,7 @@ export default function Projects() {
   const [owners, setOwners] = useState<Record<string, UserProfileResponse>>({});
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  useBodyScrollLock(showCreateModal);
   const [createName, setCreateName] = useState("");
   const [createDescription, setCreateDescription] = useState("");
   const [createType, setCreateType] = useState<"scrum" | "kanban">("scrum");

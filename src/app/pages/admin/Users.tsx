@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import {
   Plus, Search, Edit, Trash2, UserCheck, UserX, Shield, X, Loader2,
   AlertCircle, CheckCircle2, Save, Eye, EyeOff, Info, ShieldCheck, Check,
@@ -57,6 +58,7 @@ export default function AdminUsers() {
   // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
   const [deleting, setDeleting] = useState(false);
+  useBodyScrollLock(modalOpen || deleteTarget !== null);
 
   useEffect(() => {
     loadData();
