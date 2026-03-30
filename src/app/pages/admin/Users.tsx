@@ -195,7 +195,7 @@ export default function AdminUsers() {
           username: form.username.trim(),
           email: form.email.trim(),
           fullName: form.fullName.trim(),
-          position: form.position.trim(),
+          position: form.position.trim() || null,
           isActive: form.isActive,
           roleIds: form.roleIds,
         });
@@ -205,7 +205,7 @@ export default function AdminUsers() {
           username: form.username.trim(),
           email: form.email.trim(),
           fullName: form.fullName.trim(),
-          position: form.position.trim(),
+          position: form.position.trim() || null,
           password: form.password,
           isActive: form.isActive,
           roleIds: form.roleIds,

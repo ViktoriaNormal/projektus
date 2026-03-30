@@ -23,12 +23,17 @@ export interface AdminPasswordPolicy extends PasswordPolicy {
 
 // ── System Roles ─────────────────────────────────────────────
 
+export interface RolePermission {
+  code: string;
+  access: "full" | "view" | "none";
+}
+
 export interface SystemRole {
   id: string;
   name: string;
   description: string;
   isAdmin: boolean;
-  permissions: string[];
+  permissions: RolePermission[];
 }
 
 export function getSystemRoles() {
@@ -39,14 +44,14 @@ export function getSystemRole(roleId: string) {
   return apiRequest<SystemRole>(`/admin/roles/${roleId}`);
 }
 
-export function createSystemRole(data: { name: string; description: string; permissions: string[] }) {
+export function createSystemRole(data: { name: string; description?: string; permissions?: RolePermission[] }) {
   return apiRequest<SystemRole>('/admin/roles', {
     method: 'POST',
     body: JSON.stringify(data),
   });
 }
 
-export function updateSystemRole(roleId: string, data: { name: string; description: string; permissions: string[] }) {
+export function updateSystemRole(roleId: string, data: { name?: string; description?: string; permissions?: RolePermission[] }) {
   return apiRequest<SystemRole>(`/admin/roles/${roleId}`, {
     method: 'PUT',
     body: JSON.stringify(data),
@@ -87,7 +92,7 @@ export interface UpdateUserPayload {
   username?: string;
   email?: string;
   fullName?: string;
-  position?: string;
+  position?: string | null;
   isActive?: boolean;
   roleIds?: string[];
 }
@@ -278,7 +283,7 @@ export function createTemplateBoard(templateId: string, data: {
 }
 
 export function updateTemplateBoard(templateId: string, boardId: string, data: Partial<{
-  name: string; description: string; isDefault: boolean; order: number;
+  name: string; description: string | null; isDefault: boolean; order: number;
   priorityType: string; estimationUnit: string; swimlaneGroupBy: string | null;
 }>) {
   return apiRequest<TemplateBoard>(`/admin/project-templates/${templateId}/boards/${boardId}`, {
@@ -312,7 +317,7 @@ export function createTemplateBoardColumn(templateId: string, boardId: string, d
 }
 
 export function updateTemplateBoardColumn(templateId: string, boardId: string, columnId: string, data: Partial<{
-  name: string; systemType: string; wipLimit: number | null;
+  name: string; systemType: string; wipLimit: number | null; note: string | null;
 }>) {
   return apiRequest<TemplateBoardColumn>(`/admin/project-templates/${templateId}/boards/${boardId}/columns/${columnId}`, {
     method: 'PATCH',
@@ -379,7 +384,7 @@ export function createTemplateBoardField(templateId: string, boardId: string, da
 }
 
 export function updateTemplateBoardField(templateId: string, boardId: string, fieldId: string, data: Partial<{
-  name: string; description: string; isRequired: boolean; options: string[];
+  name: string; description: string | null; isRequired: boolean; options: string[];
 }>) {
   return apiRequest<TemplateBoardField>(`/admin/project-templates/${templateId}/boards/${boardId}/fields/${fieldId}`, {
     method: 'PATCH',

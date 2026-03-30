@@ -10,11 +10,17 @@ export interface UserResponse {
 }
 
 
+export interface AuthRolePermission {
+  code: string;
+  access: "full" | "view" | "none";
+}
+
 export interface AuthRoleResponse {
   id: string;
   name: string;
   description: string;
-  permissions: string[];
+  isAdmin: boolean;
+  permissions: AuthRolePermission[];
 }
 
 export interface AuthResponse {

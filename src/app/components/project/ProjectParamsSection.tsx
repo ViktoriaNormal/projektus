@@ -1,28 +1,16 @@
-import { useState } from "react";
-import { Settings, Lock, Plus, Trash2, GripVertical, X, Info } from "lucide-react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { Settings, Lock, Plus, Trash2, X, Info, AlertCircle, Copy, Check, Edit, Search } from "lucide-react";
 import { toast } from "sonner";
 import {
   createProjectParam,
+  updateProjectParam,
   deleteProjectParam,
   type ProjectParam,
 } from "../../api/project-params";
+import { searchUsers, getUser, type UserProfileResponse } from "../../api/users";
 import type { ProjectReferences } from "../../api/boards";
 
-interface ProjectParamsSectionProps {
-  projectId: string;
-  projectType: string;
-  refs: ProjectReferences;
-  params: ProjectParam[];
-  onReload: () => Promise<void>;
-}
-
-function buildFieldTypeLabels(refs: ProjectReferences): Record<string, string> {
-  const map: Record<string, string> = {};
-  if (refs.fieldTypes) {
-    refs.fieldTypes.forEach((ft) => { map[ft.key] = ft.name; });
-  }
-  return map;
-}
+// ── Helpers ────────────────────────────────────────────────────
 
 const SYSTEM_FIELD_TYPE_LABELS: Record<string, string> = {
   text: "Текст", number: "Число", datetime: "Дата и время", select: "Выпадающий список",
@@ -30,12 +18,380 @@ const SYSTEM_FIELD_TYPE_LABELS: Record<string, string> = {
   user_list: "Список пользователей",
 };
 
+const STATUS_OPTIONS = [
+  { value: "active", label: "Активный" },
+  { value: "paused", label: "Приостановлен" },
+  { value: "archived", label: "Архивирован" },
+];
+
+function buildFieldTypeLabels(refs: ProjectReferences, opts?: { projectType?: string; scope?: string }): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const t of refs.fieldTypes || []) {
+    if (opts?.projectType && t.availableFor && !t.availableFor.includes(opts.projectType)) continue;
+    if (opts?.scope && t.allowedScopes && !t.allowedScopes.includes(opts.scope)) continue;
+    map[t.key] = t.name;
+  }
+  return map;
+}
+
+// ── Validation helpers ─────────────────────────────────────────
+
+function isParamEmpty(param: ProjectParam, projectProps?: { name?: string; description?: string; status?: string; ownerId?: string }): boolean {
+  // System params backed by project fields
+  if (param.isSystem) {
+    if (param.name === "Название") return !projectProps?.name?.trim();
+    if (param.name === "Описание") return !projectProps?.description?.trim();
+    if (param.name === "Статус проекта") return !projectProps?.status;
+    if (param.name === "Ответственный за проект") return !projectProps?.ownerId;
+    if (param.name === "Дата создания") return false; // always filled
+  }
+  if (param.fieldType === "checkbox") return param.value == null;
+  return !param.value?.trim();
+}
+
+function validateNumber(val: string): string | null {
+  if (!val.trim()) return null;
+  if (isNaN(Number(val))) return "Значение должно быть числом";
+  return null;
+}
+
+function validateDate(dateStr: string): string | null {
+  if (!dateStr) return null;
+  // Extract year from ISO-like string to catch obvious issues before parsing
+  const yearMatch = dateStr.match(/^(\d{4})/);
+  if (yearMatch) {
+    const y = parseInt(yearMatch[1], 10);
+    if (y < 2000 || y > 2100) return "Год должен быть в диапазоне 2000–2100";
+  }
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return "Некорректная дата";
+  return null;
+}
+
+function validateParamType(param: ProjectParam): string | null {
+  if (!param.value?.trim()) return null; // empty — only required check matters
+  switch (param.fieldType) {
+    case "number": return validateNumber(param.value);
+    case "datetime": return validateDate(param.value);
+    default: return null;
+  }
+}
+
+export interface ParamValidationError { paramId: string; paramName: string; message: string; }
+
+function computeParamErrors(
+  params: ProjectParam[],
+  projectProps: { name: string; description: string; status: string; ownerId: string },
+): ParamValidationError[] {
+  const errors: ParamValidationError[] = [];
+  for (const p of params) {
+    if (p.isRequired && isParamEmpty(p, projectProps)) {
+      errors.push({ paramId: p.id, paramName: p.name, message: `Обязательный параметр «${p.name}» не заполнен` });
+      continue; // don't double-report type errors on empty required
+    }
+    const typeErr = validateParamType(p);
+    if (typeErr) {
+      errors.push({ paramId: p.id, paramName: p.name, message: `Параметр «${p.name}» некорректно заполнен: ${typeErr.toLowerCase()}` });
+    }
+  }
+  return errors;
+}
+
+// ── DebouncedInput ─────────────────────────────────────────────
+
+function DebouncedInput({ value, onSave, className, placeholder, required, requiredMessage, validate }: {
+  value: string; onSave: (val: string) => void; className?: string; placeholder?: string;
+  required?: boolean; requiredMessage?: string; validate?: (val: string) => string | null;
+}) {
+  const [local, setLocal] = useState(value);
+  const [error, setError] = useState("");
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dirtyRef = useRef(false);
+  const localRef = useRef(local);
+  const onSaveRef = useRef(onSave);
+  const validateRef = useRef(validate);
+  localRef.current = local;
+  onSaveRef.current = onSave;
+  validateRef.current = validate;
+
+  useEffect(() => { if (!dirtyRef.current) setLocal(value); }, [value]);
+
+  function trySave(v: string) {
+    if (required && !v.trim()) { setError(requiredMessage || "Поле не может быть пустым"); return; }
+    const vErr = validate?.(v);
+    if (vErr) { setError(vErr); return; }
+    setError(""); onSave(v);
+  }
+
+  function handleChange(v: string) {
+    setLocal(v);
+    dirtyRef.current = true;
+    // Live error clearing
+    if (error) {
+      const stillRequired = required && !v.trim();
+      const stillInvalid = validate?.(v);
+      if (!stillRequired && !stillInvalid) setError("");
+    }
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => { dirtyRef.current = false; trySave(v); }, 1500);
+  }
+
+  useEffect(() => () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current); dirtyRef.current = false;
+      const v = localRef.current;
+      const reqFail = required && !v.trim();
+      const valFail = validateRef.current?.(v);
+      if (!reqFail && !valFail) onSaveRef.current(v);
+    }
+  }, []);
+
+  return (
+    <div>
+      <input type="text" value={local} onChange={e => handleChange(e.target.value)}
+        className={`${className} ${error ? "border-red-400 ring-2 ring-red-200" : ""}`} placeholder={placeholder} />
+      {error && (
+        <div className="flex items-center gap-2 mt-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">
+          <AlertCircle size={16} className="shrink-0" /><span>{error}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── DateTimeInput ─────────────────────────────────────────────
+
+function DateTimeInput({ value, onSave }: { value: string | null; onSave: (val: string | null) => void }) {
+  const parsed = value ? new Date(value) : null;
+  const isValid = parsed && !isNaN(parsed.getTime());
+
+  const [dateStr, setDateStr] = useState(isValid ? parsed.toISOString().slice(0, 10) : "");
+  const [timeStr, setTimeStr] = useState(isValid ? parsed.toISOString().slice(11, 16) : "");
+  const [error, setError] = useState("");
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const p = value ? new Date(value) : null;
+    const v = p && !isNaN(p.getTime());
+    setDateStr(v ? p.toISOString().slice(0, 10) : "");
+    setTimeStr(v ? p.toISOString().slice(11, 16) : "");
+  }, [value]);
+
+  function trySave(d: string, t: string) {
+    if (!d) { setError(""); onSave(null); return; }
+    const err = validateDate(d + "T00:00:00Z");
+    if (err) { setError(err); return; }
+    setError("");
+    const iso = t ? new Date(`${d}T${t}:00`).toISOString() : new Date(`${d}T00:00:00`).toISOString();
+    onSave(iso);
+  }
+
+  function scheduleUpdate(d: string, t: string) {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => trySave(d, t), 800);
+  }
+
+  function handleDateChange(d: string) {
+    setDateStr(d);
+    if (d && error) { const e = validateDate(d + "T00:00:00Z"); if (!e) setError(""); }
+    scheduleUpdate(d, timeStr);
+  }
+
+  function handleTimeChange(t: string) {
+    setTimeStr(t);
+    scheduleUpdate(dateStr, t);
+  }
+
+  const inputCls = "px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500";
+
+  return (
+    <div>
+      <div className="flex items-center gap-2">
+        <input type="date" value={dateStr} onChange={e => handleDateChange(e.target.value)}
+          min="2000-01-01" max="2100-12-31"
+          className={`w-44 ${inputCls} ${error ? "border-red-400 ring-2 ring-red-200" : ""}`} />
+        <div className="relative">
+          <input type="time" value={timeStr} onChange={e => handleTimeChange(e.target.value)}
+            className={`w-36 ${inputCls} ${timeStr ? "pr-7" : ""}`} />
+          {timeStr && (
+            <button onClick={() => handleTimeChange("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-red-600 transition-colors" title="Сбросить время">
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      </div>
+      {error && (
+        <div className="flex items-center gap-2 mt-2 p-2.5 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs">
+          <AlertCircle size={14} className="shrink-0" /><span>{error}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── UserPicker ─────────────────────────────────────────────────
+
+function UserPicker({ value, onSave, multiple }: {
+  value: string | null; onSave: (val: string | null) => void; multiple?: boolean;
+}) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<UserProfileResponse[]>([]);
+  const [selectedUsers, setSelectedUsers] = useState<{ id: string; name: string }[]>([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Load initial user names from IDs
+  useEffect(() => {
+    if (!value) { setSelectedUsers([]); return; }
+    const ids = multiple ? value.split(",").map(s => s.trim()).filter(Boolean) : [value];
+    Promise.all(ids.map(async id => {
+      try { const u = await getUser(id); return { id: u.id, name: u.fullName }; }
+      catch { return { id, name: id }; }
+    })).then(setSelectedUsers);
+  }, [value, multiple]);
+
+  function handleSearch(q: string) {
+    setQuery(q);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (q.length < 2) { setResults([]); return; }
+    timerRef.current = setTimeout(async () => {
+      try { const users = await searchUsers(q, 10); setResults(users); setShowDropdown(true); }
+      catch { setResults([]); }
+    }, 300);
+  }
+
+  function selectUser(user: UserProfileResponse) {
+    if (multiple) {
+      if (selectedUsers.some(u => u.id === user.id)) return;
+      const updated = [...selectedUsers, { id: user.id, name: user.fullName }];
+      setSelectedUsers(updated);
+      onSave(updated.map(u => u.id).join(","));
+    } else {
+      setSelectedUsers([{ id: user.id, name: user.fullName }]);
+      onSave(user.id);
+    }
+    setQuery(""); setResults([]); setShowDropdown(false);
+  }
+
+  function removeUser(userId: string) {
+    const updated = selectedUsers.filter(u => u.id !== userId);
+    setSelectedUsers(updated);
+    onSave(updated.length > 0 ? updated.map(u => u.id).join(",") : null);
+  }
+
+  // Single user: searchable select (one input field)
+  if (!multiple) {
+    const selectedUser = selectedUsers[0] ?? null;
+    const isOpen = !selectedUser && showDropdown && results.length > 0;
+    return (
+      <div className="relative">
+        <input
+          type="text"
+          value={selectedUser ? selectedUser.name : query}
+          readOnly={!!selectedUser}
+          onChange={e => { if (!selectedUser) handleSearch(e.target.value); }}
+          onFocus={() => { if (!selectedUser && results.length > 0) setShowDropdown(true); }}
+          onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
+          placeholder="Поиск пользователя..."
+          className={`w-full px-3 py-2 pr-8 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 ${selectedUser ? "bg-slate-50" : ""}`}
+        />
+        {selectedUser && (
+          <button onClick={() => removeUser(selectedUser.id)}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-red-600 transition-colors" title="Очистить">
+            <X size={14} />
+          </button>
+        )}
+        {isOpen && (
+          <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
+            {results.map(user => (
+              <button key={user.id} onClick={() => selectUser(user)}
+                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-left text-sm"
+              >
+                <span className="font-medium">{user.fullName}</span>
+                <span className="text-slate-400 text-xs">{user.email}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Multiple users: tags
+  return (
+    <div>
+      {selectedUsers.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {selectedUsers.map(u => (
+            <span key={u.id} className="px-2 py-1 bg-blue-50 border border-blue-200 rounded text-sm flex items-center gap-1.5">
+              {u.name}
+              <button onClick={() => removeUser(u.id)} className="hover:text-red-600"><X size={12} /></button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="relative">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+        <input type="text" value={query} onChange={e => handleSearch(e.target.value)}
+          onFocus={() => results.length > 0 && setShowDropdown(true)}
+          onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
+          placeholder="Поиск пользователей..."
+          className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+        />
+        {showDropdown && results.length > 0 && (
+          <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
+            {results.map(user => (
+              <button key={user.id} onClick={() => selectUser(user)}
+                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-left text-sm"
+              >
+                <span className="font-medium">{user.fullName}</span>
+                <span className="text-slate-400 text-xs">{user.email}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── CopyButton ─────────────────────────────────────────────────
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button onClick={() => { navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }); }}
+      className="text-slate-400 hover:text-purple-600 transition-colors shrink-0 p-1 rounded hover:bg-purple-50" title="Скопировать"
+    >{copied ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}</button>
+  );
+}
+
+// ── Types ──────────────────────────────────────────────────────
+
+interface MemberUser { userId: string; fullName: string; }
+
+interface ProjectParamsSectionProps {
+  projectId: string;
+  projectKey: string;
+  projectName: string;
+  projectDescription: string;
+  projectType: string;
+  projectStatus: string;
+  projectOwnerId: string;
+  projectCreatedAt: string;
+  members: MemberUser[];
+  refs: ProjectReferences;
+  params: ProjectParam[];
+  onReload: () => Promise<void>;
+  onProjectUpdate: (patch: Partial<{ name: string; description: string | null; status: string; ownerId: string }>) => Promise<void>;
+  onValidationChange?: (errors: ParamValidationError[]) => void;
+}
+
+// ── Main Component ─────────────────────────────────────────────
+
 export default function ProjectParamsSection({
-  projectId,
-  projectType,
-  refs,
-  params,
-  onReload,
+  projectId, projectKey, projectName, projectDescription, projectType, projectStatus, projectOwnerId, projectCreatedAt, members, refs, params, onReload, onProjectUpdate, onValidationChange,
 }: ProjectParamsSectionProps) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newName, setNewName] = useState("");
@@ -44,51 +400,232 @@ export default function ProjectParamsSection({
   const [newOptions, setNewOptions] = useState<string[]>([]);
   const [optionInput, setOptionInput] = useState("");
 
-  const FIELD_TYPE_LABELS = buildFieldTypeLabels(refs);
+  // Edit modal for custom params
+  const [editingParamId, setEditingParamId] = useState<string | null>(null);
+  const editingParam = editingParamId ? customParams.find(p => p.id === editingParamId) || null : null;
+  const [editParamOptionInput, setEditParamOptionInput] = useState("");
+
   const isScrum = projectType === "scrum";
+  const FIELD_TYPE_LABELS = buildFieldTypeLabels(refs, { projectType, scope: "project_param" });
+  const systemParams = params.filter(p => p.isSystem);
+  const customParams = params.filter(p => !p.isSystem);
 
-  // System params always come from refs (they exist in every project)
-  const systemProjectParams = refs.systemProjectParams || [];
-  // Custom params come from project-level API
-  const customParams = params.filter((p) => !p.isSystem);
+  // ── Local value overrides (for values changed locally but not yet saved / rejected by backend) ──
+  const [localOverrides, setLocalOverrides] = useState<Map<string, string | null>>(new Map());
 
-  async function addCustomParam() {
-    if (!newName.trim()) return;
+  // Local overrides for project-level fields (system params: name, description)
+  const [localProjName, setLocalProjName] = useState<string | null>(null);
+  const [localProjDesc, setLocalProjDesc] = useState<string | null>(null);
+
+  // Reset overrides when params reload from server
+  useEffect(() => { setLocalOverrides(new Map()); }, [params]);
+  useEffect(() => { setLocalProjName(null); }, [projectName]);
+  useEffect(() => { setLocalProjDesc(null); }, [projectDescription]);
+
+  // Effective values for project fields
+  const effName = localProjName ?? projectName;
+  const effDesc = localProjDesc ?? projectDescription;
+
+  // Effective params: merge server values with local overrides
+  const effectiveParams = useMemo(() =>
+    params.map(p => {
+      if (localOverrides.has(p.id)) return { ...p, value: localOverrides.get(p.id) ?? null };
+      return p;
+    }), [params, localOverrides]);
+
+  // ── Validation ────────────────────────────────────────────────
+  const validationErrors = useMemo(
+    () => computeParamErrors(effectiveParams, { name: effName, description: effDesc, status: projectStatus, ownerId: projectOwnerId }),
+    [effectiveParams, effName, effDesc, projectStatus, projectOwnerId],
+  );
+  const errorsByParamId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const e of validationErrors) map.set(e.paramId, e.message);
+    return map;
+  }, [validationErrors]);
+
+  const prevErrorsJsonRef = useRef("");
+  useEffect(() => {
+    const json = JSON.stringify(validationErrors);
+    if (json !== prevErrorsJsonRef.current) {
+      prevErrorsJsonRef.current = json;
+      onValidationChange?.(validationErrors);
+    }
+  }, [validationErrors, onValidationChange]);
+
+  const nameParam = systemParams.find(p => p.name === "Название");
+  const descParam = systemParams.find(p => p.name === "Описание");
+  const statusParam = systemParams.find(p => p.name === "Статус проекта");
+  const ownerParam = systemParams.find(p => p.name === "Ответственный за проект");
+  const createdParam = systemParams.find(p => p.name === "Дата создания");
+
+  async function handleSaveParamValue(paramId: string, value: string | null) {
+    // Update local override immediately so validation reacts
+    setLocalOverrides(prev => new Map(prev).set(paramId, value));
+
+    // Check validity before sending to backend
+    const param = effectiveParams.find(p => p.id === paramId);
+    if (param) {
+      const testParam = { ...param, value };
+      if (param.isRequired && isParamEmpty(testParam)) return; // don't send, inline error shows
+      const typeErr = validateParamType(testParam);
+      if (typeErr) return; // don't send, inline error shows
+    }
+
     try {
-      await createProjectParam(projectId, {
-        name: newName.trim(),
-        fieldType: newType,
-        isRequired: newRequired,
-        order: params.length + 1,
-        options: ["select", "multiselect"].includes(newType) ? newOptions : null,
-      });
-      setNewName("");
-      setNewType("text");
-      setNewRequired(false);
-      setNewOptions([]);
-      setShowAddForm(false);
+      await updateProjectParam(projectId, paramId, { value });
       await onReload();
     } catch (e: any) {
-      toast.error(e.message || "Не удалось добавить параметр");
+      toast.error(e.message || "Не удалось сохранить значение");
     }
   }
 
-  async function removeParam(paramId: string) {
-    try {
-      await deleteProjectParam(projectId, paramId);
-      await onReload();
-    } catch (e: any) {
-      toast.error(e.message || "Не удалось удалить параметр");
+  async function handleUpdateCustomParam(paramId: string, updates: Partial<{ name: string; isRequired: boolean; options: string[] | null }>) {
+    if (updates.name !== undefined) {
+      const trimmed = updates.name.trim();
+      if (!trimmed) return;
+      if (params.some(p => p.id !== paramId && p.name.toLowerCase() === trimmed.toLowerCase())) {
+        toast.error(`Параметр «${trimmed}» уже существует`); return;
+      }
     }
+    try {
+      await updateProjectParam(projectId, paramId, updates);
+      await onReload();
+    } catch (e: any) { toast.error(e.message || "Не удалось обновить параметр"); }
+  }
+
+  async function addCustomParam() {
+    if (!newName.trim()) return;
+    if (params.some(p => p.name.toLowerCase() === newName.trim().toLowerCase())) {
+      toast.error(`Параметр «${newName.trim()}» уже существует`); return;
+    }
+    try {
+      await createProjectParam(projectId, {
+        name: newName.trim(), fieldType: newType, isRequired: newRequired,
+        order: customParams.length + 1,
+        options: ["select", "multiselect"].includes(newType) ? newOptions : null,
+      });
+      setNewName(""); setNewType("text"); setNewRequired(false); setNewOptions([]);
+      setShowAddForm(false);
+      await onReload();
+    } catch (e: any) { toast.error(e.message || "Не удалось добавить параметр"); }
+  }
+
+  async function removeCustomParam(paramId: string) {
+    try { await deleteProjectParam(projectId, paramId); await onReload(); }
+    catch (e: any) { toast.error(e.message || "Не удалось удалить параметр"); }
   }
 
   function addOption() {
     if (optionInput.trim() && !newOptions.includes(optionInput.trim())) {
-      setNewOptions([...newOptions, optionInput.trim()]);
-      setOptionInput("");
+      setNewOptions([...newOptions, optionInput.trim()]); setOptionInput("");
     }
   }
 
+  // ── Render value editor ──────────────────────────────────────
+  function renderParamValue(param: ProjectParam) {
+    if (param.id === nameParam?.id) {
+      return <DebouncedInput value={projectName} onSave={(val) => {
+          setLocalProjName(val);
+          if (val.trim()) onProjectUpdate({ name: val });
+        }}
+        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+        placeholder="Название проекта..." />;
+    }
+    if (param.id === descParam?.id) {
+      return <DebouncedInput value={projectDescription} onSave={(val) => {
+          setLocalProjDesc(val);
+          if (descParam?.isRequired && !val.trim()) return;
+          onProjectUpdate({ description: val || null });
+        }}
+        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+        placeholder="Описание проекта..." />;
+    }
+    if (param.id === statusParam?.id) {
+      return (
+        <select value={projectStatus} onChange={(e) => onProjectUpdate({ status: e.target.value })}
+          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
+          {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      );
+    }
+    if (param.id === ownerParam?.id) {
+      return (
+        <select value={projectOwnerId} onChange={(e) => onProjectUpdate({ ownerId: e.target.value })}
+          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
+          {members.map(m => <option key={m.userId} value={m.userId}>{m.fullName}</option>)}
+        </select>
+      );
+    }
+    if (param.id === createdParam?.id) {
+      const formatted = projectCreatedAt
+        ? new Date(projectCreatedAt).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
+        : "—";
+      return <input type="text" value={formatted} disabled className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-slate-100 text-slate-500 cursor-not-allowed" />;
+    }
+
+    // user / user_list types
+    if (param.fieldType === "user") {
+      return <UserPicker value={param.value} onSave={(val) => handleSaveParamValue(param.id, val)} />;
+    }
+    if (param.fieldType === "user_list") {
+      return <UserPicker value={param.value} onSave={(val) => handleSaveParamValue(param.id, val)} multiple />;
+    }
+
+    if (param.fieldType === "select" && param.options && param.options.length > 0) {
+      return (
+        <select value={param.value ?? ""} onChange={(e) => handleSaveParamValue(param.id, e.target.value === "" ? null : e.target.value)}
+          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
+          {!param.isRequired && <option value="">Не выбрано</option>}
+          {param.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+        </select>
+      );
+    }
+    if (param.fieldType === "multiselect" && param.options && param.options.length > 0) {
+      const selected = param.value ? param.value.split(",").map(s => s.trim()) : [];
+      return (
+        <div className="border border-slate-200 rounded-lg p-2 space-y-1">
+          {param.options.map(opt => {
+            const isChecked = selected.includes(opt);
+            const isLastChecked = isChecked && selected.length === 1 && param.isRequired;
+            return (
+              <label key={opt} className={`flex items-center gap-2 p-1.5 hover:bg-slate-50 rounded transition-colors ${isLastChecked ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}>
+                <input type="checkbox" checked={isChecked} disabled={isLastChecked}
+                  onChange={(e) => {
+                    const updated = e.target.checked ? [...selected, opt] : selected.filter(s => s !== opt);
+                    handleSaveParamValue(param.id, updated.length > 0 ? updated.join(",") : null);
+                  }}
+                  className="w-4 h-4 text-purple-600 rounded" />
+                <span className="text-sm">{opt}</span>
+              </label>
+            );
+          })}
+        </div>
+      );
+    }
+    if (param.fieldType === "checkbox") {
+      return (
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" checked={param.value === "true"}
+            onChange={(e) => handleSaveParamValue(param.id, e.target.checked ? "true" : "false")}
+            className="w-4 h-4 text-purple-600 rounded" />
+          <span className="text-sm">{param.value === "true" ? "Да" : "Нет"}</span>
+        </label>
+      );
+    }
+    if (param.fieldType === "datetime") {
+      return <DateTimeInput value={param.value} onSave={(val) => handleSaveParamValue(param.id, val)} />;
+    }
+    if (param.fieldType === "number") {
+      return <DebouncedInput value={param.value || ""} onSave={(val) => handleSaveParamValue(param.id, val || null)}
+        validate={validateNumber}
+        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="Введите число..." />;
+    }
+    return <DebouncedInput value={param.value || ""} onSave={(val) => handleSaveParamValue(param.id, val || null)}
+      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="Введите значение..." />;
+  }
+
+  // ── Render ───────────────────────────────────────────────────
   return (
     <div className="bg-white rounded-xl shadow-md border border-slate-100 overflow-hidden">
       <div className="p-6">
@@ -97,63 +634,93 @@ export default function ProjectParamsSection({
           <h2 className="text-lg font-bold">Параметры проекта</h2>
         </div>
         <p className="text-sm text-slate-500 mb-5">
-          Системные параметры задаются при создании проекта на основе шаблона и не могут быть убраны. Дополнительно можно добавить кастомные параметры.
+          Параметры проекта определяют его ключевые свойства. Системные параметры нельзя удалить, но можно заполнить их значениями.
         </p>
 
-        {/* System params (from refs — always displayed) */}
-        <div className="space-y-2 mb-4">
-          {systemProjectParams.map((param) => (
-            <div key={param.key} className="p-3 border border-slate-200 rounded-lg bg-slate-50 flex items-center gap-3">
-              <Lock size={14} className="text-slate-400 shrink-0" />
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">{param.name}</span>
+        {validationErrors.length > 0 && (
+          <div className="mb-5 p-4 bg-red-50 border border-red-300 rounded-lg" style={{ overflowAnchor: "none" }}>
+            <div className="flex items-start gap-2">
+              <AlertCircle size={18} className="text-red-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-red-800 mb-1">
+                  Не все параметры заполнены корректно ({validationErrors.length})
+                </p>
+                <ul className="text-xs text-red-700 space-y-0.5">
+                  {validationErrors.map(e => <li key={e.paramId}>— {e.message}</li>)}
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Project meta: key + type */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+          <div className="p-3 border border-slate-200 rounded-lg bg-slate-50">
+            <div className="flex items-center gap-2 mb-1">
+              <Lock size={14} className="text-slate-400" />
+              <span className="text-xs font-medium text-slate-500">Ключ проекта</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-medium text-slate-700">{projectKey}</p>
+              <CopyButton text={projectKey} />
+            </div>
+          </div>
+          <div className="p-3 border border-slate-200 rounded-lg bg-slate-50">
+            <div className="flex items-center gap-2 mb-1">
+              <Lock size={14} className="text-slate-400" />
+              <span className="text-xs font-medium text-slate-500">Тип проекта</span>
+            </div>
+            <p className="text-sm font-medium text-slate-700">{isScrum ? "Scrum" : "Kanban"}</p>
+          </div>
+        </div>
+
+        {/* System params */}
+        <div className="space-y-3">
+          {systemParams.map((param) => {
+            const err = errorsByParamId.get(param.id);
+            return (
+              <div key={param.id} className={`p-4 border rounded-lg bg-slate-50 ${err ? "border-red-300" : "border-slate-200"}`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <Lock size={14} className="text-slate-400 shrink-0" />
+                  <span className="text-sm font-medium">{param.name}{param.isRequired && <span className="text-red-500 ml-0.5">*</span>}</span>
                   <span className="text-xs px-1.5 py-0.5 bg-slate-200 text-slate-600 rounded">
                     {SYSTEM_FIELD_TYPE_LABELS[param.fieldType] || FIELD_TYPE_LABELS[param.fieldType] || param.fieldType}
                   </span>
                 </div>
-                {param.options && param.options.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-1.5">
-                    {param.options.map((opt) => (
-                      <span key={opt} className="text-xs px-2 py-0.5 bg-white border border-slate-200 rounded">{opt}</span>
-                    ))}
+                {param.description && <p className="text-xs text-slate-500 mb-2">{param.description}</p>}
+                {renderParamValue(param)}
+                {err && (
+                  <div className="flex items-center gap-2 mt-2 p-2.5 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs" style={{ overflowAnchor: "none" }}>
+                    <AlertCircle size={14} className="shrink-0" /><span>{err}</span>
                   </div>
                 )}
               </div>
-              <span className="text-xs text-slate-400">
-                {param.isRequired ? "Обязательный" : "Опциональный"}
-              </span>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
-        <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg mb-6">
+        <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
           <div className="flex items-start gap-2">
             <Info size={16} className="text-blue-600 shrink-0 mt-0.5" />
             <p className="text-xs text-blue-800">
               Тип проекта ({isScrum ? "Scrum" : "Kanban"}) фиксируется при создании и определяет доступные функции:
-              {isScrum
-                ? " спринты, бэклог продукта, Story Points, Burndown-диаграмма."
-                : " WIP-лимиты, классы обслуживания, Kanban-аналитика, прогнозирование методом Монте-Карло."
-              }
+              {isScrum ? " спринты, бэклог продукта, Story Points, Burndown-диаграмма."
+                : " WIP-лимиты, классы обслуживания, Kanban-аналитика, прогнозирование методом Монте-Карло."}
             </p>
           </div>
         </div>
 
         {/* Custom params */}
-        <div>
+        <div className="mt-6">
           <div className="flex items-center justify-between mb-3">
             <div>
               <h3 className="text-base font-bold">Кастомные параметры проекта</h3>
               <p className="text-sm text-slate-500 mt-0.5">Дополнительные параметры, специфичные для этого проекта.</p>
             </div>
             {!showAddForm && (
-              <button
-                onClick={() => setShowAddForm(true)}
-                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2 text-sm"
-              >
-                <Plus size={16} />
-                Добавить параметр
+              <button onClick={() => setShowAddForm(true)}
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2 text-sm">
+                <Plus size={16} /> Добавить параметр
               </button>
             )}
           </div>
@@ -164,136 +731,186 @@ export default function ProjectParamsSection({
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-sm font-medium mb-1">Название параметра *</label>
-                    <input
-                      type="text"
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
+                    <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)}
                       className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                      placeholder="Например: Бюджет проекта"
-                    />
+                      placeholder="Например: Бюджет проекта" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1">Тип параметра *</label>
-                    <select
-                      value={newType}
-                      onChange={(e) => setNewType(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    >
+                    <select value={newType} onChange={(e) => setNewType(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
                       {Object.entries(FIELD_TYPE_LABELS).map(([val, label]) => (
                         <option key={val} value={val}>{label}</option>
                       ))}
                     </select>
                   </div>
                 </div>
-
                 {["select", "multiselect"].includes(newType) && (
                   <div>
                     <label className="block text-sm font-medium mb-1">Варианты для выбора</label>
                     <div className="flex gap-2 mb-2">
-                      <input
-                        type="text"
-                        value={optionInput}
-                        onChange={(e) => setOptionInput(e.target.value)}
+                      <input type="text" value={optionInput} onChange={(e) => setOptionInput(e.target.value)}
                         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addOption(); } }}
                         className="flex-1 px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                        placeholder="Введите вариант..."
-                      />
-                      <button onClick={addOption} className="px-3 py-2 bg-slate-200 hover:bg-slate-300 rounded-lg transition-colors" title="Добавить">
-                        <Plus size={18} />
-                      </button>
+                        placeholder="Введите вариант..." />
+                      <button onClick={addOption} className="px-3 py-2 bg-slate-200 hover:bg-slate-300 rounded-lg transition-colors"><Plus size={18} /></button>
                     </div>
-                    <p className="text-xs text-slate-400 mb-2">
-                      Введите вариант и нажмите <strong>+</strong> (или Enter), чтобы добавить.
-                    </p>
                     {newOptions.length > 0 && (
                       <div className="flex flex-wrap gap-2">
-                        {newOptions.map((option) => (
-                          <span key={option} className="px-2 py-1 bg-white border border-slate-200 rounded text-sm flex items-center gap-2">
-                            {option}
-                            <button onClick={() => setNewOptions(newOptions.filter((o) => o !== option))} className="hover:text-red-600">
-                              <X size={14} />
-                            </button>
+                        {newOptions.map(opt => (
+                          <span key={opt} className="px-2 py-1 bg-white border border-slate-200 rounded text-sm flex items-center gap-2">
+                            {opt}
+                            <button onClick={() => setNewOptions(newOptions.filter(o => o !== opt))} className="hover:text-red-600"><X size={14} /></button>
                           </span>
                         ))}
                       </div>
                     )}
                   </div>
                 )}
-
                 <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="pp-required"
-                    checked={newRequired}
-                    onChange={(e) => setNewRequired(e.target.checked)}
-                    className="w-4 h-4 text-purple-600 rounded"
-                  />
+                  <input type="checkbox" id="pp-required" checked={newRequired} onChange={(e) => setNewRequired(e.target.checked)} className="w-4 h-4 text-purple-600 rounded" />
                   <label htmlFor="pp-required" className="text-sm">Обязательное поле</label>
                 </div>
-
                 <div className="flex gap-2 pt-2">
-                  <button
-                    onClick={() => { setShowAddForm(false); setNewName(""); setNewType("text"); setNewRequired(false); setNewOptions([]); }}
-                    className="flex-1 px-4 py-2 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
-                  >
-                    Отмена
-                  </button>
-                  <button
-                    onClick={addCustomParam}
-                    disabled={!newName.trim()}
-                    className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Добавить
-                  </button>
+                  <button onClick={() => { setShowAddForm(false); setNewName(""); setNewType("text"); setNewRequired(false); setNewOptions([]); }}
+                    className="flex-1 px-4 py-2 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">Отмена</button>
+                  <button onClick={addCustomParam} disabled={!newName.trim()}
+                    className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">Добавить</button>
                 </div>
               </div>
             </div>
           )}
 
           {customParams.length > 0 ? (
-            <div className="space-y-2">
-              {customParams.map((param) => (
-                <div key={param.id} className="p-4 border border-slate-200 rounded-lg bg-white flex items-center justify-between">
-                  <div className="flex items-center gap-3 flex-1">
-                    <GripVertical size={18} className="text-slate-400" />
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium text-sm">{param.name}</p>
-                        {param.isRequired && (
-                          <span className="text-xs px-1.5 py-0.5 bg-red-100 text-red-700 rounded">обязательное</span>
-                        )}
+            <div className="space-y-3">
+              {customParams.map((param) => {
+                const err = errorsByParamId.get(param.id);
+                return (
+                  <div key={param.id} className={`border rounded-lg bg-white p-4 ${err ? "border-red-300" : "border-slate-200"}`}>
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex items-center gap-2 flex-1">
+                        <span className="font-medium text-sm">{param.name}</span>
+                        {param.isRequired && <span className="text-xs px-1.5 py-0.5 bg-red-100 text-red-700 rounded">обязательное</span>}
                         <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">кастомное</span>
+                        <span className="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">{FIELD_TYPE_LABELS[param.fieldType] || param.fieldType}</span>
                       </div>
-                      <p className="text-sm text-slate-600 mt-0.5">Тип: {FIELD_TYPE_LABELS[param.fieldType] || param.fieldType}</p>
-                      {param.options && param.options.length > 0 && (
-                        <p className="text-xs text-slate-500 mt-0.5">Варианты: {param.options.join(", ")}</p>
-                      )}
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button onClick={() => { setEditingParamId(param.id); setEditParamOptionInput(""); }}
+                          className="p-1.5 text-blue-500 hover:bg-blue-50 rounded transition-colors" title="Настройки параметра">
+                          <Edit size={16} />
+                        </button>
+                        <button onClick={() => removeCustomParam(param.id)}
+                          className="p-1.5 text-red-500 hover:bg-red-50 rounded transition-colors" title="Удалить параметр">
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                     </div>
+                    {renderParamValue(param)}
+                    {err && (
+                      <div className="flex items-center gap-2 mt-2 p-2.5 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs">
+                        <AlertCircle size={14} className="shrink-0" /><span>{err}</span>
+                      </div>
+                    )}
                   </div>
-                  {!param.isSystem && (
-                    <button
-                      onClick={() => removeParam(param.id)}
-                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                    >
-                      <Trash2 size={18} />
-                    </button>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : !showAddForm ? (
             <div className="text-center py-8 bg-slate-50 rounded-lg border-2 border-dashed border-slate-300">
               <p className="text-slate-600 mb-3">Нет кастомных параметров проекта</p>
-              <button
-                onClick={() => setShowAddForm(true)}
-                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-              >
+              <button onClick={() => setShowAddForm(true)}
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
                 Добавить первый параметр
               </button>
             </div>
           ) : null}
         </div>
       </div>
+
+      {/* Edit Param Modal */}
+      {editingParam && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold">Настройки параметра</h2>
+              <button onClick={() => setEditingParamId(null)} className="p-2 hover:bg-slate-100 rounded-lg transition-colors"><X size={20} /></button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Название *</label>
+                <DebouncedInput
+                  value={editingParam.name}
+                  onSave={(val) => { handleUpdateCustomParam(editingParam.id, { name: val }); }}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  placeholder="Название параметра..." required requiredMessage="Название не может быть пустым"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Тип параметра</label>
+                <input type="text" value={FIELD_TYPE_LABELS[editingParam.fieldType] || editingParam.fieldType} disabled
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-slate-100 text-slate-500 cursor-not-allowed" />
+              </div>
+              <div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={editingParam.isRequired}
+                    onChange={(e) => { handleUpdateCustomParam(editingParam.id, { isRequired: e.target.checked }); }}
+                    className="w-4 h-4 text-purple-600 rounded" />
+                  <span className="text-sm">Обязательное поле</span>
+                </label>
+              </div>
+              {["select", "multiselect"].includes(editingParam.fieldType) && (
+                <div>
+                  <label className="block text-sm font-medium mb-1">Варианты для выбора</label>
+                  <div className="flex gap-2 mb-2">
+                    <input type="text" value={editParamOptionInput}
+                      onChange={(e) => setEditParamOptionInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          const trimmed = editParamOptionInput.trim();
+                          if (trimmed && !(editingParam.options || []).includes(trimmed)) {
+                            const newOpts = [...(editingParam.options || []), trimmed];
+                            handleUpdateCustomParam(editingParam.id, { options: newOpts });
+                            setEditParamOptionInput("");
+                          }
+                        }
+                      }}
+                      className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      placeholder="Введите вариант..." />
+                    <button onClick={() => {
+                      const trimmed = editParamOptionInput.trim();
+                      if (trimmed && !(editingParam.options || []).includes(trimmed)) {
+                        const newOpts = [...(editingParam.options || []), trimmed];
+                        handleUpdateCustomParam(editingParam.id, { options: newOpts });
+                        setEditParamOptionInput("");
+                      }
+                    }} className="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm"><Plus size={16} /></button>
+                  </div>
+                  {editingParam.options && editingParam.options.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {editingParam.options.map(opt => (
+                        <span key={opt} className="inline-flex items-center gap-1 px-2 py-1 bg-slate-100 text-slate-700 rounded text-xs">
+                          {opt}
+                          <button onClick={() => {
+                            const newOpts = editingParam.options!.filter(o => o !== opt);
+                            handleUpdateCustomParam(editingParam.id, { options: newOpts });
+                          }} className="hover:text-red-600"><X size={12} /></button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="mt-6">
+              <button onClick={() => setEditingParamId(null)}
+                className="w-full px-4 py-2.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium">
+                Готово
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

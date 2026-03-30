@@ -1,11 +1,17 @@
 import { apiRequest } from './client';
 import type { UserResponse } from './auth';
 
+export interface SystemRolePermission {
+  code: string;
+  access: "full" | "view" | "none";
+}
+
 export interface SystemRoleResponse {
   id: string;
   name: string;
   description: string;
-  permissions: string[];
+  isAdmin: boolean;
+  permissions: SystemRolePermission[];
 }
 
 export interface ProjectRoleResponse {
@@ -19,8 +25,8 @@ export interface UserProfileResponse extends UserResponse {
   position: string | null;
   onVacation: boolean;
   isSick: boolean;
-  alternativeContactChannel: string | null;
-  alternativeContactInfo: string | null;
+  altContactChannel: string | null;
+  altContactInfo: string | null;
 }
 
 export interface UpdateUserProfileData {
@@ -29,8 +35,8 @@ export interface UpdateUserProfileData {
   position?: string | null;
   onVacation?: boolean;
   isSick?: boolean;
-  alternativeContactChannel?: string | null;
-  alternativeContactInfo?: string | null;
+  altContactChannel?: string | null;
+  altContactInfo?: string | null;
 }
 
 export function getUser(userId: string) {

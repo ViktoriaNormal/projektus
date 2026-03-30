@@ -39,7 +39,7 @@ export function getSprint(sprintId: string) {
 
 export function updateSprint(sprintId: string, data: Partial<{
   name: string;
-  goal: string;
+  goal: string | null;
   startDate: string;
   endDate: string;
 }>) {

@@ -5,6 +5,7 @@ import { apiRequest } from './client';
 export interface ProjectParam {
   id: string;
   name: string;
+  description: string | null;
   fieldType: string;
   isSystem: boolean;
   isRequired: boolean;

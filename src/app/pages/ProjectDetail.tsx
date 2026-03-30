@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { Link, useParams, useNavigate } from "react-router";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Link, useParams, useNavigate, useBlocker } from "react-router";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import {
@@ -18,6 +18,8 @@ import {
   ChevronUp,
   Loader2,
   Search,
+  Info,
+  AlertCircle,
 } from "lucide-react";
 import { UserAvatar } from "../components/UserAvatar";
 import Board from "./Board";
@@ -26,6 +28,7 @@ import ScrumBacklog from "./ScrumBacklog";
 import KanbanMetrics from "./KanbanMetrics";
 import ProjectOverview from "./ProjectOverview";
 import ProjectParamsSection from "../components/project/ProjectParamsSection";
+import type { ParamValidationError } from "../components/project/ProjectParamsSection";
 import ProjectRolesSection from "../components/project/ProjectRolesSection";
 import { getProject, updateProject, deleteProject as deleteProjectApi, type ProjectResponse } from "../api/projects";
 import { getProjectMembers, addProjectMember, updateMemberRoles, removeMember, type ProjectMemberResponse } from "../api/projects";
@@ -181,12 +184,27 @@ export default function ProjectDetail() {
   const [editStatus, setEditStatus] = useState<"active" | "archived" | "paused">("active");
   const [savingProject, setSavingProject] = useState(false);
 
+  // Param validation
+  const [paramErrors, setParamErrors] = useState<ParamValidationError[]>([]);
+  const hasParamErrors = activeTab === "params" && paramErrors.length > 0;
+  const [showTabBlockWarning, setShowTabBlockWarning] = useState(false);
+
+  // Block route navigation when params tab has errors
+  const blocker = useBlocker(hasParamErrors);
+  const [showBlockerModal, setShowBlockerModal] = useState(false);
+
+  useEffect(() => {
+    if (blocker.state === "blocked") {
+      setShowBlockerModal(true);
+    }
+  }, [blocker.state]);
+
   // ── Data Loading ────────────────────────────────────────────
 
-  const loadProject = useCallback(async () => {
+  const loadProject = useCallback(async (showSpinner = false) => {
     if (!projectId) return;
     try {
-      setLoading(true);
+      if (showSpinner) setLoading(true);
       const p = await getProject(projectId);
       setProject(p);
       setEditName(p.name);
@@ -281,7 +299,7 @@ export default function ProjectDetail() {
     } catch { /* silently */ }
   }, [projectId]);
 
-  useEffect(() => { loadProject(); }, [loadProject]);
+  useEffect(() => { loadProject(true); }, [loadProject]);
   useEffect(() => { loadRefs(); }, []);
   useEffect(() => { if (project) loadBoards(); }, [project?.id]);
   useEffect(() => { if (project) loadMembers(); }, [project?.id]);
@@ -355,6 +373,25 @@ export default function ProjectDetail() {
 
   const handleRemoveMember = async (memberId: string) => {
     if (!project) return;
+    const member = members.find(m => m.id === memberId);
+    if (!member) return;
+
+    // Protect owner
+    if (member.userId === project.ownerId) {
+      toast.error("Нельзя удалить ответственного за проект. Сначала назначьте другого ответственного.");
+      return;
+    }
+
+    // Protect last admin
+    const adminRole = projectRoles.find(r => r.isAdmin);
+    if (adminRole) {
+      const admins = members.filter(m => m.roles.includes(adminRole.id));
+      if (admins.length === 1 && admins[0].id === memberId) {
+        toast.error("Нельзя удалить последнего администратора проекта. Сначала назначьте роль администратора другому участнику.");
+        return;
+      }
+    }
+
     if (!confirm("Вы уверены, что хотите удалить этого участника из проекта?")) return;
     try {
       await removeMember(project.id, memberId);
@@ -464,6 +501,14 @@ export default function ProjectDetail() {
 
   const activeBoard = boardTabs.find((b) => b.id === activeBoardId);
 
+  function handleTabChange(tabId: string) {
+    if (hasParamErrors && tabId !== "params") {
+      setShowTabBlockWarning(true);
+      return;
+    }
+    setActiveTab(tabId as any);
+  }
+
   // ── Render ──────────────────────────────────────────────────
 
   return (
@@ -539,6 +584,17 @@ export default function ProjectDetail() {
         )}
       </div>
 
+      {/* Tab block warning — visible until errors are fixed */}
+      {showTabBlockWarning && hasParamErrors && (
+        <div className="p-4 bg-red-50 border border-red-300 rounded-xl flex items-start gap-3" style={{ overflowAnchor: "none" }}>
+          <AlertCircle size={20} className="text-red-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-medium text-red-800">Невозможно покинуть вкладку параметров</p>
+            <p className="text-xs text-red-700 mt-0.5">Заполните все обязательные параметры проекта корректно перед переходом на другую вкладку.</p>
+          </div>
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="bg-white rounded-xl shadow-md border border-slate-100">
         {/* Desktop tabs */}
@@ -549,7 +605,7 @@ export default function ProjectDetail() {
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id as any)}
+                  onClick={() => handleTabChange(tab.id)}
                   className={`px-4 py-3 rounded-lg font-medium transition-all flex items-center gap-2 whitespace-nowrap ${
                     activeTab === tab.id
                       ? "bg-blue-600 text-white shadow-md"
@@ -593,8 +649,8 @@ export default function ProjectDetail() {
                     <button
                       key={tab.id}
                       onClick={() => {
-                        setActiveTab(tab.id as any);
-                        setShowMobileMenu(false);
+                        handleTabChange(tab.id);
+                        if (!hasParamErrors || tab.id === "params") setShowMobileMenu(false);
                       }}
                       className={`w-full flex items-center gap-3 px-4 py-3 transition-colors border-b border-slate-100 last:border-b-0 ${
                         activeTab === tab.id
@@ -748,70 +804,35 @@ export default function ProjectDetail() {
           {/* Params & Members Tab */}
           {activeTab === "params" && (
             <div className="space-y-8">
-              {/* Настройки проекта */}
-              <div className="bg-white rounded-xl shadow-md border border-slate-100 p-6">
-                <h3 className="text-lg font-bold mb-4">Настройки проекта</h3>
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Название проекта</label>
-                      <input
-                        type="text"
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Ключ проекта (неизменяемый)</label>
-                      <input type="text" value={project.key} className="w-full px-4 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-500" disabled />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Тип проекта (неизменяемый)</label>
-                      <input type="text" value={projectType === "scrum" ? "Scrum" : "Kanban"} className="w-full px-4 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-500" disabled />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Статус проекта</label>
-                      <select
-                        value={editStatus}
-                        onChange={(e) => setEditStatus(e.target.value as "active" | "archived" | "paused")}
-                        className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      >
-                        <option value="active">Активный</option>
-                        <option value="paused">Приостановлен</option>
-                        <option value="archived">Архивирован</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Описание</label>
-                    <textarea
-                      value={editDescription}
-                      onChange={(e) => setEditDescription(e.target.value)}
-                      className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      rows={3}
-                    />
-                  </div>
-                  <button
-                    onClick={handleSaveProject}
-                    disabled={savingProject}
-                    className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-                  >
-                    {savingProject ? "Сохранение..." : "Сохранить изменения"}
-                  </button>
-                </div>
-              </div>
-
-              {/* Параметры проекта (из шаблона + кастомные) */}
+              {/* Параметры проекта (объединённый блок) */}
               {refs && (
                 <ProjectParamsSection
                   projectId={project.id}
+                  projectKey={project.key}
+                  projectName={project.name}
+                  projectDescription={project.description}
                   projectType={projectType}
+                  projectStatus={project.status}
+                  projectOwnerId={project.ownerId}
+                  projectCreatedAt={project.createdAt}
+                  members={members.map(m => {
+                    const u = memberUsers.get(m.userId);
+                    return { userId: m.userId, fullName: u?.fullName || m.userId };
+                  })}
                   refs={refs}
                   params={projectParams}
                   onReload={loadProjectParams}
+                  onValidationChange={setParamErrors}
+                  onProjectUpdate={async (patch) => {
+                    try {
+                      await updateProject(project.id, patch as any);
+                      await loadProject();
+                      await loadProjectParams();
+                      toast.success("Параметры проекта обновлены");
+                    } catch (e: any) {
+                      toast.error(e.message || "Не удалось сохранить");
+                    }
+                  }}
                 />
               )}
 
@@ -827,7 +848,7 @@ export default function ProjectDetail() {
               )}
 
               {/* Участники проекта */}
-              <div className="border-t border-slate-200 pt-6">
+              <div className="bg-white rounded-xl shadow-md border border-slate-100 overflow-hidden p-6">
                 <div className="flex items-center justify-between mb-4">
                   <div>
                     <h3 className="text-lg font-bold">Участники проекта</h3>
@@ -837,11 +858,20 @@ export default function ProjectDetail() {
                   </div>
                   <button
                     onClick={() => setShowAddMemberModal(true)}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
                   >
                     <Plus size={20} />
                     Добавить участника
                   </button>
+                </div>
+
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg mb-4">
+                  <div className="flex items-start gap-2">
+                    <Info size={16} className="text-amber-600 shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-800">
+                      На проекте должен быть минимум один участник с полными проектными правами доступа.
+                    </p>
+                  </div>
                 </div>
 
                 <div className="space-y-3">
@@ -865,21 +895,23 @@ export default function ProjectDetail() {
                           <div className="text-right">
                             {member.roles.length > 0 ? (
                               <div className="flex flex-wrap gap-1 justify-end">
-                                {member.roles.map((role) => (
-                                  <span
-                                    key={role}
-                                    className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded"
-                                  >
-                                    {role}
-                                  </span>
-                                ))}
+                                {member.roles.map((roleId) => {
+                                  const roleDef = projectRoles.find(r => r.id === roleId);
+                                  return (
+                                    <span
+                                      key={roleId}
+                                      className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded"
+                                    >
+                                      {roleDef?.name || roleId}
+                                    </span>
+                                  );
+                                })}
                               </div>
                             ) : (
                               <p className="text-sm text-slate-500">Без роли</p>
                             )}
                           </div>
-                          {member.userId !== project.ownerId && (
-                            <>
+                          <div className="flex items-center gap-1">
                               <button
                                 onClick={() => {
                                   setSelectedMember(member);
@@ -898,8 +930,7 @@ export default function ProjectDetail() {
                               >
                                 <Trash2 size={18} />
                               </button>
-                            </>
-                          )}
+                          </div>
                         </div>
                       </div>
                     );
@@ -981,6 +1012,34 @@ export default function ProjectDetail() {
                 )}
               </div>
 
+              {selectedUserId && projectRoles.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium mb-2">Роли (опционально)</label>
+                  <div className="border border-slate-200 rounded-lg p-3 space-y-1 max-h-48 overflow-y-auto">
+                    {projectRoles.map((role) => (
+                      <label key={role.id} className="flex items-center gap-3 p-2 hover:bg-slate-50 rounded-lg cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={newMemberRoles.includes(role.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setNewMemberRoles([...newMemberRoles, role.id]);
+                            } else {
+                              setNewMemberRoles(newMemberRoles.filter(r => r !== role.id));
+                            }
+                          }}
+                          className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                        />
+                        <div>
+                          <span className="text-sm font-medium">{role.name}</span>
+                          {role.description && <p className="text-xs text-slate-500">{role.description}</p>}
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="flex gap-3 pt-4">
                 <button
                   onClick={() => {
@@ -1044,23 +1103,32 @@ export default function ProjectDetail() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">
-                  Роли (через запятую)
-                </label>
-                <input
-                  type="text"
-                  value={selectedRoles.join(", ")}
-                  onChange={(e) =>
-                    setSelectedRoles(
-                      e.target.value
-                        .split(",")
-                        .map((r) => r.trim())
-                        .filter(Boolean)
-                    )
-                  }
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Например: Разработчик, Тестировщик"
-                />
+                <label className="block text-sm font-medium mb-2">Роли</label>
+                <div className="border border-slate-200 rounded-lg p-3 space-y-1 max-h-60 overflow-y-auto">
+                  {projectRoles.map((role) => (
+                    <label key={role.id} className="flex items-center gap-3 p-2 hover:bg-slate-50 rounded-lg cursor-pointer transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={selectedRoles.includes(role.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedRoles([...selectedRoles, role.id]);
+                          } else {
+                            setSelectedRoles(selectedRoles.filter(r => r !== role.id));
+                          }
+                        }}
+                        className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                      />
+                      <div>
+                        <span className="text-sm font-medium">{role.name}</span>
+                        {role.description && <p className="text-xs text-slate-500">{role.description}</p>}
+                      </div>
+                    </label>
+                  ))}
+                  {projectRoles.length === 0 && (
+                    <p className="text-sm text-slate-400 italic p-2">Нет доступных ролей</p>
+                  )}
+                </div>
               </div>
 
               <div className="flex gap-3 pt-4">
@@ -1106,6 +1174,32 @@ export default function ProjectDetail() {
             loadBoardDetails();
           }}
         />
+      )}
+
+      {/* Navigation blocker modal */}
+      {showBlockerModal && blocker.state === "blocked" && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full">
+            <div className="flex items-start gap-3 mb-4">
+              <AlertCircle size={24} className="text-red-600 shrink-0 mt-0.5" />
+              <div>
+                <h2 className="text-lg font-bold text-slate-800">Не все параметры заполнены</h2>
+                <p className="text-sm text-slate-600 mt-1">
+                  Заполните все обязательные параметры проекта перед переходом на другую страницу.
+                </p>
+                <ul className="text-xs text-red-700 mt-2 space-y-0.5">
+                  {paramErrors.map(e => <li key={e.paramId}>— {e.message}</li>)}
+                </ul>
+              </div>
+            </div>
+            <button
+              onClick={() => { setShowBlockerModal(false); blocker.reset?.(); }}
+              className="w-full px-4 py-2.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
+            >
+              Вернуться к параметрам
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

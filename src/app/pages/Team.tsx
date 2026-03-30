@@ -200,14 +200,14 @@ export default function Team() {
                     <CopyButton text={user.email} />
                   </div>
 
-                  {user.alternativeContactChannel && user.alternativeContactInfo && (
+                  {user.altContactChannel && user.altContactInfo && (
                     <div className="flex items-center gap-2 justify-center">
                       <MessageCircle size={14} className="text-slate-400" />
                       <span>
-                        <span className="text-slate-500">{user.alternativeContactChannel}:</span>{' '}
-                        <span className="font-medium text-slate-700">{user.alternativeContactInfo}</span>
+                        <span className="text-slate-500">{user.altContactChannel}:</span>{' '}
+                        <span className="font-medium text-slate-700">{user.altContactInfo}</span>
                       </span>
-                      <CopyButton text={user.alternativeContactInfo} />
+                      <CopyButton text={user.altContactInfo} />
                     </div>
                   )}
                 </div>

@@ -11,8 +11,7 @@ export interface ProjectRole {
   id: string;
   name: string;
   description: string;
-  isDefault: boolean;
-  isProjectAdmin?: boolean;
+  isAdmin: boolean;
   order: number;
   permissions: ProjectRolePermission[];
 }

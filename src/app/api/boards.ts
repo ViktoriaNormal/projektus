@@ -7,6 +7,7 @@ export interface BoardResponse {
   projectId: string | null;
   name: string;
   description: string | null;
+  isDefault: boolean;
   order: number;
   priorityType?: string;
   estimationUnit?: string;
@@ -32,7 +33,6 @@ export interface ColumnResponse {
   wipLimit: number | null;
   order: number;
   isLocked?: boolean;
-  note?: string | null;
 }
 
 export interface SwimlaneResponse {
@@ -41,7 +41,6 @@ export interface SwimlaneResponse {
   name: string;
   wipLimit: number | null;
   order: number;
-  note?: string | null;
 }
 
 export interface NoteResponse {
@@ -75,7 +74,8 @@ export function createBoard(data: {
 
 export function updateBoard(boardId: string, data: Partial<{
   name: string;
-  description: string;
+  description: string | null;
+  isDefault: boolean;
   order: number;
   priorityType: string;
   estimationUnit: string;
@@ -163,7 +163,7 @@ export function createSwimlaneNote(swimlaneId: string, content: string) {
 
 export function updateColumn(boardId: string, columnId: string, data: Partial<{
   name: string;
-  systemType: string;
+  systemType: string | null;
   wipLimit: number | null;
 }>) {
   return apiRequest<ColumnResponse>(`/boards/${boardId}/columns/${columnId}`, {
@@ -247,7 +247,7 @@ export function createBoardField(boardId: string, data: {
 
 export function updateBoardField(boardId: string, fieldId: string, data: Partial<{
   name: string;
-  description: string;
+  description: string | null;
   isRequired: boolean;
   options: string[];
 }>) {
@@ -278,14 +278,10 @@ export interface ProjectReferences {
   estimationUnits: { key: string; name: string; availableFor: string[] }[];
   priorityTypeOptions: { key: string; name: string; availableFor: string[]; defaultValues: string[] }[];
   projectStatuses?: { key: string; name: string }[];
-  systemTaskFields: { key: string; name: string; fieldType: string; isRequired: boolean; availableFor: string[]; description?: string }[];
-  systemProjectParams: { key: string; name: string; fieldType: string; isRequired: boolean; options: string[] | null }[];
   permissionAreas: { area: string; name: string; description: string; availableFor: string[] }[];
   accessLevels: { key: string; name: string }[];
 }
 
 export function getProjectReferences() {
-  // Use the same references endpoint as admin templates for now
-  // In production, this should be GET /v1/projects/references
-  return apiRequest<ProjectReferences>('/admin/project-templates/references');
+  return apiRequest<ProjectReferences>('/projects/references');
 }

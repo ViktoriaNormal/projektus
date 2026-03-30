@@ -40,40 +40,6 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-const MOCK_PROJECT: ProjectResponse = {
-  id: "1",
-  key: "ECOM",
-  name: "Электронная коммерция",
-  description: "Разработка нового интернет-магазина с современным UX/UI",
-  projectType: "scrum",
-  ownerId: "mock-owner",
-  status: "active",
-  createdAt: "2025-01-15T00:00:00Z",
-};
-
-const MOCK_PROJECT_KANBAN: ProjectResponse = {
-  id: "3",
-  key: "SUPPORT",
-  name: "Техническая поддержка",
-  description: "Обработка запросов пользователей",
-  projectType: "kanban",
-  ownerId: "mock-owner",
-  status: "active",
-  createdAt: "2024-11-10T00:00:00Z",
-};
-
-const MOCK_OWNER: UserProfileResponse = {
-  id: "mock-owner",
-  username: "demo",
-  email: "demo@example.com",
-  fullName: "Демо-пользователь",
-  avatarUrl: null,
-  position: null,
-  onVacation: false,
-  isSick: false,
-  alternativeContactChannel: null,
-  alternativeContactInfo: null,
-};
 
 export default function Projects() {
   const { user: authUser } = useAuth();
@@ -98,10 +64,10 @@ export default function Projects() {
     setLoading(true);
     try {
       const result = await getProjects();
-      setProjects([MOCK_PROJECT, MOCK_PROJECT_KANBAN, ...result]);
+      setProjects(result);
       // Load owner profiles
       const uniqueOwnerIds = [...new Set(result.map((p) => p.ownerId).filter(Boolean))];
-      const profiles: Record<string, UserProfileResponse> = { [MOCK_OWNER.id]: MOCK_OWNER };
+      const profiles: Record<string, UserProfileResponse> = {};
       await Promise.all(
         uniqueOwnerIds.map(async (id) => {
           try {

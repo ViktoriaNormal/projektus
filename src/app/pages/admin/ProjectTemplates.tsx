@@ -362,7 +362,6 @@ function TemplateCard({ template, refs, onEdit }: { template: ProjectTemplateDet
                   title={r.description || undefined}
                 >
                   {r.name}
-                  {r.isAdmin && <span className="text-amber-400 ml-1 font-normal">admin</span>}
                 </span>
               ))}
             </div>

@@ -37,7 +37,7 @@ import { ApiError } from '../api/client';
 import { UserAvatar } from '../components/UserAvatar';
 
 export default function Profile() {
-  const { user: authUser, setAuth } = useAuth();
+  const { user: authUser, updateUser: updateAuthUser } = useAuth();
 
   const [profile, setProfile] = useState<UserProfileResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -92,8 +92,8 @@ export default function Profile() {
       setEmail(userData.email);
       setOnVacation(userData.onVacation ?? false);
       setIsSick(userData.isSick ?? false);
-      setAltContactChannel(userData.alternativeContactChannel ?? '');
-      setAltContactInfo(userData.alternativeContactInfo ?? '');
+      setAltContactChannel(userData.altContactChannel ?? '');
+      setAltContactInfo(userData.altContactInfo ?? '');
       setPolicy(policyData);
       setSystemRoles(sysRoles);
       setProjectRoles(projRoles);
@@ -133,13 +133,11 @@ export default function Profile() {
         email: email.trim(),
         onVacation: onVacation,
         isSick: isSick,
-        alternativeContactChannel: altContactChannel.trim() || null,
-        alternativeContactInfo: altContactInfo.trim() || null,
+        altContactChannel: altContactChannel.trim() || null,
+        altContactInfo: altContactInfo.trim() || null,
       });
       setProfile(updated);
-      const accessToken = localStorage.getItem('access_token') || '';
-      const refreshToken = localStorage.getItem('refresh_token') || '';
-      setAuth({ accessToken, refreshToken, user: updated, roles: [] });
+      updateAuthUser(updated);
       setProfileMsg({ type: 'success', text: 'Профиль успешно обновлён' });
     } catch (err) {
       if (err instanceof ApiError) {
@@ -208,9 +206,7 @@ export default function Profile() {
     try {
       const updated = await uploadAvatar(authUser.id, file);
       setProfile(updated);
-      const accessToken = localStorage.getItem('access_token') || '';
-      const refreshToken = localStorage.getItem('refresh_token') || '';
-      setAuth({ accessToken, refreshToken, user: updated, roles: [] });
+      updateAuthUser(updated);
     } catch {
       setProfileMsg({ type: 'error', text: 'Не удалось загрузить аватар' });
     } finally {
@@ -609,12 +605,12 @@ export default function Profile() {
                         )}
                         {role.permissions.length > 0 && (
                           <div className="mt-2 flex flex-wrap gap-1">
-                            {role.permissions.map((perm) => (
+                            {role.permissions.filter((p) => p.access !== 'none').map((perm) => (
                               <span
-                                key={perm}
+                                key={perm.code}
                                 className="inline-block px-2 py-0.5 bg-purple-100 text-purple-800 text-xs rounded-md"
                               >
-                                {permCatalog.find((p) => p.key === perm)?.description || perm}
+                                {permCatalog.find((p) => p.key === perm.code)?.description || perm.code}
                               </span>
                             ))}
                           </div>

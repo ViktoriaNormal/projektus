@@ -1,5 +1,12 @@
 import { apiRequest } from './client';
 
+export interface ProjectOwner {
+  id: string;
+  fullName: string;
+  avatarUrl: string | null;
+  email: string;
+}
+
 export interface ProjectResponse {
   id: string;
   key: string;
@@ -9,6 +16,7 @@ export interface ProjectResponse {
   ownerId: string;
   status: 'active' | 'archived' | 'paused';
   createdAt: string;
+  owner?: ProjectOwner;
 }
 
 export function getProjects() {
@@ -42,8 +50,9 @@ export function createProject(data: CreateProjectData) {
 
 export function updateProject(projectId: string, data: Partial<{
   name: string;
-  description: string;
+  description: string | null;
   status: 'active' | 'archived' | 'paused';
+  ownerId: string;
 }>) {
   return apiRequest<ProjectResponse>(`/projects/${projectId}`, {
     method: 'PATCH',
@@ -52,7 +61,7 @@ export function updateProject(projectId: string, data: Partial<{
 }
 
 export function deleteProject(projectId: string) {
-  return apiRequest<null>(`/projects/${projectId}`, {
+  return apiRequest<null>(`/projects/${projectId}?confirm=true`, {
     method: 'DELETE',
   });
 }

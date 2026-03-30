@@ -145,7 +145,7 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
       if (selectedSprint) {
         await updateSprint(selectedSprint.id, {
           name: sprintName,
-          goal: sprintGoal || undefined,
+          goal: sprintGoal || null,
           startDate: sprintStartDate,
           endDate: endDate,
         });
@@ -153,7 +153,7 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
       } else {
         await createSprint(projectId, {
           name: sprintName,
-          goal: sprintGoal || undefined,
+          goal: sprintGoal || null,
           startDate: sprintStartDate,
           endDate: endDate,
         });

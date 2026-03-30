@@ -73,10 +73,12 @@ export default function ProjectOverview({
 
         // Filter meetings by projectId
         if (meetingsResult.status === "fulfilled") {
+          const raw = meetingsResult.value;
+          const meetingsArray = Array.isArray(raw) ? raw : (raw as any)?.meetings ?? [];
           setMeetings(
-            meetingsResult.value
-              .filter((m) => m.projectId === projectId && m.status === "active")
-              .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
+            meetingsArray
+              .filter((m: MeetingResponse) => m.projectId === projectId && m.status === "active")
+              .sort((a: MeetingResponse, b: MeetingResponse) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
               .slice(0, 5)
           );
         }
@@ -505,7 +507,7 @@ export default function ProjectOverview({
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <p className="font-medium text-sm truncate">{user.fullName}</p>
-                      {member.roles.length > 0 && (
+                      {member.roles && member.roles.length > 0 && (
                         <div className="flex flex-wrap gap-1">
                           {member.roles.map((role) => (
                             <span

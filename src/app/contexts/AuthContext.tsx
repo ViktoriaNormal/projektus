@@ -9,6 +9,7 @@ interface AuthContextValue {
   permissions: string[];
   hasPermission: (perm: string) => boolean;
   setAuth: (data: AuthResponse) => void;
+  updateUser: (user: UserResponse) => void;
   clearAuth: () => void;
 }
 
@@ -16,7 +17,11 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 function extractPermissions(roles: AuthResponse['roles']): string[] {
   if (!roles || !Array.isArray(roles)) return [];
-  const allPerms = roles.flatMap((r) => r.permissions || []);
+  const allPerms = roles.flatMap((r) =>
+    (r.permissions || [])
+      .filter((p) => p.access !== 'none')
+      .map((p) => p.code),
+  );
   return [...new Set(allPerms)];
 }
 
@@ -35,6 +40,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const perms = extractPermissions(data.roles);
     setPermissions(perms);
     localStorage.setItem('permissions', JSON.stringify(perms));
+  }, []);
+
+  const updateUser = useCallback((updatedUser: UserResponse) => {
+    localStorage.setItem('user', JSON.stringify(updatedUser));
+    setUser(updatedUser);
   }, []);
 
   const clearAuth = useCallback(() => {
@@ -123,7 +133,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, isAdmin, permissions, hasPermission, setAuth, clearAuth }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, isAdmin, permissions, hasPermission, setAuth, updateUser, clearAuth }}>
       {children}
     </AuthContext.Provider>
   );
