@@ -15,12 +15,14 @@ import {
   Settings,
   Check,
   AlertCircle,
+  StickyNote,
 } from "lucide-react";
 import { toast } from "sonner";
 import { UserAvatar } from "../components/UserAvatar";
 import {
-  getBoard, getBoardColumns, getBoardSwimlanes, getBoardFields, createColumn, updateColumn, deleteColumn, reorderColumns, reorderSwimlanes,
-  type BoardResponse, type BoardField, type ColumnResponse, type SwimlaneResponse,
+  getBoard, getBoardColumns, getBoardSwimlanes, getBoardFields, getBoardNotes, createColumnNote, createSwimlaneNote, updateNote, deleteNote,
+  createColumn, updateColumn, deleteColumn, reorderColumns, reorderSwimlanes,
+  type BoardResponse, type BoardField, type ColumnResponse, type SwimlaneResponse, type NoteResponse,
 } from "../api/boards";
 import { searchTasks, updateTask, type TaskResponse } from "../api/tasks";
 import { getTaskFieldValues, type TaskFieldValue } from "../api/field-values";
@@ -314,7 +316,7 @@ function DropZone({
 
 function ColumnHeader({
   column, index, columns, moveColumn, taskCount, isScrum,
-  onUpdate, onAddAfter, onRemove,
+  onUpdate, onAddAfter, onRemove, note, onSaveNote,
 }: {
   column: ColumnResponse;
   index: number;
@@ -325,6 +327,8 @@ function ColumnHeader({
   onUpdate: (colId: string, field: string, value: any) => void;
   onAddAfter: (afterIndex: number) => void;
   onRemove: (colId: string) => void;
+  note: string | null;
+  onSaveNote: (val: string | null) => void;
 }) {
   const [{ isDragging }, drag] = useDrag({
     type: ItemType.COLUMN,
@@ -404,6 +408,7 @@ function ColumnHeader({
         </div>
         {/* Actions */}
         <div className="flex items-center gap-0.5 shrink-0">
+          <NotePopover note={note} onSave={onSaveNote} />
           <button onClick={() => onAddAfter(index)} className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Добавить колонку после">
             <Plus size={14} />
           </button>
@@ -452,7 +457,7 @@ function ColumnHeader({
 // ── Swimlane Row ────────────────────────────────────────────
 
 function SwimlaneRow({
-  swimlane, index, columns, tasks, userCache, moveTask, onAddTask, canAddTaskInColumn, getAddTaskHint, returnUrl, moveSwimlane, canDrag,
+  swimlane, index, columns, tasks, userCache, moveTask, onAddTask, canAddTaskInColumn, getAddTaskHint, returnUrl, moveSwimlane, canDrag, note, onSaveNote,
 }: {
   swimlane: ComputedSwimlane;
   index: number;
@@ -466,6 +471,8 @@ function SwimlaneRow({
   returnUrl?: string;
   moveSwimlane: (dragIndex: number, hoverIndex: number) => void;
   canDrag: boolean;
+  note: string | null;
+  onSaveNote?: (val: string | null) => void;
 }) {
   const [{ isDragging }, drag] = useDrag({
     type: ItemType.SWIMLANE,
@@ -495,6 +502,7 @@ function SwimlaneRow({
             <div className="flex items-center gap-2">
               <span className="text-slate-700">{swimlane.name}</span>
               <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-slate-200 text-slate-600">{swimlaneTasks.length}</span>
+              {onSaveNote && <NotePopover note={note} onSave={onSaveNote} align="left" />}
             </div>
             {swimlane.wipLimit != null && (
               <div className="text-xs text-slate-500 font-normal mt-1">
@@ -591,6 +599,64 @@ function FilterDropdown({
   );
 }
 
+// ── Note Popover ───────────────────────────────────────────
+
+function NotePopover({ note, onSave, align = "right" }: { note: string | null; onSave: (val: string | null) => void; align?: "left" | "right" }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [localValue, setLocalValue] = useState(note ?? "");
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => { setLocalValue(note ?? ""); }, [note]);
+  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
+
+  function handleChange(val: string) {
+    setLocalValue(val);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => { onSave(val || null); }, 600);
+  }
+
+  function handleClear() {
+    setLocalValue("");
+    if (timerRef.current) clearTimeout(timerRef.current);
+    onSave(null);
+  }
+
+  return (
+    <div className="relative">
+      <button
+        onClick={(e) => { e.stopPropagation(); setIsOpen(!isOpen); }}
+        className={`p-1 rounded transition-colors ${note ? "text-amber-500 hover:text-amber-600 hover:bg-amber-50" : "text-slate-400 hover:text-slate-600 hover:bg-slate-200"}`}
+        title={note ? "Редактировать заметку" : "Добавить заметку"}
+      >
+        <StickyNote size={14} />
+      </button>
+      {isOpen && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
+          <div className={`absolute top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-20 p-3 w-64 ${align === "left" ? "left-0" : "right-0"}`} onClick={(e) => e.stopPropagation()}>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Заметка</label>
+            <div className="relative">
+              <textarea
+                value={localValue}
+                onChange={(e) => handleChange(e.target.value)}
+                rows={3}
+                className="w-full px-3 py-1.5 pr-7 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
+                placeholder="Правила, пояснения..."
+                autoFocus
+              />
+              {localValue && (
+                <button onClick={handleClear} className="absolute right-2 top-1.5 p-0.5 text-slate-400 hover:text-red-500 rounded transition-colors" title="Очистить">
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Main Board Component ────────────────────────────────────
 
 export default function Board({ boardId, projectId, projectType, onBoardChanged }: BoardProps) {
@@ -604,6 +670,7 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
   const [filterFields, setFilterFields] = useState<BoardField[]>([]);
   const [fieldValuesMap, setFieldValuesMap] = useState<Map<string, TaskFieldValue[]>>(new Map());
   const [allSprints, setAllSprints] = useState<SprintResponse[]>([]);
+  const [notes, setNotes] = useState<NoteResponse[]>([]);
   const [columnError, setColumnError] = useState<{ message: string; dismissible: boolean } | null>(null);
   const [activeSprintName, setActiveSprintName] = useState<string | null>(null);
   const [activeSprintId, setActiveSprintId] = useState<string | null>(null);
@@ -732,12 +799,57 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
       }
 
       setUserCache(cache);
+
+      // Load notes
+      const boardNotes = await getBoardNotes(boardId).catch(() => [] as NoteResponse[]);
+      setNotes(boardNotes);
     } catch { /**/ } finally {
       setLoading(false);
     }
   }, [boardId, projectId, isScrum]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // ── Note helpers ──────────────────────────────────────────────
+
+  const loadNotes = useCallback(async () => {
+    if (!boardId) return;
+    try { setNotes(await getBoardNotes(boardId)); } catch { /**/ }
+  }, [boardId]);
+
+  const getColumnNote = (colId: string): string | null =>
+    notes.find(n => n.columnId === colId)?.content ?? null;
+
+  const getSwimlaneNote = (swId: string | undefined): string | null =>
+    swId ? (notes.find(n => n.swimlaneId === swId)?.content ?? null) : null;
+
+  const saveColumnNote = async (colId: string, content: string | null) => {
+    const existing = notes.find(n => n.columnId === colId);
+    try {
+      if (content) {
+        if (existing) await updateNote(existing.id, content);
+        else await createColumnNote(colId, content);
+      } else if (existing) {
+        await deleteNote(existing.id);
+      }
+      await loadNotes();
+      onBoardChanged?.();
+    } catch { /**/ }
+  };
+
+  const saveSwimlaneNote = async (swId: string, content: string | null) => {
+    const existing = notes.find(n => n.swimlaneId === swId);
+    try {
+      if (content) {
+        if (existing) await updateNote(existing.id, content);
+        else await createSwimlaneNote(swId, content);
+      } else if (existing) {
+        await deleteNote(existing.id);
+      }
+      await loadNotes();
+      onBoardChanged?.();
+    } catch { /**/ }
+  };
 
   const reloadColumns = useCallback(async () => {
     if (!boardId) return;
@@ -1027,6 +1139,8 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
                       onUpdate={handleUpdateColumn}
                       onAddAfter={handleAddColumnAfter}
                       onRemove={handleRemoveColumn}
+                      note={getColumnNote(column.id)}
+                      onSaveNote={(val) => saveColumnNote(column.id, val)}
                     />
                   ))}
                 </tr>
@@ -1050,6 +1164,8 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
                         returnUrl={boardReturnUrl}
                         moveSwimlane={moveSwimlane}
                         canDrag={canDrag}
+                        note={getSwimlaneNote(swimlane.backendId)}
+                        onSaveNote={swimlane.backendId ? (val) => saveSwimlaneNote(swimlane.backendId!, val) : undefined}
                       />
                     ));
                   })()
