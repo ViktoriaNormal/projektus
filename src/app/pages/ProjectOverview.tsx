@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router";
 import {
   Users,
   Calendar,
@@ -22,6 +23,21 @@ import { getMeetings, type MeetingResponse } from "../api/meetings";
 import { apiRequest } from "../api/client";
 import type { ProjectMemberResponse } from "../api/projects";
 import type { UserProfileResponse } from "../api/users";
+
+const meetingTypeLabels: Record<string, string> = {
+  scrum_planning: "Планирование спринта",
+  daily_scrum: "Daily Scrum",
+  sprint_review: "Обзор спринта",
+  sprint_retrospective: "Ретроспектива",
+  kanban_daily: "Ежедневная встреча",
+  kanban_risk_review: "Обзор рисков",
+  kanban_strategy_review: "Обзор стратегии",
+  kanban_service_delivery_review: "Обзор предоставления услуг",
+  kanban_operations_review: "Обзор операций",
+  kanban_replenishment: "Пополнение запасов",
+  kanban_delivery_planning: "Планирование поставок",
+  custom: "Пользовательское событие",
+};
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -53,6 +69,7 @@ export default function ProjectOverview({
   members,
   memberUsers,
 }: ProjectOverviewProps) {
+  const navigate = useNavigate();
   const [tasks, setTasks] = useState<TaskResponse[]>([]);
   const [sprints, setSprints] = useState<SprintResponse[]>([]);
   const [meetings, setMeetings] = useState<MeetingResponse[]>([]);
@@ -102,7 +119,7 @@ export default function ProjectOverview({
         // Load dependencies to find blocked tasks
         const blocked = new Set<string>();
         await Promise.allSettled(
-          loadedTasks.slice(0, 50).map(async (task) => {
+          allTasks.slice(0, 50).map(async (task) => {
             try {
               const deps = await apiRequest<TaskDependencyResponse[]>(
                 `/tasks/${task.id}/dependencies`
@@ -136,13 +153,16 @@ export default function ProjectOverview({
   const completedTasks = statTasks.filter(t => t.columnSystemType === "completed").length;
   const inProgressTasks = statTasks.filter(t => t.columnSystemType === "in_progress").length;
 
-  // Deadlines (7 days)
-  const weekLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  // Deadlines (≤3 days including today)
+  const threeDaysLater = new Date(now);
+  threeDaysLater.setDate(threeDaysLater.getDate() + 3);
+  threeDaysLater.setHours(23, 59, 59, 999);
   const upcomingDeadlines = tasks
     .filter((t) => {
       if (!t.deadline) return false;
+      if (t.columnSystemType === "completed") return false;
       const d = new Date(t.deadline);
-      return d >= now && d <= weekLater;
+      return d >= now && d <= threeDaysLater;
     })
     .sort((a, b) => new Date(a.deadline!).getTime() - new Date(b.deadline!).getTime())
     .slice(0, 8);
@@ -300,7 +320,7 @@ export default function ProjectOverview({
                   <Ban size={16} className="text-red-400 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">
-                      <span className="text-red-600 font-mono mr-1">{task.key}</span>
+                      <span className="text-red-600 font-mono mr-1 hover:underline cursor-pointer" onClick={() => navigate(`/tasks/${task.id}?returnUrl=${encodeURIComponent(`/projects/${projectId}?tab=overview`)}`)}>{task.key}</span>
                       {task.name}
                     </p>
                   </div>
@@ -341,6 +361,7 @@ export default function ProjectOverview({
             </span>
           )}
         </div>
+        <p className="text-xs text-slate-400 mb-3">Незавершённые задачи, до крайнего срока которых осталось не более 3 дней (включая сегодня)</p>
 
         {/* Просроченные */}
         {overdueTasks.length > 0 && (
@@ -358,7 +379,7 @@ export default function ProjectOverview({
                   >
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">
-                        <span className="text-red-600 font-mono mr-1">{task.key}</span>
+                        <span className="text-red-600 font-mono mr-1 hover:underline cursor-pointer" onClick={() => navigate(`/tasks/${task.id}?returnUrl=${encodeURIComponent(`/projects/${projectId}?tab=overview`)}`)}>{task.key}</span>
                         {task.name}
                       </p>
                     </div>
@@ -396,7 +417,7 @@ export default function ProjectOverview({
                 >
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">
-                      <span className="text-blue-600 font-mono mr-1">{task.key}</span>
+                      <span className="text-blue-600 font-mono mr-1 hover:underline cursor-pointer" onClick={() => navigate(`/tasks/${task.id}?returnUrl=${encodeURIComponent(`/projects/${projectId}?tab=overview`)}`)}>{task.key}</span>
                       {task.name}
                     </p>
                   </div>
@@ -487,7 +508,7 @@ export default function ProjectOverview({
                       </span>
                       {meeting.meetingType && (
                         <span className="px-1.5 py-0.5 bg-slate-200 rounded text-slate-700">
-                          {meeting.meetingType}
+                          {meetingTypeLabels[meeting.meetingType] || meeting.meetingType}
                         </span>
                       )}
                     </div>
@@ -544,6 +565,9 @@ export default function ProjectOverview({
                         </span>
                       )}
                     </div>
+                    {user.position && (
+                      <p className="text-xs text-slate-500 mb-0.5">{user.position}</p>
+                    )}
                     {user.email && (
                       <div className="flex items-center gap-1 mb-1">
                         <span className="text-xs text-slate-500 truncate">{user.email}</span>

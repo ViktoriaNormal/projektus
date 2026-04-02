@@ -54,7 +54,7 @@ export interface CreateTaskChecklist {
 export interface CreateTaskFieldValue {
   fieldId: string;
   valueText?: string | null;
-  valueNumber?: number | null;
+  valueNumber?: number | string | null;
   valueDatetime?: string | null;
 }
 

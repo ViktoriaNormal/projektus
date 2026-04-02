@@ -1,12 +1,12 @@
 import { X, Calendar as CalendarIcon, Clock, MapPin, Users, Save, Search, Plus, UserPlus, Loader2, Crown } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useBodyScrollLock } from "../../hooks/useBodyScrollLock";
 import { toast } from "sonner";
-import { projects } from "../../data/mockData";
 import { UserAvatar } from "../UserAvatar";
 import { searchUsers, getUser, type UserProfileResponse } from "../../api/users";
 import { useAuth } from "../../contexts/AuthContext";
 import type { MeetingDetailsResponse, CreateMeetingData, UpdateMeetingData } from "../../api/meetings";
+import { getProjects, getProjectMembers, type ProjectResponse } from "../../api/projects";
 
 interface MeetingModalProps {
   meeting?: MeetingDetailsResponse;
@@ -66,6 +66,14 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
   const [searchResults, setSearchResults] = useState<UserProfileResponse[]>([]);
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [realProjects, setRealProjects] = useState<ProjectResponse[]>([]);
+  const loadingProjectMembersRef = useRef(false);
+
+  // Load real projects
+  useEffect(() => {
+    if (!isOpen) return;
+    getProjects().then(setRealProjects).catch(() => setRealProjects([]));
+  }, [isOpen]);
 
   // Load organizer profile
   useEffect(() => {
@@ -203,6 +211,7 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
           description: description || null,
           meetingType: selectedType || null,
           location: location || null,
+          projectId: selectedProject || null,
         };
         const newIds = selectedParticipants
           .map((p) => p.id)
@@ -249,8 +258,8 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
     setSelectedParticipants(selectedParticipants.filter((p) => p.id !== userId));
   };
 
-  const selectedProjectData = projects.find((p) => String(p.id) === selectedProject);
-  const projectType = selectedProjectData?.type;
+  const selectedProjectData = realProjects.find((p) => String(p.id) === selectedProject);
+  const projectType = selectedProjectData?.projectType;
 
   const getMeetingTypes = () => {
     if (!selectedProject) {
@@ -359,16 +368,20 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
             <select
               value={selectedProject || ""}
               onChange={(e) => {
-                const value = e.target.value || null;
-                setSelectedProject(value);
-                setSelectedType("");
+                const newProjectId = e.target.value || null;
+                const prevType = selectedProjectData?.projectType ?? null;
+                const newType = (newProjectId ? realProjects.find((p) => String(p.id) === newProjectId)?.projectType : null) ?? null;
+                setSelectedProject(newProjectId);
+                if (selectedType !== "custom" && prevType !== newType) {
+                  setSelectedType("");
+                }
               }}
               className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">Без привязки к проекту</option>
-              {projects.filter((p) => p.status === "Активный").map((project) => (
+              {realProjects.filter((p) => p.status === "active").map((project) => (
                 <option key={project.id} value={project.id}>
-                  {project.name} ({project.type === "scrum" ? "Scrum" : "Kanban"})
+                  {project.key} — {project.name} ({project.projectType === "scrum" ? "Scrum" : "Kanban"})
                 </option>
               ))}
             </select>
@@ -455,10 +468,40 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
                 Участники ({selectedParticipants.length})
               </label>
               {selectedProject && (
-                <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-500">
+                <button
+                  type="button"
+                  disabled={loadingProjectMembersRef.current}
+                  onClick={async () => {
+                    if (loadingProjectMembersRef.current || !selectedProject) return;
+                    loadingProjectMembersRef.current = true;
+                    try {
+                      const members = await getProjectMembers(selectedProject);
+                      const memberProfiles = await Promise.all(
+                        members.map(async (m) => {
+                          try { return await getUser(m.userId); } catch { return null; }
+                        })
+                      );
+                      const loaded = memberProfiles.filter((p): p is UserProfileResponse => p !== null);
+                      setSelectedParticipants((prev) => {
+                        const ids = new Set(prev.map((p) => p.id));
+                        const newMembers = loaded.filter((m) => !ids.has(m.id));
+                        if (newMembers.length === 0) {
+                          toast.info("Все участники проекта уже добавлены");
+                          return prev;
+                        }
+                        toast.success(`Добавлено участников: ${newMembers.length}`);
+                        return [...prev, ...newMembers];
+                      });
+                    } catch {
+                      toast.error("Не удалось загрузить участников проекта");
+                    }
+                    loadingProjectMembersRef.current = false;
+                  }}
+                  className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 transition-colors"
+                >
                   <UserPlus size={14} />
-                  <span>Привязка к проекту — скоро</span>
-                </label>
+                  Добавить всю команду проекта
+                </button>
               )}
             </div>
 

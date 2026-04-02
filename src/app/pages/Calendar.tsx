@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { ChevronLeft, ChevronRight, Plus, Clock, MapPin, Loader2, Copy, Check, Info } from "lucide-react";
-import { projects } from "../data/mockData";
+import { getProjects, type ProjectResponse } from "../api/projects";
 import { MeetingModal } from "../components/modals/MeetingModal";
 import { useAuth } from "../contexts/AuthContext";
 import {
@@ -111,7 +111,7 @@ function CopyInviteButton({ meeting, organizerName, size = "sm" }: { meeting: Me
 }
 
 function WeekMeetingCard({
-  meeting, meetingTypeColors, meetingTypeLabels, dayNames, organizerName, onClick, cancelled, badge, badgeClass,
+  meeting, meetingTypeColors, meetingTypeLabels, dayNames, organizerName, onClick, cancelled, badge, badgeClass, projects,
 }: {
   meeting: MeetingResponse;
   meetingTypeColors: Record<string, string>;
@@ -122,6 +122,7 @@ function WeekMeetingCard({
   cancelled?: boolean;
   badge?: string;
   badgeClass?: string;
+  projects: ProjectResponse[];
 }) {
   const project = meeting.projectId
     ? projects.find((p) => String(p.id) === meeting.projectId)
@@ -220,6 +221,11 @@ export default function Calendar() {
   const [loading, setLoading] = useState(true);
   const [weekLoading, setWeekLoading] = useState(true);
   const [defaultDate, setDefaultDate] = useState<string>("");
+  const [projects, setProjects] = useState<ProjectResponse[]>([]);
+
+  useEffect(() => {
+    getProjects().then(setProjects).catch(() => setProjects([]));
+  }, []);
 
   const loadMonthMeetings = useCallback(async () => {
     setLoading(true);
@@ -555,6 +561,7 @@ export default function Calendar() {
                           cancelled={section.cancelled}
                           badge={section.badge}
                           badgeClass={section.badgeClass}
+                          projects={projects}
                         />
                       ))}
                     </div>

@@ -44,6 +44,7 @@ export interface UpdateMeetingData {
   startTime?: string;
   endTime?: string;
   location?: string | null;
+  projectId?: string | null;
 }
 
 export function getMeetings(from?: string, to?: string) {

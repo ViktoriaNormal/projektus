@@ -79,6 +79,8 @@ export default function TaskDetail() {
   const [mentionCursorPos, setMentionCursorPos] = useState(0);
   const commentTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [uploadingFile, setUploadingFile] = useState(false);
+  const [deadlineFocused, setDeadlineFocused] = useState(false);
+  const [deadlineLocal, setDeadlineLocal] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Editable fields
@@ -286,7 +288,7 @@ export default function TaskDetail() {
         tags: tags.length > 0 ? tags.map(t => t.name) : undefined,
         watcherMemberIds: watchers.length > 0 ? watchers.map(w => w.memberId) : undefined,
         fieldValues: fieldValues.length > 0
-          ? fieldValues.map(fv => ({ fieldId: fv.fieldId, valueText: fv.valueText, valueNumber: fv.valueNumber, valueDatetime: fv.valueDatetime }))
+          ? fieldValues.map(fv => ({ fieldId: fv.fieldId, valueText: fv.valueText, valueNumber: fv.valueNumber != null ? String(fv.valueNumber) : null, valueDatetime: fv.valueDatetime }))
           : undefined,
         dependencies: dependencies.length > 0
           ? dependencies.map(d => ({ dependsOnTaskId: d.dependsOnTaskId, type: d.type }))
@@ -1095,13 +1097,22 @@ export default function TaskDetail() {
                   {/* Deadline */}
                   <div className="mb-4">
                     <label className="flex items-center gap-2 text-slate-600 text-sm mb-2"><Calendar size={16} /><span>Крайний срок</span></label>
-                    <input type="date" value={task.deadline ? task.deadline.slice(0, 10) : ""}
+                    <input type="date" value={deadlineLocal !== null ? deadlineLocal : (task.deadline ? task.deadline.slice(0, 10) : "")}
                       min={new Date().toISOString().slice(0, 10)}
-                      onChange={e => handleUpdateField("deadline", e.target.value ? new Date(e.target.value).toISOString() : null)}
+                      onChange={e => setDeadlineLocal(e.target.value)}
+                      onFocus={() => { setDeadlineFocused(true); setDeadlineLocal(task.deadline ? task.deadline.slice(0, 10) : ""); }}
+                      onBlur={() => {
+                        setDeadlineFocused(false);
+                        const val = deadlineLocal ?? "";
+                        const newValue = val ? new Date(val).toISOString() : null;
+                        const oldValue = task.deadline || null;
+                        if (newValue !== oldValue) handleUpdateField("deadline", newValue);
+                        setDeadlineLocal(null);
+                      }}
                       className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                        fieldErrorIds.has("_deadline") ? "border-red-400 bg-red-50" : "border-slate-200"
+                        !deadlineFocused && fieldErrorIds.has("_deadline") ? "border-red-400 bg-red-50" : "border-slate-200"
                       }`} />
-                    {fieldErrorIds.has("_deadline") && (
+                    {!deadlineFocused && fieldErrorIds.has("_deadline") && (
                       <div className="flex items-center gap-1.5 mt-1 text-xs text-red-600">
                         <AlertTriangle size={12} className="shrink-0" />
                         <span>{getError("_deadline")}</span>
@@ -1201,8 +1212,21 @@ export default function TaskDetail() {
                             </div>
                           );
                         } else if (field.fieldType === "datetime") {
+                          const dtDate = val ? val.slice(0, 10) : "";
+                          const dtTime = val ? val.slice(11, 16) : "";
                           control = (
-                            <input type="datetime-local" value={val} onChange={e => handleSetFieldValue(field.id, field, e.target.value)} className={inputCls} />
+                            <div className="flex gap-2">
+                              <input type="date" defaultValue={dtDate} onBlur={e => {
+                                const d = e.target.value;
+                                const t = (e.target.parentElement?.querySelector('input[type="time"]') as HTMLInputElement)?.value || dtTime || "00:00";
+                                handleSetFieldValue(field.id, field, d ? `${d}T${t}` : "");
+                              }} className={inputCls} />
+                              <input type="time" defaultValue={dtTime} onBlur={e => {
+                                const t = e.target.value;
+                                const d = (e.target.parentElement?.querySelector('input[type="date"]') as HTMLInputElement)?.value || dtDate;
+                                if (d) handleSetFieldValue(field.id, field, `${d}T${t || "00:00"}`);
+                              }} className={inputCls} />
+                            </div>
                           );
                         } else if (field.fieldType === "number") {
                           control = (

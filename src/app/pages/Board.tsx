@@ -19,11 +19,12 @@ import {
 import { toast } from "sonner";
 import { UserAvatar } from "../components/UserAvatar";
 import {
-  getBoardColumns, getBoardSwimlanes, createColumn, updateColumn, deleteColumn, reorderColumns,
-  type ColumnResponse, type SwimlaneResponse,
+  getBoard, getBoardColumns, getBoardSwimlanes, getBoardFields, createColumn, updateColumn, deleteColumn, reorderColumns,
+  type BoardResponse, type BoardField, type ColumnResponse, type SwimlaneResponse,
 } from "../api/boards";
 import { searchTasks, updateTask, type TaskResponse } from "../api/tasks";
-import { getProjectSprints, getSprintTasks } from "../api/sprints";
+import { getTaskFieldValues, type TaskFieldValue } from "../api/field-values";
+import { getProjectSprints, getSprintTasks, type SprintResponse } from "../api/sprints";
 import { getUser, type UserProfileResponse } from "../api/users";
 
 const ItemType = {
@@ -43,6 +44,125 @@ interface Filters {
   assignees: string[];
   priorities: string[];
   tags: string[];
+}
+
+// ── Computed Swimlanes ────────────────────────────────────────
+
+interface ComputedSwimlane {
+  key: string;
+  name: string;
+  taskIds: Set<string>;
+  wipLimit: number | null;
+}
+
+function getTaskValueForField(
+  task: TaskResponse,
+  field: BoardField,
+  fieldValuesMap: Map<string, TaskFieldValue[]>,
+): string | null {
+  if (field.isSystem) {
+    switch (field.fieldType) {
+      case "priority": return task.priority || null;
+      case "user": return task.executorUserId || null;
+      case "estimation": return task.estimation || null;
+      case "datetime": return task.deadline || null;
+      case "tags": {
+        const names = task.tags?.map(t => t.name).sort();
+        return names && names.length > 0 ? names.join(", ") : null;
+      }
+      default: return null;
+    }
+  }
+  const fvs = fieldValuesMap.get(task.id);
+  const fv = fvs?.find(v => v.fieldId === field.id);
+  if (!fv) return null;
+  if (field.fieldType === "number") return fv.valueNumber != null ? String(fv.valueNumber) : null;
+  if (field.fieldType === "datetime") return fv.valueDatetime ? fv.valueDatetime.slice(0, 16) : null;
+  return fv.valueText || null;
+}
+
+function computeSwimlanesFromTasks(
+  tasks: TaskResponse[],
+  field: BoardField,
+  fieldValuesMap: Map<string, TaskFieldValue[]>,
+  backendSwimlanes: SwimlaneResponse[],
+  userCache: Map<string, UserProfileResponse>,
+  sprints: SprintResponse[],
+  priorityOptions?: string[],
+): ComputedSwimlane[] {
+  const wipMap = new Map(backendSwimlanes.map(s => [s.name, s.wipLimit]));
+  const make = (name: string, ids: string[]): ComputedSwimlane => ({
+    key: name, name, taskIds: new Set(ids), wipLimit: wipMap.get(name) ?? null,
+  });
+  const getVal = (t: TaskResponse) => getTaskValueForField(t, field, fieldValuesMap);
+  const resolveUser = (id: string) => userCache.get(id)?.fullName || id;
+  const resolveSprint = (id: string) => sprints.find(s => s.id === id)?.name || id;
+
+  // Checkbox: always 2 lanes
+  if (field.fieldType === "checkbox") {
+    return [
+      make(`${field.name}: да`, tasks.filter(t => getVal(t) === "true").map(t => t.id)),
+      make(`${field.name}: нет`, tasks.filter(t => getVal(t) !== "true").map(t => t.id)),
+    ];
+  }
+
+  // Select / Priority: fixed lanes from options
+  if (field.fieldType === "select" || field.fieldType === "priority") {
+    const opts = (field.fieldType === "priority" && priorityOptions?.length ? priorityOptions : field.options) || [];
+    const lanes = opts.map(opt => make(opt, tasks.filter(t => getVal(t) === opt).map(t => t.id)));
+    const assigned = new Set(opts);
+    const unmatched = tasks.filter(t => { const v = getVal(t); return v == null || !assigned.has(v); });
+    if (unmatched.length > 0) lanes.push(make("Значение не задано", unmatched.map(t => t.id)));
+    return lanes;
+  }
+
+  // User / Sprint: dynamic values + "Значение не задано"
+  if (field.fieldType === "user" || field.fieldType === "sprint") {
+    const groups = new Map<string, string[]>();
+    const nullIds: string[] = [];
+    for (const task of tasks) {
+      const v = getVal(task);
+      if (!v) { nullIds.push(task.id); continue; }
+      if (!groups.has(v)) groups.set(v, []);
+      groups.get(v)!.push(task.id);
+    }
+    const resolve = field.fieldType === "user" ? resolveUser : resolveSprint;
+    const lanes = [...groups.entries()].map(([val, ids]) => make(resolve(val), ids));
+    if (nullIds.length > 0) lanes.push(make("Значение не задано", nullIds));
+    return lanes;
+  }
+
+  // Multiselect / User list / Sprint list / Tags: group by unique combinations
+  if (field.fieldType === "multiselect" || field.fieldType === "user_list" || field.fieldType === "sprint_list" || field.fieldType === "tags") {
+    const groups = new Map<string, string[]>();
+    const nullIds: string[] = [];
+    for (const task of tasks) {
+      const raw = getVal(task);
+      if (!raw) { nullIds.push(task.id); continue; }
+      const parts = raw.split(",").map(s => s.trim()).filter(Boolean).sort();
+      if (parts.length === 0) { nullIds.push(task.id); continue; }
+      const resolve = field.fieldType === "user_list" ? resolveUser : field.fieldType === "sprint_list" ? resolveSprint : (v: string) => v;
+      const displayKey = parts.map(resolve).join(", ");
+      if (!groups.has(displayKey)) groups.set(displayKey, []);
+      groups.get(displayKey)!.push(task.id);
+    }
+    const lanes = [...groups.entries()].map(([key, ids]) => make(key, ids));
+    if (nullIds.length > 0) lanes.push(make("Значение не задано", nullIds));
+    return lanes;
+  }
+
+  // Text / Number / Datetime / Estimation / Tags: group by unique values
+  const groups = new Map<string, string[]>();
+  const nullIds: string[] = [];
+  for (const task of tasks) {
+    const v = getVal(task);
+    if (!v) { nullIds.push(task.id); continue; }
+    if (!groups.has(v)) groups.set(v, []);
+    groups.get(v)!.push(task.id);
+  }
+  const lanes = [...groups.entries()].map(([val, ids]) => make(val, ids));
+  if (nullIds.length > 0) lanes.push(make("Значение не задано", nullIds));
+  return lanes;
 }
 
 const COLUMN_TYPE_LABELS: Record<string, string> = {
@@ -317,9 +437,9 @@ function ColumnHeader({
 // ── Swimlane Row ────────────────────────────────────────────
 
 function SwimlaneRow({
-  swimlane, columns, tasks, userCache, moveTask, onAddTask, canAddTaskInColumn, getAddTaskHint,
+  swimlane, columns, tasks, userCache, moveTask, onAddTask, canAddTaskInColumn, getAddTaskHint, returnUrl,
 }: {
-  swimlane: SwimlaneResponse;
+  swimlane: ComputedSwimlane;
   columns: ColumnResponse[];
   tasks: TaskResponse[];
   userCache: Map<string, UserProfileResponse>;
@@ -327,8 +447,9 @@ function SwimlaneRow({
   onAddTask: (columnId: string, swimlaneId: string | null) => void;
   canAddTaskInColumn?: (col: ColumnResponse) => boolean;
   getAddTaskHint?: (col: ColumnResponse) => string | undefined;
+  returnUrl?: string;
 }) {
-  const swimlaneTasks = tasks.filter((t) => t.swimlaneId === swimlane.id);
+  const swimlaneTasks = tasks.filter((t) => swimlane.taskIds.has(t.id));
 
   return (
     <tr className="border-b border-slate-200">
@@ -340,7 +461,7 @@ function SwimlaneRow({
               <span className="text-slate-700">{swimlane.name}</span>
               <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-slate-200 text-slate-600">{swimlaneTasks.length}</span>
             </div>
-            {swimlane.wipLimit && (
+            {swimlane.wipLimit != null && (
               <div className="text-xs text-slate-500 font-normal mt-1">
                 WIP: {swimlaneTasks.length} / {swimlane.wipLimit}
               </div>
@@ -349,15 +470,15 @@ function SwimlaneRow({
         </div>
       </td>
       {columns.map((column) => {
-        const cellTasks = tasks.filter((t) => t.columnId === column.id && t.swimlaneId === swimlane.id);
+        const cellTasks = tasks.filter((t) => t.columnId === column.id && swimlane.taskIds.has(t.id));
         return (
           <td key={column.id} className="p-4 align-top bg-slate-50">
-            <DropZone columnId={column.id} swimlaneId={swimlane.id} moveTask={moveTask}
-              onAddTask={() => onAddTask(column.id, swimlane.id)}
+            <DropZone columnId={column.id} swimlaneId={null} moveTask={moveTask}
+              onAddTask={() => onAddTask(column.id, null)}
               canAddTask={canAddTaskInColumn ? canAddTaskInColumn(column) : true}
               addTaskHint={getAddTaskHint?.(column)}>
               {cellTasks.map((task) => (
-                <TaskCard key={task.id} task={task} userCache={userCache} moveTask={moveTask} returnUrl={boardReturnUrl} />
+                <TaskCard key={task.id} task={task} userCache={userCache} moveTask={moveTask} returnUrl={returnUrl} />
               ))}
             </DropZone>
           </td>
@@ -438,7 +559,7 @@ function FilterDropdown({
 export default function Board({ boardId, projectId, projectType, onBoardChanged }: BoardProps) {
   const navigate = useNavigate();
   const [columns, setColumns] = useState<ColumnResponse[]>([]);
-  const [swimlanes, setSwimlanes] = useState<SwimlaneResponse[]>([]);
+  const [computedSwimlanes, setComputedSwimlanes] = useState<ComputedSwimlane[]>([]);
   const [tasks, setTasks] = useState<TaskResponse[]>([]);
   const [userCache, setUserCache] = useState<Map<string, UserProfileResponse>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -453,28 +574,29 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
     if (!boardId) return;
     setLoading(true);
     try {
-      const [cols, swims] = await Promise.all([
+      const [boardMeta, cols, backendSwims] = await Promise.all([
+        getBoard(boardId),
         getBoardColumns(boardId),
         getBoardSwimlanes(boardId),
       ]);
       setColumns(cols.sort((a, b) => a.order - b.order));
-      setSwimlanes(swims.sort((a, b) => a.order - b.order));
 
-      // Load tasks: for Scrum boards — only active sprint tasks with columnId; for Kanban — all board tasks
+      // Load sprints for Scrum and for sprint field resolution
+      let allSprints: SprintResponse[] = [];
+      let boardTasks: TaskResponse[] = [];
+
       if (projectId) {
         try {
-          let boardTasks: TaskResponse[];
+          allSprints = await getProjectSprints(projectId).catch(() => []);
+
           if (isScrum) {
-            // For Scrum: show tasks from the active sprint that belong to this board
-            const sprints = await getProjectSprints(projectId).catch(() => []);
-            const activeSprint = sprints.find(s => s.status === "active");
+            const activeSprint = allSprints.find(s => s.status === "active");
             if (activeSprint) {
               setActiveSprintName(activeSprint.name);
               setActiveSprintId(activeSprint.id);
               const sprintTasks = await getSprintTasks(activeSprint.id).catch(() => [] as TaskResponse[]);
               const colIds = new Set(cols.map(c => c.id));
               const initialCol = cols.find(c => c.systemType === "initial");
-              // Tasks for this board: place tasks without columnId into the first (initial) column
               boardTasks = sprintTasks
                 .filter(t => t.boardId === boardId)
                 .map(t => {
@@ -487,26 +609,75 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
             } else {
               setActiveSprintName(null);
               setActiveSprintId(null);
-              boardTasks = []; // No active sprint — board is empty
+              boardTasks = [];
             }
           } else {
             const t = await searchTasks({ projectId });
             const colIds = new Set(cols.map((c) => c.id));
             boardTasks = t.filter((task) => colIds.has(task.columnId));
           }
-          setTasks(boardTasks);
-
-          const userIds = new Set<string>();
-          boardTasks.forEach((task) => { if (task.executorUserId) userIds.add(task.executorUserId); });
-          const cache = new Map<string, UserProfileResponse>();
-          await Promise.allSettled(
-            [...userIds].map(async (uid) => {
-              try { const u = await getUser(uid); cache.set(uid, u); } catch { /**/ }
-            })
-          );
-          setUserCache(cache);
         } catch { /**/ }
       }
+      setTasks(boardTasks);
+
+      // Load user cache
+      const userIds = new Set<string>();
+      boardTasks.forEach((task) => { if (task.executorUserId) userIds.add(task.executorUserId); });
+      const cache = new Map<string, UserProfileResponse>();
+      await Promise.allSettled(
+        [...userIds].map(async (uid) => {
+          try { const u = await getUser(uid); cache.set(uid, u); } catch { /**/ }
+        })
+      );
+
+      // Compute swimlanes from field values
+      const groupByFieldId = boardMeta.swimlaneGroupBy;
+      if (groupByFieldId && boardTasks.length >= 0) {
+        const boardFields = await getBoardFields(boardId).catch(() => [] as BoardField[]);
+        // Virtual "tags" field when __tags__ is selected
+        const field: BoardField | undefined = groupByFieldId === "__tags__"
+          ? { id: "__tags__", name: "Теги", fieldType: "tags", isSystem: true, isRequired: false, options: null }
+          : boardFields.find(f => f.id === groupByFieldId);
+        if (field) {
+          // For custom fields, load field values per task
+          let fvMap = new Map<string, TaskFieldValue[]>();
+          if (!field.isSystem && boardTasks.length > 0) {
+            await Promise.allSettled(
+              boardTasks.map(async (t) => {
+                try {
+                  const fvs = await getTaskFieldValues(t.id);
+                  fvMap.set(t.id, Array.isArray(fvs) ? fvs : []);
+                } catch { /**/ }
+              })
+            );
+          }
+          // For user fields on custom fields, resolve additional user IDs
+          if ((field.fieldType === "user" || field.fieldType === "user_list") && !field.isSystem) {
+            const extraIds = new Set<string>();
+            for (const fvs of fvMap.values()) {
+              const fv = fvs.find(v => v.fieldId === field.id);
+              if (fv?.valueText) fv.valueText.split(",").map(s => s.trim()).filter(Boolean).forEach(id => extraIds.add(id));
+            }
+            await Promise.allSettled(
+              [...extraIds].filter(id => !cache.has(id)).map(async (uid) => {
+                try { const u = await getUser(uid); cache.set(uid, u); } catch { /**/ }
+              })
+            );
+          }
+
+          const computed = computeSwimlanesFromTasks(
+            boardTasks, field, fvMap, backendSwims.sort((a, b) => a.order - b.order),
+            cache, allSprints, boardMeta.priorityOptions,
+          );
+          setComputedSwimlanes(computed);
+        } else {
+          setComputedSwimlanes([]);
+        }
+      } else {
+        setComputedSwimlanes([]);
+      }
+
+      setUserCache(cache);
     } catch { /**/ } finally {
       setLoading(false);
     }
@@ -570,10 +741,10 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
     } catch (e: any) { setColumnError({ message: e.message || "Ошибка удаления колонки", dismissible: true }); }
   }
 
-  const moveTask = async (taskId: string, columnId: string, swimlaneId: string | null) => {
-    setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, columnId, swimlaneId } : t));
+  const moveTask = async (taskId: string, columnId: string, _swimlaneId: string | null) => {
+    setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, columnId } : t));
     try {
-      await updateTask(taskId, { columnId, swimlaneId });
+      await updateTask(taskId, { columnId });
     } catch (e: any) {
       toast.error(e.message || "Ошибка перемещения задачи");
       loadData(); // rollback
@@ -597,12 +768,8 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
 
   const getColumnTaskCount = (columnId: string) => tasks.filter((t) => t.columnId === columnId).length;
 
-  const getFilteredTasks = (columnId: string, swimlaneId: string | null) => {
-    return tasks.filter((t) => {
-      const matchCol = t.columnId === columnId;
-      const matchSwim = swimlanes.length > 0 ? t.swimlaneId === swimlaneId : true;
-      return matchCol && matchSwim;
-    });
+  const getFilteredTasks = (columnId: string) => {
+    return tasks.filter((t) => t.columnId === columnId);
   };
 
   const boardReturnUrl = encodeURIComponent(`/projects/${projectId}?tab=boards`);
@@ -707,7 +874,7 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
               />
               <FilterDropdown
                 label="Дорожка"
-                options={swimlanes.map((s) => s.name)}
+                options={computedSwimlanes.map((s) => s.name)}
                 selectedValues={filters.tags}
                 onToggle={(v) => toggleFilter("tags", v)}
                 renderOption={(v) => v}
@@ -733,7 +900,7 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
             <table className="border-collapse">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50">
-                  {swimlanes.length > 0 && (
+                  {computedSwimlanes.length > 0 && (
                     <th className="p-4 text-left font-semibold text-slate-700 w-48 sticky left-0 bg-slate-50 z-10" />
                   )}
                   {columns.map((column, index) => (
@@ -753,10 +920,10 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
                 </tr>
               </thead>
               <tbody>
-                {swimlanes.length > 0 ? (
-                  swimlanes.map((swimlane) => (
+                {computedSwimlanes.length > 0 ? (
+                  computedSwimlanes.map((swimlane) => (
                     <SwimlaneRow
-                      key={swimlane.id}
+                      key={swimlane.key}
                       swimlane={swimlane}
                       columns={columns}
                       tasks={tasks}
@@ -765,12 +932,13 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
                       onAddTask={handleAddTask}
                       canAddTaskInColumn={canAddTaskInColumn}
                       getAddTaskHint={getAddTaskHint}
+                      returnUrl={boardReturnUrl}
                     />
                   ))
                 ) : (
                   <tr>
                     {columns.map((column) => {
-                      const cellTasks = getFilteredTasks(column.id, null);
+                      const cellTasks = getFilteredTasks(column.id);
                       return (
                         <td key={column.id} className="p-4 align-top bg-slate-50">
                           <DropZone

@@ -894,9 +894,14 @@ function BoardSwimlanesTab({
             className="w-full px-4 py-3 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
           >
             <option value="">Без дорожек</option>
-            {boardFields.map(f => (
-              <option key={f.id} value={f.id}>{getFieldDisplayName(f)}</option>
-            ))}
+            {boardFields
+              .filter(f => ["priority", "select", "checkbox", "multiselect", "user", "user_list", "sprint", "sprint_list", "tags"].includes(f.fieldType) && f.fieldType !== "column" && !f.name.toLowerCase().includes("статус"))
+              .map(f => (
+                <option key={f.id} value={f.id}>{getFieldDisplayName(f)}</option>
+              ))}
+            {!boardFields.some(f => f.fieldType === "tags") && (
+              <option value="__tags__">Теги</option>
+            )}
           </select>
         </div>
 
