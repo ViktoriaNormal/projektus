@@ -19,7 +19,7 @@ import {
 import { toast } from "sonner";
 import { UserAvatar } from "../components/UserAvatar";
 import {
-  getBoard, getBoardColumns, getBoardSwimlanes, getBoardFields, createColumn, updateColumn, deleteColumn, reorderColumns,
+  getBoard, getBoardColumns, getBoardSwimlanes, getBoardFields, createColumn, updateColumn, deleteColumn, reorderColumns, reorderSwimlanes,
   type BoardResponse, type BoardField, type ColumnResponse, type SwimlaneResponse,
 } from "../api/boards";
 import { searchTasks, updateTask, type TaskResponse } from "../api/tasks";
@@ -40,11 +40,7 @@ interface BoardProps {
   onBoardChanged?: () => void;
 }
 
-interface Filters {
-  assignees: string[];
-  priorities: string[];
-  tags: string[];
-}
+const FILTERABLE_TYPES = new Set(["priority", "select", "checkbox", "multiselect", "user", "user_list", "sprint", "sprint_list", "tags"]);
 
 // ── Computed Swimlanes ────────────────────────────────────────
 
@@ -53,6 +49,8 @@ interface ComputedSwimlane {
   name: string;
   taskIds: Set<string>;
   wipLimit: number | null;
+  backendId?: string;
+  order?: number;
 }
 
 function getTaskValueForField(
@@ -63,7 +61,11 @@ function getTaskValueForField(
   if (field.isSystem) {
     switch (field.fieldType) {
       case "priority": return task.priority || null;
-      case "user": return task.executorUserId || null;
+      case "user": {
+        const n = field.name.toLowerCase();
+        if (n.includes("автор") || n.includes("owner")) return task.ownerUserId || null;
+        return task.executorUserId || null;
+      }
       case "estimation": return task.estimation || null;
       case "datetime": return task.deadline || null;
       case "tags": {
@@ -90,20 +92,33 @@ function computeSwimlanesFromTasks(
   sprints: SprintResponse[],
   priorityOptions?: string[],
 ): ComputedSwimlane[] {
-  const wipMap = new Map(backendSwimlanes.map(s => [s.name, s.wipLimit]));
-  const make = (name: string, ids: string[]): ComputedSwimlane => ({
-    key: name, name, taskIds: new Set(ids), wipLimit: wipMap.get(name) ?? null,
-  });
+  const backendMap = new Map(backendSwimlanes.map(s => [s.name, s]));
+  const make = (name: string, ids: string[]): ComputedSwimlane => {
+    const backend = backendMap.get(name);
+    return {
+      key: name, name, taskIds: new Set(ids),
+      wipLimit: backend?.wipLimit ?? null,
+      backendId: backend?.id,
+      order: backend?.order,
+    };
+  };
+  const sortByOrder = (lanes: ComputedSwimlane[]) =>
+    lanes.sort((a, b) => {
+      if (a.order != null && b.order != null) return a.order - b.order;
+      if (a.order != null) return -1;
+      if (b.order != null) return 1;
+      return 0;
+    });
   const getVal = (t: TaskResponse) => getTaskValueForField(t, field, fieldValuesMap);
   const resolveUser = (id: string) => userCache.get(id)?.fullName || id;
   const resolveSprint = (id: string) => sprints.find(s => s.id === id)?.name || id;
 
   // Checkbox: always 2 lanes
   if (field.fieldType === "checkbox") {
-    return [
+    return sortByOrder([
       make(`${field.name}: да`, tasks.filter(t => getVal(t) === "true").map(t => t.id)),
       make(`${field.name}: нет`, tasks.filter(t => getVal(t) !== "true").map(t => t.id)),
-    ];
+    ]);
   }
 
   // Select / Priority: fixed lanes from options
@@ -113,7 +128,7 @@ function computeSwimlanesFromTasks(
     const assigned = new Set(opts);
     const unmatched = tasks.filter(t => { const v = getVal(t); return v == null || !assigned.has(v); });
     if (unmatched.length > 0) lanes.push(make("Значение не задано", unmatched.map(t => t.id)));
-    return lanes;
+    return sortByOrder(lanes);
   }
 
   // User / Sprint: dynamic values + "Значение не задано"
@@ -129,7 +144,7 @@ function computeSwimlanesFromTasks(
     const resolve = field.fieldType === "user" ? resolveUser : resolveSprint;
     const lanes = [...groups.entries()].map(([val, ids]) => make(resolve(val), ids));
     if (nullIds.length > 0) lanes.push(make("Значение не задано", nullIds));
-    return lanes;
+    return sortByOrder(lanes);
   }
 
   // Multiselect / User list / Sprint list / Tags: group by unique combinations
@@ -148,7 +163,7 @@ function computeSwimlanesFromTasks(
     }
     const lanes = [...groups.entries()].map(([key, ids]) => make(key, ids));
     if (nullIds.length > 0) lanes.push(make("Значение не задано", nullIds));
-    return lanes;
+    return sortByOrder(lanes);
   }
 
   // Text / Number / Datetime / Estimation / Tags: group by unique values
@@ -162,7 +177,7 @@ function computeSwimlanesFromTasks(
   }
   const lanes = [...groups.entries()].map(([val, ids]) => make(val, ids));
   if (nullIds.length > 0) lanes.push(make("Значение не задано", nullIds));
-  return lanes;
+  return sortByOrder(lanes);
 }
 
 const COLUMN_TYPE_LABELS: Record<string, string> = {
@@ -437,9 +452,10 @@ function ColumnHeader({
 // ── Swimlane Row ────────────────────────────────────────────
 
 function SwimlaneRow({
-  swimlane, columns, tasks, userCache, moveTask, onAddTask, canAddTaskInColumn, getAddTaskHint, returnUrl,
+  swimlane, index, columns, tasks, userCache, moveTask, onAddTask, canAddTaskInColumn, getAddTaskHint, returnUrl, moveSwimlane, canDrag,
 }: {
   swimlane: ComputedSwimlane;
+  index: number;
   columns: ColumnResponse[];
   tasks: TaskResponse[];
   userCache: Map<string, UserProfileResponse>;
@@ -448,14 +464,33 @@ function SwimlaneRow({
   canAddTaskInColumn?: (col: ColumnResponse) => boolean;
   getAddTaskHint?: (col: ColumnResponse) => string | undefined;
   returnUrl?: string;
+  moveSwimlane: (dragIndex: number, hoverIndex: number) => void;
+  canDrag: boolean;
 }) {
+  const [{ isDragging }, drag] = useDrag({
+    type: ItemType.SWIMLANE,
+    item: { index },
+    canDrag: () => canDrag,
+    collect: (monitor) => ({ isDragging: monitor.isDragging() }),
+  });
+
+  const [, drop] = useDrop({
+    accept: ItemType.SWIMLANE,
+    hover: (item: { index: number }) => {
+      if (item.index !== index) {
+        moveSwimlane(item.index, index);
+        item.index = index;
+      }
+    },
+  });
+
   const swimlaneTasks = tasks.filter((t) => swimlane.taskIds.has(t.id));
 
   return (
-    <tr className="border-b border-slate-200">
+    <tr ref={(node) => drag(drop(node))} className={`border-b border-slate-200 ${isDragging ? "opacity-50" : ""}`}>
       <td className="p-4 font-semibold align-top sticky left-0 z-10 border-r-2 border-slate-300 bg-slate-100">
         <div className="flex items-start gap-2">
-          <GripVertical size={18} className="text-slate-400 flex-shrink-0 mt-1" />
+          <GripVertical size={18} className={`flex-shrink-0 mt-1 ${canDrag ? "text-slate-400 cursor-move" : "text-slate-200 cursor-default"}`} />
           <div className="flex-1">
             <div className="flex items-center gap-2">
               <span className="text-slate-700">{swimlane.name}</span>
@@ -507,21 +542,23 @@ function FilterDropdown({
     <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full px-3 py-2 border border-slate-200 rounded-lg hover:border-blue-400 transition-colors text-left flex items-center justify-between"
+        className={`px-4 py-2 border rounded-full transition-colors text-left flex items-center gap-2 whitespace-nowrap ${
+          selectedValues.length > 0
+            ? "border-blue-300 bg-blue-50 text-blue-700"
+            : "border-slate-200 hover:border-slate-300 text-slate-700 bg-white"
+        }`}
       >
-        <span className="text-sm font-medium">
-          {label}
-          {selectedValues.length > 0 && (
-            <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full">{selectedValues.length}</span>
-          )}
-        </span>
-        <ChevronDown size={16} className={`transition-transform ${isOpen ? "rotate-180" : ""}`} />
+        <span className="text-sm font-medium">{label}</span>
+        {selectedValues.length > 0 && (
+          <span className="px-1.5 py-0.5 bg-blue-600 text-white text-xs rounded-full font-bold leading-none">{selectedValues.length}</span>
+        )}
+        <ChevronDown size={14} className={`text-slate-400 transition-transform ${isOpen ? "rotate-180" : ""}`} />
       </button>
 
       {isOpen && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
-          <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-20 max-h-64 overflow-hidden flex flex-col">
+          <div className="absolute top-full left-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-20 max-h-64 min-w-[220px] overflow-hidden flex flex-col">
             <div className="p-2 border-b border-slate-200">
               <div className="relative">
                 <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -563,7 +600,10 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
   const [tasks, setTasks] = useState<TaskResponse[]>([]);
   const [userCache, setUserCache] = useState<Map<string, UserProfileResponse>>(new Map());
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState<Filters>({ assignees: [], priorities: [], tags: [] });
+  const [filters, setFilters] = useState<Record<string, string[]>>({});
+  const [filterFields, setFilterFields] = useState<BoardField[]>([]);
+  const [fieldValuesMap, setFieldValuesMap] = useState<Map<string, TaskFieldValue[]>>(new Map());
+  const [allSprints, setAllSprints] = useState<SprintResponse[]>([]);
   const [columnError, setColumnError] = useState<{ message: string; dismissible: boolean } | null>(null);
   const [activeSprintName, setActiveSprintName] = useState<string | null>(null);
   const [activeSprintId, setActiveSprintId] = useState<string | null>(null);
@@ -630,43 +670,57 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
         })
       );
 
+      // Load board fields and custom field values (for swimlanes + filters)
+      const boardFields = await getBoardFields(boardId).catch(() => [] as BoardField[]);
+      const filterable = boardFields.filter(f => FILTERABLE_TYPES.has(f.fieldType) && f.fieldType !== "column" && !f.name.toLowerCase().includes("статус"));
+      // Add virtual tags field if not in board fields
+      if (!boardFields.some(f => f.fieldType === "tags")) {
+        filterable.push({ id: "__tags__", name: "Теги", fieldType: "tags", isSystem: true, isRequired: false, options: null });
+      }
+      setFilterFields(filterable);
+
+      // Load custom field values for all tasks (needed for filters + swimlanes)
+      let fvMap = new Map<string, TaskFieldValue[]>();
+      const hasCustomFilterable = filterable.some(f => !f.isSystem);
+      if ((hasCustomFilterable || boardMeta.swimlaneGroupBy) && boardTasks.length > 0) {
+        await Promise.allSettled(
+          boardTasks.map(async (t) => {
+            try {
+              const fvs = await getTaskFieldValues(t.id);
+              fvMap.set(t.id, Array.isArray(fvs) ? fvs : []);
+            } catch { /**/ }
+          })
+        );
+      }
+      setFieldValuesMap(fvMap);
+      setAllSprints(allSprints);
+
+      // Resolve extra user IDs from custom user/user_list fields
+      const userFieldIds = filterable.filter(f => (f.fieldType === "user" || f.fieldType === "user_list") && !f.isSystem);
+      if (userFieldIds.length > 0) {
+        const extraIds = new Set<string>();
+        for (const fvs of fvMap.values()) {
+          for (const uf of userFieldIds) {
+            const fv = fvs.find(v => v.fieldId === uf.id);
+            if (fv?.valueText) fv.valueText.split(",").map(s => s.trim()).filter(Boolean).forEach(id => extraIds.add(id));
+          }
+        }
+        await Promise.allSettled(
+          [...extraIds].filter(id => !cache.has(id)).map(async (uid) => {
+            try { const u = await getUser(uid); cache.set(uid, u); } catch { /**/ }
+          })
+        );
+      }
+
       // Compute swimlanes from field values
       const groupByFieldId = boardMeta.swimlaneGroupBy;
-      if (groupByFieldId && boardTasks.length >= 0) {
-        const boardFields = await getBoardFields(boardId).catch(() => [] as BoardField[]);
-        // Virtual "tags" field when __tags__ is selected
-        const field: BoardField | undefined = groupByFieldId === "__tags__"
-          ? { id: "__tags__", name: "Теги", fieldType: "tags", isSystem: true, isRequired: false, options: null }
+      if (groupByFieldId) {
+        const swimField: BoardField | undefined = groupByFieldId === "__tags__"
+          ? filterable.find(f => f.id === "__tags__")
           : boardFields.find(f => f.id === groupByFieldId);
-        if (field) {
-          // For custom fields, load field values per task
-          let fvMap = new Map<string, TaskFieldValue[]>();
-          if (!field.isSystem && boardTasks.length > 0) {
-            await Promise.allSettled(
-              boardTasks.map(async (t) => {
-                try {
-                  const fvs = await getTaskFieldValues(t.id);
-                  fvMap.set(t.id, Array.isArray(fvs) ? fvs : []);
-                } catch { /**/ }
-              })
-            );
-          }
-          // For user fields on custom fields, resolve additional user IDs
-          if ((field.fieldType === "user" || field.fieldType === "user_list") && !field.isSystem) {
-            const extraIds = new Set<string>();
-            for (const fvs of fvMap.values()) {
-              const fv = fvs.find(v => v.fieldId === field.id);
-              if (fv?.valueText) fv.valueText.split(",").map(s => s.trim()).filter(Boolean).forEach(id => extraIds.add(id));
-            }
-            await Promise.allSettled(
-              [...extraIds].filter(id => !cache.has(id)).map(async (uid) => {
-                try { const u = await getUser(uid); cache.set(uid, u); } catch { /**/ }
-              })
-            );
-          }
-
+        if (swimField) {
           const computed = computeSwimlanesFromTasks(
-            boardTasks, field, fvMap, backendSwims.sort((a, b) => a.order - b.order),
+            boardTasks, swimField, fvMap, backendSwims.sort((a, b) => a.order - b.order),
             cache, allSprints, boardMeta.priorityOptions,
           );
           setComputedSwimlanes(computed);
@@ -766,10 +820,22 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
     }
   };
 
-  const getColumnTaskCount = (columnId: string) => tasks.filter((t) => t.columnId === columnId).length;
+  const moveSwimlane = (dragIndex: number, hoverIndex: number) => {
+    const newLanes = [...computedSwimlanes];
+    const [dragged] = newLanes.splice(dragIndex, 1);
+    newLanes.splice(hoverIndex, 0, dragged);
+    newLanes.forEach((lane, i) => { lane.order = i + 1; });
+    setComputedSwimlanes(newLanes);
+    if (boardId && newLanes.every(l => l.backendId)) {
+      const orders = newLanes.map((l, i) => ({ swimlaneId: l.backendId!, order: i + 1 }));
+      reorderSwimlanes(boardId, orders).then(() => onBoardChanged?.()).catch(() => loadData());
+    }
+  };
+
+  const getColumnTaskCount = (columnId: string) => filteredTasks.filter((t) => t.columnId === columnId).length;
 
   const getFilteredTasks = (columnId: string) => {
-    return tasks.filter((t) => t.columnId === columnId);
+    return filteredTasks.filter((t) => t.columnId === columnId);
   };
 
   const boardReturnUrl = encodeURIComponent(`/projects/${projectId}?tab=boards`);
@@ -800,18 +866,71 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
     return undefined;
   };
 
-  const toggleFilter = (filterType: keyof Filters, value: string) => {
+  const toggleFilter = (fieldId: string, value: string) => {
     setFilters((prev) => {
-      const current = prev[filterType];
+      const current = prev[fieldId] || [];
       return {
         ...prev,
-        [filterType]: current.includes(value) ? current.filter((v) => v !== value) : [...current, value],
+        [fieldId]: current.includes(value) ? current.filter((v) => v !== value) : [...current, value],
       };
     });
   };
 
-  const clearFilters = () => setFilters({ assignees: [], priorities: [], tags: [] });
+  const clearFilters = () => setFilters({});
   const hasActiveFilters = Object.values(filters).some((f) => f.length > 0);
+
+  // Build filter options for each filterable field
+  const getFilterOptions = (field: BoardField): { value: string; label: string }[] => {
+    const seen = new Map<string, string>(); // value → label
+    for (const task of tasks) {
+      const raw = getTaskValueForField(task, field, fieldValuesMap);
+      if (raw == null) continue;
+      if (field.fieldType === "multiselect" || field.fieldType === "user_list" || field.fieldType === "sprint_list" || field.fieldType === "tags") {
+        for (const part of raw.split(",").map(s => s.trim()).filter(Boolean)) {
+          if (!seen.has(part)) {
+            let label = part;
+            if (field.fieldType === "user_list" || (field.fieldType === "user" && field.isSystem)) label = userCache.get(part)?.fullName || part;
+            else if (field.fieldType === "sprint_list") label = allSprints.find(s => s.id === part)?.name || part;
+            seen.set(part, label);
+          }
+        }
+      } else {
+        if (!seen.has(raw)) {
+          let label = raw;
+          if (field.fieldType === "user") label = userCache.get(raw)?.fullName || raw;
+          else if (field.fieldType === "sprint") label = allSprints.find(s => s.id === raw)?.name || raw;
+          else if (field.fieldType === "checkbox") label = raw === "true" ? "Да" : "Нет";
+          seen.set(raw, label);
+        }
+      }
+    }
+    // For select/priority with predefined options, include all options even if unused
+    if ((field.fieldType === "select" || field.fieldType === "priority") && field.options) {
+      for (const opt of field.options) {
+        if (!seen.has(opt)) seen.set(opt, opt);
+      }
+    }
+    return [...seen.entries()].map(([value, label]) => ({ value, label }));
+  };
+
+  // Check if a task passes all active filters
+  const taskPassesFilters = (task: TaskResponse): boolean => {
+    for (const [fieldId, selectedValues] of Object.entries(filters)) {
+      if (selectedValues.length === 0) continue;
+      const field = filterFields.find(f => f.id === fieldId);
+      if (!field) continue;
+      const raw = getTaskValueForField(task, field, fieldValuesMap);
+      if (field.fieldType === "multiselect" || field.fieldType === "user_list" || field.fieldType === "sprint_list" || field.fieldType === "tags") {
+        const parts = raw ? raw.split(",").map(s => s.trim()).filter(Boolean) : [];
+        if (!parts.some(p => selectedValues.includes(p))) return false;
+      } else {
+        if (!raw || !selectedValues.includes(raw)) return false;
+      }
+    }
+    return true;
+  };
+
+  const filteredTasks = hasActiveFilters ? tasks.filter(taskPassesFilters) : tasks;
 
   if (loading) {
     return (
@@ -847,38 +966,31 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
           </div>
         )}
         {/* Filters */}
-        {tasks.length > 0 && (
-          <div className="bg-white border border-slate-200 rounded-lg p-4">
+        {tasks.length > 0 && filterFields.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm border border-slate-100 px-5 py-4">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-slate-700">Фильтры</h3>
+              <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wide">Фильтры</h3>
               {hasActiveFilters && (
-                <button onClick={clearFilters} className="text-sm text-red-600 hover:text-red-700 flex items-center gap-1">
-                  <X size={14} /> Сбросить все
+                <button onClick={clearFilters} className="text-xs text-red-500 hover:text-red-600 flex items-center gap-1 font-medium">
+                  <X size={12} /> Сбросить
                 </button>
               )}
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              <FilterDropdown
-                label="Исполнитель"
-                options={[...new Set(tasks.map((t) => t.executorUserId).filter(Boolean) as string[])]}
-                selectedValues={filters.assignees}
-                onToggle={(v) => toggleFilter("assignees", v)}
-                renderOption={(id) => userCache.get(id)?.fullName || id}
-              />
-              <FilterDropdown
-                label="Колонка"
-                options={columns.map((c) => c.name)}
-                selectedValues={filters.priorities}
-                onToggle={(v) => toggleFilter("priorities", v)}
-                renderOption={(v) => v}
-              />
-              <FilterDropdown
-                label="Дорожка"
-                options={computedSwimlanes.map((s) => s.name)}
-                selectedValues={filters.tags}
-                onToggle={(v) => toggleFilter("tags", v)}
-                renderOption={(v) => v}
-              />
+            <div className="flex flex-wrap gap-2">
+              {filterFields.map((field) => {
+                const opts = getFilterOptions(field);
+                if (opts.length === 0) return null;
+                return (
+                  <FilterDropdown
+                    key={field.id}
+                    label={field.name}
+                    options={opts.map(o => o.value)}
+                    selectedValues={filters[field.id] || []}
+                    onToggle={(v) => toggleFilter(field.id, v)}
+                    renderOption={(v) => opts.find(o => o.value === v)?.label || v}
+                  />
+                );
+              })}
             </div>
           </div>
         )}
@@ -921,20 +1033,26 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
               </thead>
               <tbody>
                 {computedSwimlanes.length > 0 ? (
-                  computedSwimlanes.map((swimlane) => (
-                    <SwimlaneRow
-                      key={swimlane.key}
-                      swimlane={swimlane}
-                      columns={columns}
-                      tasks={tasks}
-                      userCache={userCache}
-                      moveTask={moveTask}
-                      onAddTask={handleAddTask}
-                      canAddTaskInColumn={canAddTaskInColumn}
-                      getAddTaskHint={getAddTaskHint}
-                      returnUrl={boardReturnUrl}
-                    />
-                  ))
+                  (() => {
+                    const canDrag = computedSwimlanes.length > 1 && computedSwimlanes.every(s => !!s.backendId);
+                    return computedSwimlanes.map((swimlane, index) => (
+                      <SwimlaneRow
+                        key={swimlane.key}
+                        swimlane={swimlane}
+                        index={index}
+                        columns={columns}
+                        tasks={filteredTasks}
+                        userCache={userCache}
+                        moveTask={moveTask}
+                        onAddTask={handleAddTask}
+                        canAddTaskInColumn={canAddTaskInColumn}
+                        getAddTaskHint={getAddTaskHint}
+                        returnUrl={boardReturnUrl}
+                        moveSwimlane={moveSwimlane}
+                        canDrag={canDrag}
+                      />
+                    ));
+                  })()
                 ) : (
                   <tr>
                     {columns.map((column) => {
