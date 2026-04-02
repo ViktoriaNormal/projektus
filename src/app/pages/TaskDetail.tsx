@@ -81,6 +81,8 @@ export default function TaskDetail() {
   const [uploadingFile, setUploadingFile] = useState(false);
   const [deadlineFocused, setDeadlineFocused] = useState(false);
   const [deadlineLocal, setDeadlineLocal] = useState<string | null>(null);
+  const [estimationLocal, setEstimationLocal] = useState<string | null>(null);
+  const [estimationFocused, setEstimationFocused] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Editable fields
@@ -152,7 +154,7 @@ export default function TaskDetail() {
       setAttachments(atts);
       setWatchers(wts);
       setFieldValues(fvs);
-      setProjectTasks(tasks.filter(pt => pt.id !== taskId));
+      setProjectTasks(tasks.filter(pt => pt.id !== taskId && pt.projectId === t.projectId));
     } catch {
       setTask(null);
     } finally {
@@ -198,7 +200,7 @@ export default function TaskDetail() {
       setColumns(cols.sort((a, b) => a.order - b.order));
       setBoardFields(fields);
       setMembers(mems);
-      setProjectTasks(tasks);
+      setProjectTasks(tasks.filter(pt => pt.projectId === pId));
 
       const uMap = new Map<string, UserProfileResponse>();
       await Promise.allSettled(mems.map(async (m) => {
@@ -322,14 +324,14 @@ export default function TaskDetail() {
 
   const handleUpdateField = async (field: string, value: any) => {
     if (!task) return;
-    if (isCreateMode) {
-      setTask(prev => prev ? { ...prev, [field]: value } : prev);
-      return;
-    }
+    setTask(prev => prev ? { ...prev, [field]: value } : prev);
+    if (isCreateMode) return;
     try {
       await updateTask(task.id, { [field]: value });
-      await loadTask();
-    } catch (e: any) { toast.error(e.message || "Ошибка обновления"); }
+    } catch (e: any) {
+      toast.error(e.message || "Ошибка обновления");
+      loadTask(); // rollback to server state
+    }
   };
 
   const handleSaveName = () => {
@@ -1062,20 +1064,26 @@ export default function TaskDetail() {
                     )}
                   </div>
 
-                  {/* Priority */}
-                  {task.priority !== undefined && (
-                    <div className="mb-4">
-                      <label className="flex items-center gap-2 text-slate-600 text-sm mb-2"><AlertTriangle size={16} /><span>Приоритет</span></label>
-                      <select value={task.priority || ""} onChange={e => handleUpdateField("priority", e.target.value || null)}
-                        className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        <option value="">Не указан</option>
-                        <option value="Низкий">Низкий</option>
-                        <option value="Средний">Средний</option>
-                        <option value="Высокий">Высокий</option>
-                        <option value="Критичный">Критичный</option>
-                      </select>
-                    </div>
-                  )}
+                  {/* Priority / Service Class */}
+                  {(() => {
+                    const isServiceClass = boardData?.priorityType === "service_class";
+                    const label = isServiceClass ? "Класс обслуживания" : "Приоритет";
+                    const opts = boardData?.priorityOptions?.length
+                      ? boardData.priorityOptions
+                      : ["Низкий", "Средний", "Высокий", "Критичный"];
+                    return (
+                      <div className="mb-4">
+                        <label className="flex items-center gap-2 text-slate-600 text-sm mb-2"><AlertTriangle size={16} /><span>{label}</span></label>
+                        <select value={task.priority || ""} onChange={e => handleUpdateField("priority", e.target.value || null)}
+                          className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                          <option value="">Не указан</option>
+                          {opts.map(opt => (
+                            <option key={opt} value={opt}>{opt}</option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  })()}
 
                   {/* Column (Status) */}
                   <div className="mb-4">
@@ -1121,7 +1129,7 @@ export default function TaskDetail() {
                   </div>
 
                   {/* Estimation */}
-                  {task.estimation !== undefined && (() => {
+                  {(() => {
                     const unit = boardData?.estimationUnit || "story_points";
                     const isStoryPoints = unit === "story_points";
                     const isTime = unit === "time";
@@ -1133,7 +1141,17 @@ export default function TaskDetail() {
                       <div className="mb-4">
                         <label className="flex items-center gap-2 text-slate-600 text-sm mb-2"><BarChart3 size={16} /><span>{label}</span></label>
                         <div className="relative">
-                          <input type="text" value={task.estimation || ""} onChange={e => handleUpdateField("estimation", e.target.value || null)}
+                          <input type="text"
+                            value={estimationFocused ? (estimationLocal ?? "") : (task.estimation || "")}
+                            onFocus={() => { setEstimationFocused(true); setEstimationLocal(task.estimation || ""); }}
+                            onChange={e => setEstimationLocal(e.target.value)}
+                            onBlur={() => {
+                              setEstimationFocused(false);
+                              const val = (estimationLocal ?? "").trim();
+                              const newValue = val || null;
+                              if (newValue !== (task.estimation || null)) handleUpdateField("estimation", newValue);
+                              setEstimationLocal(null);
+                            }}
                             className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${suffix ? "pr-12" : ""} ${estError ? "border-red-400 bg-red-50" : "border-slate-200"}`}
                             placeholder={placeholder} />
                           {suffix && (
