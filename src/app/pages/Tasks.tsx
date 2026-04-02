@@ -1,29 +1,134 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router";
-import { Plus, Search, Filter } from "lucide-react";
-import { tasks, users, projects } from "../data/mockData";
+import { Plus, Search } from "lucide-react";
+import { toast } from "sonner";
+import { searchTasks, type TaskResponse } from "../api/tasks";
+import { getProjects, type ProjectResponse } from "../api/projects";
+import { getUser, type UserProfileResponse } from "../api/users";
+import { getBoardColumns, type ColumnResponse } from "../api/boards";
+import { getTaskTags, type TagResponse } from "../api/tags";
+import { UserAvatar } from "../components/UserAvatar";
+
+function toAvatarUser(u: UserProfileResponse) {
+  return { fullName: u.fullName, avatarUrl: u.avatarUrl ?? undefined };
+}
+
+function getTaskStatus(task: TaskResponse, columnCache: Map<string, ColumnResponse>): string {
+  // Prefer backend-provided column info
+  if (task.columnSystemType) {
+    switch (task.columnSystemType) {
+      case "in_progress": return "В работе";
+      case "completed": return "Выполнено";
+      default: return "Бэклог";
+    }
+  }
+  if (!task.columnId) return "Бэклог";
+  const column = columnCache.get(task.columnId);
+  if (!column) return "Бэклог";
+  switch (column.systemType) {
+    case "in_progress": return "В работе";
+    case "completed": return "Выполнено";
+    default: return "Бэклог";
+  }
+}
+
+const PRIORITY_COLORS: Record<string, string> = {
+  "Критический": "bg-red-100 text-red-700 border-red-200",
+  "Критичный": "bg-red-100 text-red-700 border-red-200",
+  "Высокий": "bg-orange-100 text-orange-700 border-orange-200",
+  "Средний": "bg-yellow-100 text-yellow-700 border-yellow-200",
+  "Низкий": "bg-green-100 text-green-700 border-green-200",
+};
 
 export default function Tasks() {
+  const [tasks, setTasks] = useState<TaskResponse[]>([]);
+  const [projects, setProjects] = useState<ProjectResponse[]>([]);
+  const [userCache, setUserCache] = useState<Map<string, UserProfileResponse>>(new Map());
+  const [columnCache, setColumnCache] = useState<Map<string, ColumnResponse>>(new Map());
+  const [tagCache, setTagCache] = useState<Map<string, TagResponse[]>>(new Map());
+  const [loading, setLoading] = useState(true);
+
   const [searchQuery, setSearchQuery] = useState("");
   const [filterPriority, setFilterPriority] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
 
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [allTasks, allProjects] = await Promise.all([
+        searchTasks({}),
+        getProjects(),
+      ]);
+      setTasks(allTasks);
+      setProjects(allProjects);
+
+      // Resolve executor profiles
+      const userIds = new Set<string>();
+      allTasks.forEach(t => { if (t.executorUserId) userIds.add(t.executorUserId); });
+      const newUserCache = new Map<string, UserProfileResponse>();
+      await Promise.allSettled(
+        [...userIds].map(async (id) => {
+          try { newUserCache.set(id, await getUser(id)); } catch { /**/ }
+        })
+      );
+      setUserCache(newUserCache);
+
+      // Resolve columns for status (skip if backend provides columnSystemType)
+      const needsColumnResolve = allTasks.some(t => t.columnId && !t.columnSystemType);
+      if (needsColumnResolve) {
+        const boardIds = new Set<string>();
+        allTasks.forEach(t => { if (t.boardId) boardIds.add(t.boardId); });
+        const newColumnCache = new Map<string, ColumnResponse>();
+        await Promise.allSettled(
+          [...boardIds].map(async (boardId) => {
+            try {
+              const cols = await getBoardColumns(boardId);
+              cols.forEach(c => newColumnCache.set(c.id, c));
+            } catch { /**/ }
+          })
+        );
+        setColumnCache(newColumnCache);
+      }
+
+      // Resolve tags (skip if backend provides tags in response)
+      const needsTagResolve = allTasks.some(t => !t.tags);
+      if (needsTagResolve) {
+        const newTagCache = new Map<string, TagResponse[]>();
+        await Promise.allSettled(
+          allTasks.map(async (task) => {
+            try { newTagCache.set(task.id, await getTaskTags(task.id)); } catch { /**/ }
+          })
+        );
+        setTagCache(newTagCache);
+      }
+    } catch {
+      toast.error("Ошибка загрузки задач");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  // Client-side filters
   const filteredTasks = tasks.filter((task) => {
     const matchesSearch =
-      task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      task.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       task.key.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesPriority =
       filterPriority === "all" || task.priority === filterPriority;
-    const matchesStatus = filterStatus === "all" || task.status === filterStatus;
+    const taskStatus = getTaskStatus(task, columnCache);
+    const matchesStatus = filterStatus === "all" || taskStatus === filterStatus;
     return matchesSearch && matchesPriority && matchesStatus;
   });
 
-  const priorityColors = {
-    Критический: "bg-red-100 text-red-700 border-red-200",
-    Высокий: "bg-orange-100 text-orange-700 border-orange-200",
-    Средний: "bg-yellow-100 text-yellow-700 border-yellow-200",
-    Низкий: "bg-green-100 text-green-700 border-green-200",
-  };
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -33,20 +138,13 @@ export default function Tasks() {
           <h1 className="text-3xl font-bold">Все задачи</h1>
           <p className="text-slate-600 mt-1">Управление задачами по всем проектам</p>
         </div>
-        <button className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md hover:shadow-lg flex items-center gap-2">
-          <Plus size={20} />
-          Создать задачу
-        </button>
       </div>
 
       {/* Filters */}
       <div className="bg-white rounded-xl p-4 shadow-md border border-slate-100">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="relative">
-            <Search
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-              size={20}
-            />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
             <input
               type="text"
               placeholder="Поиск задач..."
@@ -62,7 +160,7 @@ export default function Tasks() {
             className="px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           >
             <option value="all">Все приоритеты</option>
-            <option value="Критический">Критический</option>
+            <option value="Критичный">Критичный</option>
             <option value="Высокий">Высокий</option>
             <option value="Средний">Средний</option>
             <option value="Низкий">Низкий</option>
@@ -85,8 +183,8 @@ export default function Tasks() {
       <div className="space-y-3">
         {filteredTasks.map((task) => {
           const project = projects.find((p) => p.id === task.projectId);
-          const assignee = users.find((u) => u.id === task.assigneeId);
-          const author = users.find((u) => u.id === task.authorId);
+          const executor = task.executorUserId ? userCache.get(task.executorUserId) : null;
+          const taskTags = task.tags ?? tagCache.get(task.id) ?? [];
 
           return (
             <Link
@@ -100,26 +198,28 @@ export default function Tasks() {
                     <span className="text-sm font-mono text-slate-500 font-semibold">
                       {task.key}
                     </span>
-                    <span className="px-2 py-1 bg-slate-100 text-slate-700 text-xs font-mono rounded">
-                      {project?.key}
-                    </span>
-                    <span
-                      className={`px-3 py-1 text-xs font-semibold rounded border ${
-                        priorityColors[task.priority as keyof typeof priorityColors]
-                      }`}
-                    >
-                      {task.priority}
-                    </span>
+                    {project && (
+                      <span className="px-2 py-1 bg-slate-100 text-slate-700 text-xs font-mono rounded">
+                        {project.key}
+                      </span>
+                    )}
+                    {task.priority && (
+                      <span className={`px-3 py-1 text-xs font-semibold rounded border ${
+                        PRIORITY_COLORS[task.priority] ?? "bg-slate-100 text-slate-700 border-slate-200"
+                      }`}>
+                        {task.priority}
+                      </span>
+                    )}
                   </div>
-                  <h3 className="text-lg font-bold mb-2">{task.title}</h3>
-                  <p className="text-slate-600 text-sm line-clamp-2">{task.description}</p>
+                  <h3 className="text-lg font-bold mb-2">{task.name}</h3>
+                  {task.description && (
+                    <p className="text-slate-600 text-sm line-clamp-2">{task.description}</p>
+                  )}
                 </div>
-                {task.progress > 0 && (
+                {task.progress != null && task.progress > 0 && (
                   <div className="ml-4">
                     <div className="text-right mb-2">
-                      <span className="text-sm font-semibold text-blue-600">
-                        {task.progress}%
-                      </span>
+                      <span className="text-sm font-semibold text-blue-600">{task.progress}%</span>
                     </div>
                     <div className="w-24 bg-slate-200 rounded-full h-2">
                       <div
@@ -131,40 +231,37 @@ export default function Tasks() {
                 )}
               </div>
 
-              <div className="flex items-center gap-2 mb-3">
-                {task.tags.map((tag, index) => (
-                  <span
-                    key={index}
-                    className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </div>
+              {taskTags.length > 0 && (
+                <div className="flex items-center gap-2 mb-3">
+                  {taskTags.map((tag) => (
+                    <span key={typeof tag === "string" ? tag : tag.id}
+                      className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded">
+                      {typeof tag === "string" ? tag : tag.name}
+                    </span>
+                  ))}
+                </div>
+              )}
 
               <div className="flex items-center justify-between text-sm">
                 <div className="flex items-center gap-4">
-                  {assignee && (
+                  {executor ? (
                     <div className="flex items-center gap-2">
-                      <img
-                        src={assignee.avatarUrl}
-                        alt={assignee.fullName}
-                        className="w-6 h-6 rounded-full object-cover"
-                      />
-                      <span className="text-slate-600">Исполнитель: {assignee.fullName}</span>
+                      <UserAvatar user={toAvatarUser(executor)} size="sm" />
+                      <span className="text-slate-600">Исполнитель: {executor.fullName}</span>
                     </div>
-                  )}
-                  {!assignee && (
+                  ) : (
                     <span className="text-slate-400">Не назначен</span>
                   )}
                 </div>
                 <div className="flex items-center gap-4">
-                  <span className="text-slate-500">
-                    Срок: {new Date(task.dueDate).toLocaleDateString("ru-RU")}
-                  </span>
-                  {task.storyPoints && (
+                  {task.deadline && (
+                    <span className="text-slate-500">
+                      Срок: {new Date(task.deadline).toLocaleDateString("ru-RU")}
+                    </span>
+                  )}
+                  {task.estimation && (
                     <span className="text-slate-600 font-semibold">
-                      {task.storyPoints} SP
+                      {task.estimation}
                     </span>
                   )}
                 </div>

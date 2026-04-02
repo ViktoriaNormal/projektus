@@ -6,14 +6,24 @@ export interface TaskResponse {
   id: string;
   key: string;
   projectId: string;
-  ownerId: string;
-  executorId: string | null;
+  boardId: string;
+  ownerMemberId: string;
+  executorMemberId: string | null;
+  ownerUserId: string;
+  executorUserId: string | null;
   name: string;
   description: string | null;
   deadline: string | null;
-  columnId: string;
+  columnId: string | null;
   swimlaneId: string | null;
   progress: number | null;
+  priority: string | null;
+  estimation: string | null;
+  // Extended fields (populated by backend when available)
+  tags?: { id: string; boardId: string; name: string }[];
+  createdAt?: string;
+  columnName?: string | null;
+  columnSystemType?: string | null;
 }
 
 // ── Tasks ───────────────────────────────────────────────────
@@ -36,14 +46,42 @@ export function getTask(taskId: string) {
   return apiRequest<TaskResponse>(`/tasks/${taskId}`);
 }
 
+export interface CreateTaskChecklist {
+  name: string;
+  items?: { content: string; isChecked?: boolean; order?: number }[];
+}
+
+export interface CreateTaskFieldValue {
+  fieldId: string;
+  valueText?: string | null;
+  valueNumber?: number | null;
+  valueDatetime?: string | null;
+}
+
+export interface CreateTaskDependency {
+  dependsOnTaskId: string;
+  type: 'blocks' | 'is_blocked_by' | 'parent' | 'subtask' | 'relates_to';
+}
+
 export function createTask(data: {
   projectId: string;
+  ownerMemberId: string;
   name: string;
+  boardId?: string;
   description?: string;
-  executorId?: string;
-  columnId: string;
+  executorMemberId?: string;
+  columnId?: string;
   swimlaneId?: string;
   deadline?: string;
+  priority?: string;
+  estimation?: string;
+  // Nested entities (created atomically with the task)
+  checklists?: CreateTaskChecklist[];
+  tags?: string[];
+  watcherMemberIds?: string[];
+  fieldValues?: CreateTaskFieldValue[];
+  dependencies?: CreateTaskDependency[];
+  addToBacklog?: boolean;
 }) {
   return apiRequest<TaskResponse>('/tasks', {
     method: 'POST',
@@ -54,10 +92,12 @@ export function createTask(data: {
 export function updateTask(taskId: string, data: Partial<{
   name: string;
   description: string;
-  executorId: string | null;
+  executorMemberId: string | null;
   columnId: string;
   swimlaneId: string | null;
   deadline: string | null;
+  priority: string | null;
+  estimation: string | null;
 }>) {
   return apiRequest<TaskResponse>(`/tasks/${taskId}`, {
     method: 'PATCH',
@@ -65,9 +105,8 @@ export function updateTask(taskId: string, data: Partial<{
   });
 }
 
-export function deleteTask(taskId: string, reason: string) {
+export function deleteTask(taskId: string) {
   return apiRequest<null>(`/tasks/${taskId}`, {
     method: 'DELETE',
-    body: JSON.stringify({ reason }),
   });
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import {
@@ -22,7 +22,8 @@ import {
   getBoardColumns, getBoardSwimlanes, createColumn, updateColumn, deleteColumn, reorderColumns,
   type ColumnResponse, type SwimlaneResponse,
 } from "../api/boards";
-import { searchTasks, type TaskResponse } from "../api/tasks";
+import { searchTasks, updateTask, type TaskResponse } from "../api/tasks";
+import { getProjectSprints, getSprintTasks } from "../api/sprints";
 import { getUser, type UserProfileResponse } from "../api/users";
 
 const ItemType = {
@@ -84,10 +85,11 @@ function validateColumnOrder(cols: ColumnResponse[]): string | null {
 
 // ── Task Card ───────────────────────────────────────────────
 
-function TaskCard({ task, userCache, moveTask }: {
+function TaskCard({ task, userCache, moveTask, returnUrl }: {
   task: TaskResponse;
   userCache: Map<string, UserProfileResponse>;
   moveTask: (taskId: string, columnId: string, swimlaneId: string | null) => void;
+  returnUrl?: string;
 }) {
   const [{ isDragging }, drag] = useDrag({
     type: ItemType.TASK,
@@ -95,11 +97,11 @@ function TaskCard({ task, userCache, moveTask }: {
     collect: (monitor) => ({ isDragging: monitor.isDragging() }),
   });
 
-  const executor = task.executorId ? userCache.get(task.executorId) : null;
+  const executor = task.executorUserId ? userCache.get(task.executorUserId) : null;
 
   return (
     <Link
-      to={`/tasks/${task.id}`}
+      to={`/tasks/${task.id}${returnUrl ? `?returnUrl=${returnUrl}` : ""}`}
       ref={drag}
       className={`bg-white p-3 rounded-lg shadow-md border border-slate-200 hover:shadow-xl hover:border-blue-400 transition-all cursor-move block ${
         isDragging ? "opacity-50 scale-95" : ""
@@ -134,13 +136,15 @@ function TaskCard({ task, userCache, moveTask }: {
 // ── Drop Zone ───────────────────────────────────────────────
 
 function DropZone({
-  columnId, swimlaneId, children, moveTask, onAddTask,
+  columnId, swimlaneId, children, moveTask, onAddTask, canAddTask = true, addTaskHint,
 }: {
   columnId: string;
   swimlaneId: string | null;
   children: React.ReactNode;
   moveTask: (taskId: string, columnId: string, swimlaneId: string | null) => void;
   onAddTask: () => void;
+  canAddTask?: boolean;
+  addTaskHint?: string;
 }) {
   const [{ isOver }, drop] = useDrop({
     accept: ItemType.TASK,
@@ -154,12 +158,19 @@ function DropZone({
       className={`min-h-[200px] p-2 rounded-lg transition-colors ${isOver ? "bg-blue-50 ring-2 ring-blue-300" : ""}`}
     >
       <div className="space-y-3">{children}</div>
-      <button
-        onClick={onAddTask}
-        className="mt-3 w-full py-2.5 border-2 border-dashed border-slate-300 rounded-lg hover:border-blue-400 hover:bg-blue-50 hover:text-blue-600 transition-all text-slate-600 flex items-center justify-center gap-2"
-      >
-        <Plus size={16} /> Добавить задачу
-      </button>
+      {canAddTask && (
+        <div>
+          <button
+            onClick={onAddTask}
+            className="mt-3 w-full py-2.5 border-2 border-dashed border-slate-300 rounded-lg hover:border-blue-400 hover:bg-blue-50 hover:text-blue-600 transition-all text-slate-600 flex items-center justify-center gap-2"
+          >
+            <Plus size={16} /> Добавить задачу
+          </button>
+          {addTaskHint && (
+            <p className="text-xs text-slate-400 text-center mt-1.5">{addTaskHint}</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -306,7 +317,7 @@ function ColumnHeader({
 // ── Swimlane Row ────────────────────────────────────────────
 
 function SwimlaneRow({
-  swimlane, columns, tasks, userCache, moveTask, onAddTask,
+  swimlane, columns, tasks, userCache, moveTask, onAddTask, canAddTaskInColumn, getAddTaskHint,
 }: {
   swimlane: SwimlaneResponse;
   columns: ColumnResponse[];
@@ -314,6 +325,8 @@ function SwimlaneRow({
   userCache: Map<string, UserProfileResponse>;
   moveTask: (taskId: string, columnId: string, swimlaneId: string | null) => void;
   onAddTask: (columnId: string, swimlaneId: string | null) => void;
+  canAddTaskInColumn?: (col: ColumnResponse) => boolean;
+  getAddTaskHint?: (col: ColumnResponse) => string | undefined;
 }) {
   const swimlaneTasks = tasks.filter((t) => t.swimlaneId === swimlane.id);
 
@@ -339,9 +352,12 @@ function SwimlaneRow({
         const cellTasks = tasks.filter((t) => t.columnId === column.id && t.swimlaneId === swimlane.id);
         return (
           <td key={column.id} className="p-4 align-top bg-slate-50">
-            <DropZone columnId={column.id} swimlaneId={swimlane.id} moveTask={moveTask} onAddTask={() => onAddTask(column.id, swimlane.id)}>
+            <DropZone columnId={column.id} swimlaneId={swimlane.id} moveTask={moveTask}
+              onAddTask={() => onAddTask(column.id, swimlane.id)}
+              canAddTask={canAddTaskInColumn ? canAddTaskInColumn(column) : true}
+              addTaskHint={getAddTaskHint?.(column)}>
               {cellTasks.map((task) => (
-                <TaskCard key={task.id} task={task} userCache={userCache} moveTask={moveTask} />
+                <TaskCard key={task.id} task={task} userCache={userCache} moveTask={moveTask} returnUrl={boardReturnUrl} />
               ))}
             </DropZone>
           </td>
@@ -420,6 +436,7 @@ function FilterDropdown({
 // ── Main Board Component ────────────────────────────────────
 
 export default function Board({ boardId, projectId, projectType, onBoardChanged }: BoardProps) {
+  const navigate = useNavigate();
   const [columns, setColumns] = useState<ColumnResponse[]>([]);
   const [swimlanes, setSwimlanes] = useState<SwimlaneResponse[]>([]);
   const [tasks, setTasks] = useState<TaskResponse[]>([]);
@@ -427,6 +444,8 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState<Filters>({ assignees: [], priorities: [], tags: [] });
   const [columnError, setColumnError] = useState<{ message: string; dismissible: boolean } | null>(null);
+  const [activeSprintName, setActiveSprintName] = useState<string | null>(null);
+  const [activeSprintId, setActiveSprintId] = useState<string | null>(null);
 
   const isScrum = projectType === "scrum";
 
@@ -441,15 +460,44 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
       setColumns(cols.sort((a, b) => a.order - b.order));
       setSwimlanes(swims.sort((a, b) => a.order - b.order));
 
-      // Load tasks if projectId is available
+      // Load tasks: for Scrum boards — only active sprint tasks with columnId; for Kanban — all board tasks
       if (projectId) {
         try {
-          const t = await searchTasks({ projectId });
-          const colIds = new Set(cols.map((c) => c.id));
-          setTasks(t.filter((task) => colIds.has(task.columnId)));
+          let boardTasks: TaskResponse[];
+          if (isScrum) {
+            // For Scrum: show tasks from the active sprint that belong to this board
+            const sprints = await getProjectSprints(projectId).catch(() => []);
+            const activeSprint = sprints.find(s => s.status === "active");
+            if (activeSprint) {
+              setActiveSprintName(activeSprint.name);
+              setActiveSprintId(activeSprint.id);
+              const sprintTasks = await getSprintTasks(activeSprint.id).catch(() => [] as TaskResponse[]);
+              const colIds = new Set(cols.map(c => c.id));
+              const initialCol = cols.find(c => c.systemType === "initial");
+              // Tasks for this board: place tasks without columnId into the first (initial) column
+              boardTasks = sprintTasks
+                .filter(t => t.boardId === boardId)
+                .map(t => {
+                  if (!t.columnId || !colIds.has(t.columnId)) {
+                    return { ...t, columnId: initialCol?.id ?? cols[0]?.id ?? null };
+                  }
+                  return t;
+                })
+                .filter(t => t.columnId !== null);
+            } else {
+              setActiveSprintName(null);
+              setActiveSprintId(null);
+              boardTasks = []; // No active sprint — board is empty
+            }
+          } else {
+            const t = await searchTasks({ projectId });
+            const colIds = new Set(cols.map((c) => c.id));
+            boardTasks = t.filter((task) => colIds.has(task.columnId));
+          }
+          setTasks(boardTasks);
 
           const userIds = new Set<string>();
-          t.forEach((task) => { if (task.executorId) userIds.add(task.executorId); });
+          boardTasks.forEach((task) => { if (task.executorUserId) userIds.add(task.executorUserId); });
           const cache = new Map<string, UserProfileResponse>();
           await Promise.allSettled(
             [...userIds].map(async (uid) => {
@@ -462,7 +510,7 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
     } catch { /**/ } finally {
       setLoading(false);
     }
-  }, [boardId, projectId]);
+  }, [boardId, projectId, isScrum]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -522,9 +570,14 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
     } catch (e: any) { setColumnError({ message: e.message || "Ошибка удаления колонки", dismissible: true }); }
   }
 
-  const moveTask = (taskId: string, columnId: string, swimlaneId: string | null) => {
+  const moveTask = async (taskId: string, columnId: string, swimlaneId: string | null) => {
     setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, columnId, swimlaneId } : t));
-    // TODO: call updateTask API
+    try {
+      await updateTask(taskId, { columnId, swimlaneId });
+    } catch (e: any) {
+      toast.error(e.message || "Ошибка перемещения задачи");
+      loadData(); // rollback
+    }
   };
 
   const moveColumn = (dragIndex: number, hoverIndex: number) => {
@@ -552,8 +605,32 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
     });
   };
 
+  const boardReturnUrl = encodeURIComponent(`/projects/${projectId}?tab=boards`);
+
   const handleAddTask = (columnId: string, swimlaneId: string | null) => {
-    console.log("Добавление задачи:", { columnId, swimlaneId });
+    if (!boardId || !projectId) return;
+    if (isScrum && activeSprintId) {
+      navigate(`/tasks/new?projectId=${projectId}&boardId=${boardId}&sprintId=${activeSprintId}&returnUrl=${boardReturnUrl}`);
+    } else {
+      navigate(`/tasks/new?projectId=${projectId}&boardId=${boardId}&backlog=1&returnUrl=${boardReturnUrl}`);
+    }
+  };
+
+  // Determine which columns can have the "Add task" button
+  const canAddTaskInColumn = (col: ColumnResponse): boolean => {
+    if (isScrum) {
+      // No active sprint — no task creation allowed
+      if (!activeSprintName) return false;
+      return col.systemType === "initial" && columns.indexOf(col) === 0;
+    }
+    return true;
+  };
+
+  const getAddTaskHint = (col: ColumnResponse): string | undefined => {
+    if (isScrum && canAddTaskInColumn(col) && activeSprintName) {
+      return `В бэклог спринта «${activeSprintName}» (текущий активный спринт)`;
+    }
+    return undefined;
   };
 
   const toggleFilter = (filterType: keyof Filters, value: string) => {
@@ -585,9 +662,23 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
     );
   }
 
+  const noActiveSprint = isScrum && !activeSprintName;
+
   return (
     <DndProvider backend={HTML5Backend}>
       <div className="space-y-4 min-w-0">
+        {/* Scrum: no active sprint banner */}
+        {noActiveSprint && (
+          <div className="flex items-center gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+            <AlertCircle size={20} className="text-amber-600 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-amber-800">Нет активного спринта</p>
+              <p className="text-xs text-amber-700 mt-0.5">
+                Доска отображает задачи только активного спринта. Перейдите во вкладку «Бэклог и спринты», чтобы создать и запустить спринт.
+              </p>
+            </div>
+          </div>
+        )}
         {/* Filters */}
         {tasks.length > 0 && (
           <div className="bg-white border border-slate-200 rounded-lg p-4">
@@ -602,7 +693,7 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               <FilterDropdown
                 label="Исполнитель"
-                options={[...new Set(tasks.map((t) => t.executorId).filter(Boolean) as string[])]}
+                options={[...new Set(tasks.map((t) => t.executorUserId).filter(Boolean) as string[])]}
                 selectedValues={filters.assignees}
                 onToggle={(v) => toggleFilter("assignees", v)}
                 renderOption={(id) => userCache.get(id)?.fullName || id}
@@ -672,6 +763,8 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
                       userCache={userCache}
                       moveTask={moveTask}
                       onAddTask={handleAddTask}
+                      canAddTaskInColumn={canAddTaskInColumn}
+                      getAddTaskHint={getAddTaskHint}
                     />
                   ))
                 ) : (
@@ -685,9 +778,11 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
                             swimlaneId={null}
                             moveTask={moveTask}
                             onAddTask={() => handleAddTask(column.id, null)}
+                            canAddTask={canAddTaskInColumn(column)}
+                            addTaskHint={getAddTaskHint(column)}
                           >
                             {cellTasks.map((task) => (
-                              <TaskCard key={task.id} task={task} userCache={userCache} moveTask={moveTask} />
+                              <TaskCard key={task.id} task={task} userCache={userCache} moveTask={moveTask} returnUrl={boardReturnUrl} />
                             ))}
                           </DropZone>
                         </td>

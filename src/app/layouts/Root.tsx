@@ -53,7 +53,7 @@ export default function Root() {
   const navItems = [
     { path: "/", icon: LayoutDashboard, label: "Дашборд" },
     { path: "/projects", icon: FolderKanban, label: "Проекты" },
-    { path: "/tasks", icon: CheckSquare, label: "Задачи" },
+    { path: "/tasks", icon: CheckSquare, label: "Мои задачи" },
     { path: "/calendar", icon: Calendar, label: "Календарь" },
     { path: "/team", icon: UsersRound, label: "Коллеги" },
     { path: "/analytics", icon: BarChart3, label: "Аналитика" },
@@ -90,16 +90,7 @@ export default function Root() {
             </Link>
           </div>
 
-          <div className="flex-1 max-w-2xl mx-8 hidden md:block">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-              <input
-                type="text"
-                placeholder="Поиск задач, проектов..."
-                className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
-          </div>
+          <div className="flex-1" />
 
           <div className="flex items-center gap-3">
             <div className="relative">

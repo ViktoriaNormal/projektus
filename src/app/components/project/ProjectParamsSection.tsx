@@ -10,6 +10,7 @@ import {
 } from "../../api/project-params";
 import { searchUsers, getUser, type UserProfileResponse } from "../../api/users";
 import type { ProjectReferences } from "../../api/boards";
+import { UserSelect, UserMultiSelect, type UserOption } from "../UserSelect";
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -46,7 +47,8 @@ function isParamEmpty(param: ProjectParam, projectProps?: { name?: string; descr
     if (param.name === "Ответственный за проект") return !projectProps?.ownerId;
     if (param.name === "Дата создания") return false; // always filled
   }
-  if (param.fieldType === "checkbox") return param.value == null;
+  if (param.fieldType === "checkbox") return false; // checkbox always has a state
+  if (param.fieldType === "select" && param.options && param.options.length > 0) return false; // select with options always has first value
   return !param.value?.trim();
 }
 
@@ -117,8 +119,11 @@ function DebouncedInput({ value, onSave, className, placeholder, required, requi
 
   useEffect(() => { if (!dirtyRef.current) setLocal(value); }, [value]);
 
-  function trySave(v: string) {
-    if (required && !v.trim()) { setError(requiredMessage || "Поле не может быть пустым"); return; }
+  function trySave(v: string, showRequiredError: boolean) {
+    if (required && !v.trim()) {
+      if (showRequiredError) setError(requiredMessage || "Поле не может быть пустым");
+      return;
+    }
     const vErr = validate?.(v);
     if (vErr) { setError(vErr); return; }
     setError(""); onSave(v);
@@ -134,7 +139,15 @@ function DebouncedInput({ value, onSave, className, placeholder, required, requi
       if (!stillRequired && !stillInvalid) setError("");
     }
     if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => { dirtyRef.current = false; trySave(v); }, 1500);
+    // Don't show required error on debounce — user is still typing
+    timerRef.current = setTimeout(() => { dirtyRef.current = false; trySave(v, false); }, 1500);
+  }
+
+  function handleBlur() {
+    // On blur — flush pending save and show errors
+    if (timerRef.current) clearTimeout(timerRef.current);
+    dirtyRef.current = false;
+    trySave(local, true);
   }
 
   useEffect(() => () => {
@@ -149,7 +162,7 @@ function DebouncedInput({ value, onSave, className, placeholder, required, requi
 
   return (
     <div>
-      <input type="text" value={local} onChange={e => handleChange(e.target.value)}
+      <input type="text" value={local} onChange={e => handleChange(e.target.value)} onBlur={handleBlur}
         className={`${className} ${error ? "border-red-400 ring-2 ring-red-200" : ""}`} placeholder={placeholder} />
       {error && (
         <div className="flex items-center gap-2 mt-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">
@@ -231,110 +244,124 @@ function DateTimeInput({ value, onSave }: { value: string | null; onSave: (val: 
   );
 }
 
-// ── UserPicker ─────────────────────────────────────────────────
+// ── UserPicker (searchable dropdown for all system users) ──────
+
+const PICKER_DROPDOWN_HEIGHT = 310;
+
+function usePickerDropDirection(ref: React.RefObject<HTMLDivElement | null>, open: boolean) {
+  const [dropUp, setDropUp] = useState(false);
+  useEffect(() => {
+    if (!open || !ref.current) return;
+    const rect = ref.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    setDropUp(spaceBelow < PICKER_DROPDOWN_HEIGHT && rect.top > spaceBelow);
+  }, [open, ref]);
+  return dropUp;
+}
 
 function UserPicker({ value, onSave, multiple }: {
   value: string | null; onSave: (val: string | null) => void; multiple?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<UserProfileResponse[]>([]);
-  const [selectedUsers, setSelectedUsers] = useState<{ id: string; name: string }[]>([]);
-  const [showDropdown, setShowDropdown] = useState(false);
+  const [loadedUsers, setLoadedUsers] = useState<Map<string, UserProfileResponse>>(new Map());
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dropUp = usePickerDropDirection(ref, open);
 
-  // Load initial user names from IDs
+  // Load user profiles for existing IDs
   useEffect(() => {
-    if (!value) { setSelectedUsers([]); return; }
+    if (!value) return;
     const ids = multiple ? value.split(",").map(s => s.trim()).filter(Boolean) : [value];
-    Promise.all(ids.map(async id => {
-      try { const u = await getUser(id); return { id: u.id, name: u.fullName }; }
-      catch { return { id, name: id }; }
-    })).then(setSelectedUsers);
+    ids.forEach(async id => {
+      if (loadedUsers.has(id)) return;
+      try { const u = await getUser(id); setLoadedUsers(prev => new Map(prev).set(id, u)); } catch { /**/ }
+    });
   }, [value, multiple]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   function handleSearch(q: string) {
     setQuery(q);
     if (timerRef.current) clearTimeout(timerRef.current);
     if (q.length < 2) { setResults([]); return; }
     timerRef.current = setTimeout(async () => {
-      try { const users = await searchUsers(q, 10); setResults(users); setShowDropdown(true); }
-      catch { setResults([]); }
+      try {
+        const users = await searchUsers(q, 10);
+        setResults(users);
+        users.forEach(u => setLoadedUsers(prev => new Map(prev).set(u.id, u)));
+      } catch { setResults([]); }
     }, 300);
   }
 
-  function selectUser(user: UserProfileResponse) {
-    if (multiple) {
-      if (selectedUsers.some(u => u.id === user.id)) return;
-      const updated = [...selectedUsers, { id: user.id, name: user.fullName }];
-      setSelectedUsers(updated);
-      onSave(updated.map(u => u.id).join(","));
-    } else {
-      setSelectedUsers([{ id: user.id, name: user.fullName }]);
-      onSave(user.id);
-    }
-    setQuery(""); setResults([]); setShowDropdown(false);
-  }
+  const selectedIds = value ? (multiple ? value.split(",").map(s => s.trim()).filter(Boolean) : [value]) : [];
 
-  function removeUser(userId: string) {
-    const updated = selectedUsers.filter(u => u.id !== userId);
-    setSelectedUsers(updated);
-    onSave(updated.length > 0 ? updated.map(u => u.id).join(",") : null);
-  }
-
-  // Single user: searchable dropdown select
+  // ── Single user ──
   if (!multiple) {
-    const selectedUser = selectedUsers[0] ?? null;
-    const [open, setOpen] = useState(false);
-
-    function toggleOpen() { setOpen(o => !o); setQuery(""); setResults([]); }
-
+    const selected = selectedIds[0] ? loadedUsers.get(selectedIds[0]) : null;
     return (
-      <div className="relative w-96">
-        {/* Trigger — looks like a select */}
-        <button type="button" onClick={toggleOpen}
-          className="w-full flex items-center justify-between px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-purple-500 text-left">
-          <span className={selectedUser ? "text-slate-800" : "text-slate-400"}>
-            {selectedUser ? selectedUser.name : "Выберите пользователя..."}
-          </span>
-          <ChevronDown size={14} className={`text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
+      <div ref={ref} className={`relative ${open ? "z-40" : ""}`}>
+        <button type="button" onClick={() => { setOpen(!open); setQuery(""); setResults([]); }}
+          className="w-full flex items-center justify-between px-3 py-2 border border-slate-200 rounded-lg hover:border-purple-400 transition-colors text-left bg-white">
+          {selected ? (
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0">
+                <span className="text-xs font-semibold text-purple-700">{selected.fullName.charAt(0)}</span>
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-medium truncate">{selected.fullName}</p>
+                {selected.email && (
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs text-slate-500 truncate">{selected.email}</span>
+                    <span role="button" onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(selected.email); }}
+                      className="p-0.5 text-slate-400 hover:text-purple-600 transition-colors shrink-0"><Copy size={11} /></span>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <span className="text-sm text-slate-400">Выберите пользователя...</span>
+          )}
+          <ChevronDown size={16} className={`text-slate-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
         </button>
-
-        {/* Dropdown */}
         {open && (
-          <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg"
-            onMouseDown={e => e.preventDefault()}>
-            {/* Search input inside dropdown */}
+          <div className={`absolute left-0 right-0 bg-white border border-slate-200 rounded-lg shadow-lg z-30 overflow-hidden ${dropUp ? "bottom-full mb-1" : "top-full mt-1"}`}>
             <div className="p-2 border-b border-slate-100">
               <div className="relative">
                 <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input type="text" autoFocus value={query} onChange={e => handleSearch(e.target.value)}
-                  placeholder="Поиск..."
-                  className="w-full pl-8 pr-3 py-1.5 text-sm border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-purple-500"
-                  onBlur={() => setTimeout(() => setOpen(false), 200)}
-                />
+                  placeholder="Поиск по имени или email..."
+                  className="w-full pl-8 pr-3 py-1.5 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500" />
               </div>
             </div>
-
-            {/* "Clear" option */}
-            {selectedUser && (
-              <button onClick={() => { removeUser(selectedUser.id); setOpen(false); }}
-                className="w-full px-3 py-2 text-left text-sm text-slate-400 hover:bg-slate-50 border-b border-slate-100">
-                Не выбрано
-              </button>
-            )}
-
-            {/* Results */}
-            <div className="max-h-40 overflow-y-auto">
-              {results.length > 0 ? results.map(user => (
-                <button key={user.id} onClick={() => { selectUser(user); setOpen(false); }}
-                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-left text-sm">
-                  <span className="font-medium">{user.fullName}</span>
-                  <span className="text-slate-400 text-xs">{user.email}</span>
+            <div className="max-h-[264px] overflow-y-auto">
+              {selected && (
+                <button type="button" onClick={() => { onSave(null); setOpen(false); }}
+                  className="w-full px-3 py-2.5 text-left text-sm text-slate-400 hover:bg-slate-50 border-b border-slate-100">
+                  Не выбрано
+                </button>
+              )}
+              {results.length > 0 ? results.map(u => (
+                <button key={u.id} type="button" onClick={() => { onSave(u.id); setOpen(false); setQuery(""); setResults([]); }}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-slate-50 transition-colors ${selectedIds.includes(u.id) ? "bg-purple-50" : ""}`}>
+                  <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0">
+                    <span className="text-xs font-semibold text-purple-700">{u.fullName.charAt(0)}</span>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{u.fullName}</p>
+                    {u.email && <p className="text-xs text-slate-500 truncate">{u.email}</p>}
+                  </div>
+                  {selectedIds.includes(u.id) && <Check size={16} className="text-purple-600 shrink-0 ml-auto" />}
                 </button>
               )) : query.length >= 2 ? (
-                <p className="px-3 py-2 text-xs text-slate-400">Ничего не найдено</p>
+                <p className="text-sm text-slate-400 text-center py-4">Не найдено</p>
               ) : (
-                <p className="px-3 py-2 text-xs text-slate-400">Введите минимум 2 символа</p>
+                <p className="text-sm text-slate-400 text-center py-4">Введите минимум 2 символа</p>
               )}
             </div>
           </div>
@@ -343,40 +370,84 @@ function UserPicker({ value, onSave, multiple }: {
     );
   }
 
-  // Multiple users: tags
+  // ── Multiple users ──
+  const selectedUsersLoaded = selectedIds.map(id => loadedUsers.get(id)).filter(Boolean) as UserProfileResponse[];
+
+  function toggle(userId: string) {
+    const updated = selectedIds.includes(userId) ? selectedIds.filter(id => id !== userId) : [...selectedIds, userId];
+    onSave(updated.length > 0 ? updated.join(",") : null);
+  }
+
   return (
-    <div>
-      {selectedUsers.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          {selectedUsers.map(u => (
-            <span key={u.id} className="px-2 py-1 bg-blue-50 border border-blue-200 rounded text-sm flex items-center gap-1.5">
-              {u.name}
-              <button onClick={() => removeUser(u.id)} className="hover:text-red-600"><X size={12} /></button>
-            </span>
+    <div ref={ref} className={`relative ${open ? "z-40" : ""}`}>
+      <button type="button" onClick={() => { setOpen(!open); setQuery(""); setResults([]); }}
+        className="w-full flex items-center justify-between px-4 py-2 border border-slate-200 rounded-lg hover:border-purple-400 transition-colors text-left bg-white">
+        <span className="text-sm truncate">
+          {selectedUsersLoaded.length > 0
+            ? `Выбрано: ${selectedUsersLoaded.length}`
+            : <span className="text-slate-400">Выберите пользователей...</span>
+          }
+        </span>
+        <ChevronDown size={16} className={`text-slate-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className={`absolute left-0 right-0 bg-white border border-slate-200 rounded-lg shadow-lg z-30 overflow-hidden ${dropUp ? "bottom-full mb-1" : "top-full mt-1"}`}>
+          <div className="p-2 border-b border-slate-100">
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input type="text" autoFocus value={query} onChange={e => handleSearch(e.target.value)}
+                placeholder="Поиск по имени или email..."
+                className="w-full pl-8 pr-3 py-1.5 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500" />
+            </div>
+          </div>
+          <div className="max-h-[264px] overflow-y-auto">
+            {results.length > 0 ? results.map(u => {
+              const checked = selectedIds.includes(u.id);
+              return (
+                <label key={u.id} className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 transition-colors cursor-pointer">
+                  <input type="checkbox" checked={checked} onChange={() => toggle(u.id)} className="w-4 h-4 text-purple-600 rounded shrink-0" />
+                  <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0">
+                    <span className="text-xs font-semibold text-purple-700">{u.fullName.charAt(0)}</span>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{u.fullName}</p>
+                    {u.email && <p className="text-xs text-slate-500 truncate">{u.email}</p>}
+                  </div>
+                </label>
+              );
+            }) : query.length >= 2 ? (
+              <p className="text-sm text-slate-400 text-center py-4">Не найдено</p>
+            ) : (
+              <p className="text-sm text-slate-400 text-center py-4">Введите минимум 2 символа</p>
+            )}
+          </div>
+        </div>
+      )}
+      {/* Selected user cards */}
+      {selectedUsersLoaded.length > 0 && (
+        <div className="space-y-2 mt-2">
+          {selectedUsersLoaded.map(u => (
+            <div key={u.id} className="flex items-center justify-between p-3 border border-slate-200 rounded-lg group">
+              <div className="flex items-center gap-3">
+                <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0">
+                  <span className="text-xs font-semibold text-purple-700">{u.fullName.charAt(0)}</span>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{u.fullName}</p>
+                  {u.email && (
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-slate-500 truncate">{u.email}</span>
+                      <button onClick={() => navigator.clipboard.writeText(u.email)}
+                        className="p-0.5 text-slate-400 hover:text-purple-600 transition-colors shrink-0"><Copy size={12} /></button>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <button onClick={() => toggle(u.id)} className="opacity-0 group-hover:opacity-100 p-1 text-red-600 hover:bg-red-50 rounded"><X size={14} /></button>
+            </div>
           ))}
         </div>
       )}
-      <div className="relative">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-        <input type="text" value={query} onChange={e => handleSearch(e.target.value)}
-          onFocus={() => results.length > 0 && setShowDropdown(true)}
-          onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
-          placeholder="Поиск пользователей..."
-          className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-        />
-        {showDropdown && results.length > 0 && (
-          <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
-            {results.map(user => (
-              <button key={user.id} onClick={() => selectUser(user)}
-                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-left text-sm"
-              >
-                <span className="font-medium">{user.fullName}</span>
-                <span className="text-slate-400 text-xs">{user.email}</span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
@@ -394,7 +465,7 @@ function CopyButton({ text }: { text: string }) {
 
 // ── Types ──────────────────────────────────────────────────────
 
-interface MemberUser { userId: string; fullName: string; }
+interface MemberUser { userId: string; fullName: string; email?: string; avatarUrl?: string; }
 
 interface ProjectParamsSectionProps {
   projectId: string;
@@ -425,16 +496,16 @@ export default function ProjectParamsSection({
   const [newOptions, setNewOptions] = useState<string[]>([]);
   const [optionInput, setOptionInput] = useState("");
 
+  const isScrum = projectType === "scrum";
+  const FIELD_TYPE_LABELS = buildFieldTypeLabels(refs, { projectType, scope: "project_param" });
+  const systemParams = params.filter(p => p.isSystem);
+  const customParams = params.filter(p => !p.isSystem);
+
   // Edit modal for custom params
   const [editingParamId, setEditingParamId] = useState<string | null>(null);
   useBodyScrollLock(!!editingParamId);
   const editingParam = editingParamId ? customParams.find(p => p.id === editingParamId) || null : null;
   const [editParamOptionInput, setEditParamOptionInput] = useState("");
-
-  const isScrum = projectType === "scrum";
-  const FIELD_TYPE_LABELS = buildFieldTypeLabels(refs, { projectType, scope: "project_param" });
-  const systemParams = params.filter(p => p.isSystem);
-  const customParams = params.filter(p => !p.isSystem);
 
   // ── Local value overrides (for values changed locally but not yet saved / rejected by backend) ──
   const [localOverrides, setLocalOverrides] = useState<Map<string, string | null>>(new Map());
@@ -576,10 +647,7 @@ export default function ProjectParamsSection({
     }
     if (param.id === ownerParam?.id) {
       return (
-        <select value={projectOwnerId} onChange={(e) => onProjectUpdate({ ownerId: e.target.value })}
-          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
-          {members.map(m => <option key={m.userId} value={m.userId}>{m.fullName}</option>)}
-        </select>
+        <UserPicker value={projectOwnerId} onSave={(val) => { if (val) onProjectUpdate({ ownerId: val }); }} />
       );
     }
     if (param.id === createdParam?.id) {
@@ -589,12 +657,15 @@ export default function ProjectParamsSection({
       return <input type="text" value={formatted} disabled className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-slate-100 text-slate-500 cursor-not-allowed" />;
     }
 
-    // user / user_list types
+    // user / user_list types — from project members
     if (param.fieldType === "user") {
-      return <UserPicker value={param.value} onSave={(val) => handleSaveParamValue(param.id, val)} />;
+      const memberOptions = members.map(m => ({ id: m.userId, fullName: m.fullName, email: m.email, avatarUrl: m.avatarUrl }));
+      return <UserSelect options={memberOptions} value={param.value || null} onChange={val => handleSaveParamValue(param.id, val)} placeholder="Не выбран" />;
     }
     if (param.fieldType === "user_list") {
-      return <UserPicker value={param.value} onSave={(val) => handleSaveParamValue(param.id, val)} multiple />;
+      const memberOptions = members.map(m => ({ id: m.userId, fullName: m.fullName, email: m.email, avatarUrl: m.avatarUrl }));
+      const selectedIds = param.value ? param.value.split(",").map(s => s.trim()).filter(Boolean) : [];
+      return <UserMultiSelect options={memberOptions} value={selectedIds} onChange={ids => handleSaveParamValue(param.id, ids.length > 0 ? ids.join(",") : null)} />;
     }
 
     if (param.fieldType === "select" && param.options && param.options.length > 0) {
@@ -652,7 +723,7 @@ export default function ProjectParamsSection({
 
   // ── Render ───────────────────────────────────────────────────
   return (
-    <div className="bg-white rounded-xl shadow-md border border-slate-100 overflow-hidden">
+    <div className="bg-white rounded-xl shadow-md border border-slate-100">
       <div className="p-6">
         <div className="flex items-center gap-3 mb-1">
           <Settings size={20} className="text-purple-600" />
@@ -712,7 +783,6 @@ export default function ProjectParamsSection({
                     {SYSTEM_FIELD_TYPE_LABELS[param.fieldType] || FIELD_TYPE_LABELS[param.fieldType] || param.fieldType}
                   </span>
                 </div>
-                {param.description && <p className="text-xs text-slate-500 mb-2">{param.description}</p>}
                 {renderParamValue(param)}
                 {err && (
                   <div className="flex items-center gap-2 mt-2 p-2.5 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs" style={{ overflowAnchor: "none" }}>

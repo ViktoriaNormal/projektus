@@ -333,7 +333,6 @@ function TemplateCard({ template, refs, onEdit }: { template: ProjectTemplateDet
                       ? "bg-slate-100 text-slate-600 border-slate-200"
                       : "bg-purple-50 text-purple-600 border-purple-100"
                   }`}
-                  title={p.description || undefined}
                 >
                   {p.name}
                   {p.isRequired && <span className="text-red-400 ml-0.5">*</span>}
@@ -601,7 +600,7 @@ function buildFieldTypeLabels(refs: TemplateReferences, opts?: { projectType?: s
   return map;
 }
 
-// Labels for system task field types (fieldType values from systemTaskFields)
+// Labels for system task field types
 // These are different from custom field types — they include special types like column, user_list, priority, etc.
 const SYSTEM_FIELD_TYPE_LABELS: Record<string, string> = {
   text: "Текст",
@@ -700,7 +699,7 @@ function TemplateEditor({
     const estimationUnit = defaultBoard?.estimationUnit || (isScrum ? "story_points" : "time");
     try {
       const newBoard = await createTemplateBoard(templateId, {
-        name: `Доска ${data!.boards.length + 1}`,
+        name: "Новая доска",
         isDefault: data!.boards.length === 0,
         priorityType,
         estimationUnit,
@@ -955,10 +954,10 @@ function TemplateEditor({
           if (field.fieldType === "checkbox") {
             expectedValues = [`${field.name}: да`, `${field.name}: нет`];
           } else if (field.fieldType === "select" || field.fieldType === "priority") {
-            const priorityFieldId = freshBoard.fields.find(f => f.isSystem && (f.fieldType === "priority" || f.description?.toLowerCase().includes("приоритизаци")))?.id;
+            const priorityFieldId = freshBoard.fields.find(f => f.isSystem && (f.fieldType === "priority" || f.name.toLowerCase().includes("приоритизаци")))?.id;
             if (field.id === priorityFieldId) {
               const defaults = refs.priorityTypeOptions.find(o => o.key === freshBoard.priorityType)?.defaultValues || [];
-              expectedValues = (field.options && field.options.length > 0) ? field.options : defaults.length > 0 ? defaults : null;
+              expectedValues = (freshBoard.priorityOptions && freshBoard.priorityOptions.length > 0) ? freshBoard.priorityOptions : defaults.length > 0 ? defaults : null;
             } else {
               expectedValues = (field.options && field.options.length > 0) ? field.options : null;
             }
@@ -1623,7 +1622,7 @@ function BoardSwimlanesTab({
   // For the priority field, show the current priority type name (e.g. "Класс обслуживания") instead of generic field name
   const priorityTypeLabel = (refs.priorityTypeOptions || []).find(o => o.key === board.priorityType)?.name;
   // The priority field's description from backend contains "приоритизации" — use that to identify it reliably
-  const priorityFieldId = boardFields.find(f => f.isSystem && (f.description?.toLowerCase().includes("приоритизаци") || f.name.toLowerCase().includes("приоритизаци")))?.id;
+  const priorityFieldId = boardFields.find(f => f.isSystem && (f.fieldType === "priority" || f.name.toLowerCase().includes("приоритизаци")))?.id;
 
   function getFieldDisplayName(f: TemplateBoardField): string {
     if (f.id === priorityFieldId && priorityTypeLabel) return priorityTypeLabel;
@@ -1782,12 +1781,12 @@ function BoardTaskTemplateTab({
   const priorityField = systemFields.find(f => f.fieldType === "priority")
     || systemFields.find(f =>
       f.name === "Приоритизация" ||
-      f.description?.toLowerCase().includes("приоритизаци")
+      f.name.toLowerCase().includes("приоритизаци")
     ) || null;
   const estimationFieldFound = systemFields.find(f => f.fieldType === "estimation")
     || systemFields.find(f =>
       f.name === "Оценка трудозатрат" ||
-      f.description?.toLowerCase().includes("единица измерения")
+      f.name.toLowerCase().includes("оценка трудозатрат")
     ) || null;
 
   // Custom field form state
@@ -1869,57 +1868,46 @@ function BoardTaskTemplateTab({
   }
 
   function getCurrentPriorityValues(): string[] {
-    const fieldOpts = priorityField?.options?.length ? priorityField.options : [];
-    if (fieldOpts.length > 0) return fieldOpts;
+    if (board.priorityOptions && board.priorityOptions.length > 0) return board.priorityOptions;
     return refs.priorityTypeOptions.find(o => o.key === board.priorityType)?.defaultValues || [];
   }
 
   async function addAndSaveValue() {
-    if (!priorityField) { toast.error("Параметр приоритизации не найден"); return; }
     if (!valueInput.trim()) return;
     const trimmed = valueInput.trim();
     const current = getCurrentPriorityValues();
     if (current.includes(trimmed)) { toast.info("Такое значение уже есть"); return; }
     const newOpts = [...current, trimmed];
     try {
-      await updateTemplateBoardField(templateId, board.id, priorityField.id, { options: newOpts });
+      await updateTemplateBoard(templateId, board.id, { priorityOptions: newOpts });
       setValueInput("");
       await onReload();
-      if (board.swimlaneGroupBy === priorityField.id) await onSyncSwimlanes(newOpts);
+      if (priorityField && board.swimlaneGroupBy === priorityField.id) await onSyncSwimlanes(newOpts);
     } catch (e: any) {
       toast.error(e.message || "Не удалось добавить значение");
     }
   }
 
   async function removeValue(val: string) {
-    if (!priorityField) { toast.error("priorityField не найден"); return; }
     const current = getCurrentPriorityValues();
     const updated = current.filter(v => v !== val);
     if (updated.length === 0) { toast.error("Нельзя удалить последнее значение"); return; }
     try {
-      await updateTemplateBoardField(templateId, board.id, priorityField.id, { options: updated });
+      await updateTemplateBoard(templateId, board.id, { priorityOptions: updated });
       await onReload();
-      if (board.swimlaneGroupBy === priorityField.id) await onSyncSwimlanes(updated);
+      if (priorityField && board.swimlaneGroupBy === priorityField.id) await onSyncSwimlanes(updated);
     } catch (e: any) {
       toast.error(e.message || "Не удалось удалить значение");
     }
   }
 
   async function handlePriorityTypeChange(type: "priority" | "service_class") {
+    const defaults = refs.priorityTypeOptions.find(o => o.key === type)?.defaultValues || [];
     try {
-      await updateTemplateBoard(templateId, board.id, { priorityType: type });
+      await updateTemplateBoard(templateId, board.id, { priorityType: type, priorityOptions: defaults });
     } catch (e: any) {
       toast.error(e.message || "Не удалось изменить тип приоритизации");
       return;
-    }
-    // Set default values for the new priority type
-    const defaults = refs.priorityTypeOptions.find(o => o.key === type)?.defaultValues || [];
-    if (priorityField && defaults.length > 0) {
-      try {
-        await updateTemplateBoardField(templateId, board.id, priorityField.id, { options: defaults });
-      } catch {
-        // Backend may set defaults automatically when priority type changes
-      }
     }
     // If swimlanes were grouped by the priority field, clear them
     if (priorityField && board.swimlaneGroupBy === priorityField.id) {
@@ -1977,7 +1965,7 @@ function BoardTaskTemplateTab({
 
         <div className="space-y-2">
           {simpleSystemFields.map(f => (
-              <LockedField key={f.id} name={f.name} description={f.description || SYSTEM_FIELD_TYPE_LABELS[f.fieldType] || f.fieldType} isRequired={f.isRequired} />
+              <LockedField key={f.id} name={f.name} description={SYSTEM_FIELD_TYPE_LABELS[f.fieldType] || f.fieldType} isRequired={f.isRequired} />
             ))}
 
           {/* Priority / Service Class — configurable */}
@@ -2097,7 +2085,7 @@ function BoardTaskTemplateTab({
 
           {/* Sprint — Scrum only */}
           {sprintField && (
-            <LockedField name={sprintField.name} description={sprintField.description || undefined} isRequired={sprintField.isRequired} />
+            <LockedField name={sprintField.name} description={SYSTEM_FIELD_TYPE_LABELS[sprintField.fieldType] || undefined} isRequired={sprintField.isRequired} />
           )}
         </div>
       </div>
@@ -2490,9 +2478,6 @@ function ProjectParamsSection({ templateId, isScrum, refs, params, onReload }: {
                     {SYSTEM_FIELD_TYPE_LABELS[param.fieldType] || FIELD_TYPE_LABELS_LOCAL[param.fieldType] || param.fieldType}
                   </span>
                 </div>
-                {param.description && (
-                  <p className="text-xs text-slate-500 mt-0.5">{param.description}</p>
-                )}
                 {param.options && param.options.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-1.5">
                     {param.options.map(opt => (

@@ -271,6 +271,7 @@ export default function BoardSettingsModal({
   const [currentPriorityType, setCurrentPriorityType] = useState<string>("");
   const [currentEstimationUnit, setCurrentEstimationUnit] = useState<string>("");
   const [currentSwimlaneGroupBy, setCurrentSwimlaneGroupBy] = useState<string>("");
+  const [currentPriorityOptions, setCurrentPriorityOptions] = useState<string[]>([]);
 
   const isScrum = projectType === "scrum";
 
@@ -306,6 +307,7 @@ export default function BoardSettingsModal({
       setCurrentPriorityType(b.priorityType || "");
       setCurrentEstimationUnit(b.estimationUnit || "");
       setCurrentSwimlaneGroupBy(b.swimlaneGroupBy || "");
+      setCurrentPriorityOptions(b.priorityOptions || []);
       setCurrentBoardName(b.name);
       setCurrentBoardDescription(b.description || "");
     } catch { /**/ }
@@ -476,10 +478,10 @@ export default function BoardSettingsModal({
           if (field.fieldType === "checkbox") {
             expectedValues = [`${field.name}: да`, `${field.name}: нет`];
           } else if (field.fieldType === "select" || field.fieldType === "priority") {
-            const priorityFieldId = freshFields.find(f => f.isSystem && (f.fieldType === "priority" || f.description?.toLowerCase().includes("приоритизаци")))?.id;
+            const priorityFieldId = freshFields.find(f => f.isSystem && (f.fieldType === "priority" || f.name.toLowerCase().includes("приоритизаци")))?.id;
             if (field.id === priorityFieldId) {
               const defaults = (refs?.priorityTypeOptions || []).find(o => o.key === currentPriorityType)?.defaultValues || [];
-              expectedValues = (field.options && field.options.length > 0) ? field.options : defaults.length > 0 ? defaults : null;
+              expectedValues = currentPriorityOptions.length > 0 ? currentPriorityOptions : defaults.length > 0 ? defaults : null;
             } else {
               expectedValues = (field.options && field.options.length > 0) ? field.options : null;
             }
@@ -618,6 +620,7 @@ export default function BoardSettingsModal({
               currentPriorityType={currentPriorityType}
               currentEstimationUnit={currentEstimationUnit}
               currentSwimlaneGroupBy={currentSwimlaneGroupBy}
+              currentPriorityOptions={currentPriorityOptions}
               refs={refs}
               onReload={async () => { await loadBoardFields(); await loadBoardMeta(); await loadSwimlanes(); }}
               onBoardUpdated={onBoardUpdated}
@@ -625,6 +628,7 @@ export default function BoardSettingsModal({
               onSyncSwimlanes={syncSwimlanesWithOptions}
               setCurrentPriorityType={setCurrentPriorityType}
               setCurrentEstimationUnit={setCurrentEstimationUnit}
+              setCurrentPriorityOptions={setCurrentPriorityOptions}
             />
           )}
         </div>
@@ -867,7 +871,7 @@ function BoardSwimlanesTab({
 }) {
   const isScrum = projectType === "scrum";
   const priorityTypeLabel = (refs.priorityTypeOptions || []).find(o => o.key === currentPriorityType)?.name;
-  const priorityFieldId = boardFields.find(f => f.isSystem && (f.description?.toLowerCase().includes("приоритизаци") || f.name.toLowerCase().includes("приоритизаци")))?.id;
+  const priorityFieldId = boardFields.find(f => f.isSystem && (f.fieldType === "priority" || f.name.toLowerCase().includes("приоритизаци")))?.id;
 
   function getFieldDisplayName(f: BoardField): string {
     if (f.id === priorityFieldId && priorityTypeLabel) return priorityTypeLabel;
@@ -971,8 +975,8 @@ function BoardSwimlanesTab({
 
 function BoardTaskTemplateTab({
   isScrum, boardId, boardFields, currentPriorityType, currentEstimationUnit,
-  currentSwimlaneGroupBy, refs, onReload, onBoardUpdated, onClearSwimlaneGroupBy,
-  onSyncSwimlanes, setCurrentPriorityType, setCurrentEstimationUnit,
+  currentSwimlaneGroupBy, currentPriorityOptions, refs, onReload, onBoardUpdated, onClearSwimlaneGroupBy,
+  onSyncSwimlanes, setCurrentPriorityType, setCurrentEstimationUnit, setCurrentPriorityOptions,
 }: {
   isScrum: boolean;
   boardId: string;
@@ -980,6 +984,7 @@ function BoardTaskTemplateTab({
   currentPriorityType: string;
   currentEstimationUnit: string;
   currentSwimlaneGroupBy: string;
+  currentPriorityOptions: string[];
   refs: ProjectReferences;
   onReload: () => Promise<void>;
   onBoardUpdated: () => void;
@@ -987,6 +992,7 @@ function BoardTaskTemplateTab({
   onSyncSwimlanes: (expectedValues: string[]) => Promise<void>;
   setCurrentPriorityType: (v: string) => void;
   setCurrentEstimationUnit: (v: string) => void;
+  setCurrentPriorityOptions: (v: string[]) => void;
 }) {
   const projectType = isScrum ? "scrum" : "kanban";
   const FIELD_TYPE_LABELS = buildFieldTypeLabels(refs, { projectType, scope: "board_field" });
@@ -996,10 +1002,10 @@ function BoardTaskTemplateTab({
   const customFields = boardFields.filter(f => !f.isSystem);
 
   const priorityField = systemFields.find(f => f.fieldType === "priority")
-    || systemFields.find(f => f.name === "Приоритизация" || f.description?.toLowerCase().includes("приоритизаци"))
+    || systemFields.find(f => f.name === "Приоритизация" || f.name.toLowerCase().includes("приоритизаци"))
     || null;
   const estimationField = systemFields.find(f => f.fieldType === "estimation")
-    || systemFields.find(f => f.name === "Оценка трудозатрат" || f.description?.toLowerCase().includes("единица измерения"))
+    || systemFields.find(f => f.name === "Оценка трудозатрат" || f.name.toLowerCase().includes("оценка трудозатрат"))
     || null;
   const sprintField = systemFields.find(f => f.fieldType === "sprint") || null;
   const simpleSystemFields = systemFields.filter(f =>
@@ -1026,8 +1032,7 @@ function BoardTaskTemplateTab({
   const priorityLabel = priorityTypeLabels[currentPriorityType] || currentPriorityType;
 
   function getCurrentPriorityValues(): string[] {
-    const fieldOpts = priorityField?.options?.length ? priorityField.options : [];
-    if (fieldOpts.length > 0) return fieldOpts;
+    if (currentPriorityOptions.length > 0) return currentPriorityOptions;
     return refs.priorityTypeOptions.find(o => o.key === currentPriorityType)?.defaultValues || [];
   }
 
@@ -1038,40 +1043,38 @@ function BoardTaskTemplateTab({
   }
 
   async function addAndSaveValue() {
-    if (!priorityField) { toast.error("Параметр приоритизации не найден"); return; }
     if (!valueInput.trim()) return;
     const trimmed = valueInput.trim();
     const current = getCurrentPriorityValues();
     if (current.includes(trimmed)) { toast.info("Такое значение уже есть"); return; }
     const newOpts = [...current, trimmed];
     try {
-      await updateBoardField(boardId, priorityField.id, { options: newOpts });
+      await updateBoard(boardId, { priorityOptions: newOpts });
+      setCurrentPriorityOptions(newOpts);
       setValueInput(""); await onReload();
-      if (currentSwimlaneGroupBy === priorityField.id) await onSyncSwimlanes(newOpts);
+      if (priorityField && currentSwimlaneGroupBy === priorityField.id) await onSyncSwimlanes(newOpts);
     } catch (e: any) { toast.error(e.message || "Не удалось добавить значение"); }
   }
 
   async function removeValue(val: string) {
-    if (!priorityField) return;
     const current = getCurrentPriorityValues();
     const updated = current.filter(v => v !== val);
     if (updated.length === 0) { toast.error("Нельзя удалить последнее значение"); return; }
     try {
-      await updateBoardField(boardId, priorityField.id, { options: updated });
+      await updateBoard(boardId, { priorityOptions: updated });
+      setCurrentPriorityOptions(updated);
       await onReload();
-      if (currentSwimlaneGroupBy === priorityField.id) await onSyncSwimlanes(updated);
+      if (priorityField && currentSwimlaneGroupBy === priorityField.id) await onSyncSwimlanes(updated);
     } catch (e: any) { toast.error(e.message || "Не удалось удалить значение"); }
   }
 
   async function handlePriorityTypeChange(type: string) {
-    try {
-      await updateBoard(boardId, { priorityType: type });
-      setCurrentPriorityType(type);
-    } catch (e: any) { toast.error(e.message || "Ошибка"); return; }
     const defaults = refs.priorityTypeOptions.find(o => o.key === type)?.defaultValues || [];
-    if (priorityField && defaults.length > 0) {
-      try { await updateBoardField(boardId, priorityField.id, { options: defaults }); } catch { /**/ }
-    }
+    try {
+      await updateBoard(boardId, { priorityType: type, priorityOptions: defaults });
+      setCurrentPriorityType(type);
+      setCurrentPriorityOptions(defaults);
+    } catch (e: any) { toast.error(e.message || "Ошибка"); return; }
     // Reset swimlanes if they were grouped by the priority field
     if (priorityField && currentSwimlaneGroupBy === priorityField.id) {
       onClearSwimlaneGroupBy();
@@ -1150,7 +1153,7 @@ function BoardTaskTemplateTab({
         <p className="text-sm text-slate-500 mb-4">Эти параметры являются системными и не могут быть удалены.</p>
         <div className="space-y-2">
           {simpleSystemFields.map(f => (
-            <LockedField key={f.id} name={f.name} description={f.description || SYSTEM_FIELD_TYPE_LABELS[f.fieldType] || f.fieldType} isRequired={f.isRequired} />
+            <LockedField key={f.id} name={f.name} description={SYSTEM_FIELD_TYPE_LABELS[f.fieldType] || f.fieldType} isRequired={f.isRequired} />
           ))}
 
           {/* Priority / Service Class */}
@@ -1239,7 +1242,7 @@ function BoardTaskTemplateTab({
 
           {/* Sprint */}
           {sprintField && (
-            <LockedField name={sprintField.name} description={sprintField.description || undefined} isRequired={sprintField.isRequired} />
+            <LockedField name={sprintField.name} description={SYSTEM_FIELD_TYPE_LABELS[sprintField.fieldType] || undefined} isRequired={sprintField.isRequired} />
           )}
         </div>
       </div>

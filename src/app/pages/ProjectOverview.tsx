@@ -11,10 +11,13 @@ import {
   Video,
   MapPin,
   ListTodo,
+  Copy,
+  Star,
 } from "lucide-react";
+import { toast } from "sonner";
 import { UserAvatar } from "../components/UserAvatar";
 import { searchTasks, type TaskResponse } from "../api/tasks";
-import { getProjectSprints, type SprintResponse } from "../api/sprints";
+import { getProjectSprints, getSprintTasks, type SprintResponse } from "../api/sprints";
 import { getMeetings, type MeetingResponse } from "../api/meetings";
 import { apiRequest } from "../api/client";
 import type { ProjectMemberResponse } from "../api/projects";
@@ -32,6 +35,7 @@ interface TaskDependencyResponse {
 interface ProjectOverviewProps {
   projectId: string;
   projectType: string;
+  projectOwnerId: string;
   members: ProjectMemberResponse[];
   memberUsers: Map<string, UserProfileResponse>;
 }
@@ -45,6 +49,7 @@ function toAvatarUser(u: UserProfileResponse) {
 export default function ProjectOverview({
   projectId,
   projectType,
+  projectOwnerId,
   members,
   memberUsers,
 }: ProjectOverviewProps) {
@@ -52,6 +57,7 @@ export default function ProjectOverview({
   const [sprints, setSprints] = useState<SprintResponse[]>([]);
   const [meetings, setMeetings] = useState<MeetingResponse[]>([]);
   const [blockedTaskIds, setBlockedTaskIds] = useState<Set<string>>(new Set());
+  const [activeSprintTasks, setActiveSprintTasks] = useState<TaskResponse[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -67,9 +73,19 @@ export default function ProjectOverview({
           ),
         ]);
 
-        const loadedTasks = tasksResult.status === "fulfilled" ? tasksResult.value : [];
-        setTasks(loadedTasks);
-        if (sprintsResult.status === "fulfilled") setSprints(sprintsResult.value);
+        const allTasks = tasksResult.status === "fulfilled" ? tasksResult.value : [];
+        const loadedSprints = sprintsResult.status === "fulfilled" ? sprintsResult.value : [];
+        setSprints(loadedSprints);
+
+        // For Scrum: load active sprint tasks for stats
+        const activeSpr = loadedSprints.find(s => s.status === "active");
+        let sprintTaskList: TaskResponse[] = [];
+        if (activeSpr) {
+          try { sprintTaskList = await getSprintTasks(activeSpr.id); } catch { /**/ }
+        }
+
+        setTasks(allTasks);
+        setActiveSprintTasks(sprintTaskList);
 
         // Filter meetings by projectId
         if (meetingsResult.status === "fulfilled") {
@@ -111,17 +127,14 @@ export default function ProjectOverview({
 
   const now = new Date();
 
-  // Task summary
-  const totalTasks = tasks.length;
-  const overdueTasks = tasks.filter(
+  // Task summary — based on active sprint tasks across all boards
+  const statTasks = projectType === "scrum" ? activeSprintTasks : tasks;
+  const totalTasks = statTasks.length;
+  const overdueTasks = statTasks.filter(
     (t) => t.deadline && new Date(t.deadline) < now
   );
-  // We don't have a "status" field in TaskResponse from API, so we use column-based heuristics
-  // For the summary, we'll count tasks with/without executors and with progress
-  const completedTasks = tasks.filter((t) => t.progress === 100).length;
-  const inProgressTasks = tasks.filter(
-    (t) => t.executorId && t.progress !== 100
-  ).length;
+  const completedTasks = statTasks.filter(t => t.columnSystemType === "completed").length;
+  const inProgressTasks = statTasks.filter(t => t.columnSystemType === "in_progress").length;
 
   // Deadlines (7 days)
   const weekLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
@@ -143,8 +156,8 @@ export default function ProjectOverview({
   // Tasks per member (distribution)
   const tasksByMember = new Map<string, number>();
   tasks.forEach((t) => {
-    if (t.executorId) {
-      tasksByMember.set(t.executorId, (tasksByMember.get(t.executorId) || 0) + 1);
+    if (t.executorUserId) {
+      tasksByMember.set(t.executorUserId, (tasksByMember.get(t.executorUserId) || 0) + 1);
     }
   });
   const maxTasksPerMember = Math.max(1, ...tasksByMember.values());
@@ -207,6 +220,13 @@ export default function ProjectOverview({
       )}
 
       {/* Сводка по задачам */}
+      {projectType === "scrum" && (
+        <p className="text-xs text-slate-500">
+          {activeSprint
+            ? `Данные по задачам активного спринта «${activeSprint.name}» со всех досок проекта`
+            : "Нет активного спринта — данные недоступны"}
+        </p>
+      )}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl p-4 shadow-md border border-slate-100">
           <div className="flex items-center gap-3">
@@ -269,8 +289,8 @@ export default function ProjectOverview({
         {blockedTasks.length > 0 ? (
           <div className="space-y-2">
             {blockedTasks.slice(0, 8).map((task) => {
-              const executor = task.executorId
-                ? memberUsers.get(task.executorId)
+              const executor = task.executorUserId
+                ? memberUsers.get(task.executorUserId)
                 : null;
               return (
                 <div
@@ -285,7 +305,19 @@ export default function ProjectOverview({
                     </p>
                   </div>
                   {executor && (
-                    <UserAvatar user={toAvatarUser(executor)} size="sm" />
+                    <div className="flex items-center gap-2 shrink-0">
+                      <UserAvatar user={toAvatarUser(executor)} size="sm" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium">{executor.fullName}</p>
+                        {executor.email && (
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs text-slate-500 truncate">{executor.email}</span>
+                            <button onClick={() => { navigator.clipboard.writeText(executor.email); toast.success("Email скопирован"); }}
+                              className="p-0.5 text-slate-400 hover:text-blue-600 transition-colors shrink-0"><Copy size={10} /></button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   )}
                 </div>
               );
@@ -316,8 +348,8 @@ export default function ProjectOverview({
             <p className="text-xs font-semibold text-red-600 uppercase mb-2">Просрочено</p>
             <div className="space-y-2">
               {overdueTasks.slice(0, 5).map((task) => {
-                const executor = task.executorId
-                  ? memberUsers.get(task.executorId)
+                const executor = task.executorUserId
+                  ? memberUsers.get(task.executorUserId)
                   : null;
                 return (
                   <div
@@ -347,8 +379,8 @@ export default function ProjectOverview({
         {upcomingDeadlines.length > 0 ? (
           <div className="space-y-2">
             {upcomingDeadlines.map((task) => {
-              const executor = task.executorId
-                ? memberUsers.get(task.executorId)
+              const executor = task.executorUserId
+                ? memberUsers.get(task.executorUserId)
                 : null;
               const daysLeft = Math.ceil(
                 (new Date(task.deadline!).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
@@ -477,7 +509,7 @@ export default function ProjectOverview({
         )}
       </div>
 
-      {/* Команда проекта + распределение задач */}
+      {/* Команда проекта */}
       <div className="bg-white rounded-xl p-6 shadow-md border border-slate-100">
         <div className="flex items-center gap-2 mb-4">
           <Users size={20} className="text-blue-600" />
@@ -488,53 +520,38 @@ export default function ProjectOverview({
           <p className="text-slate-500 text-sm">Участники не добавлены</p>
         ) : (
           <div className="space-y-3">
-            {members.map((member) => {
+            {[...members].sort((a, b) => {
+              const aOwner = a.userId === projectOwnerId ? 0 : 1;
+              const bOwner = b.userId === projectOwnerId ? 0 : 1;
+              return aOwner - bOwner;
+            }).map((member) => {
               const user = memberUsers.get(member.userId);
               if (!user) return null;
-
-              const memberTaskCount = tasksByMember.get(member.userId) || 0;
-              const barWidth =
-                maxTasksPerMember > 0
-                  ? Math.round((memberTaskCount / maxTasksPerMember) * 100)
-                  : 0;
+              const isOwner = member.userId === projectOwnerId;
+              const inProgressCount = tasks.filter(t =>
+                t.executorUserId === member.userId && t.columnSystemType !== "completed"
+              ).length;
 
               return (
-                <div
-                  key={member.id}
-                  className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg border border-slate-200"
-                >
+                <div key={member.id} className="flex items-center gap-4 p-4 bg-slate-50 rounded-lg border border-slate-200">
                   <UserAvatar user={toAvatarUser(user)} size="md" />
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex items-center gap-2 mb-0.5">
                       <p className="font-medium text-sm truncate">{user.fullName}</p>
-                      {member.roles && member.roles.length > 0 && (
-                        <div className="flex flex-wrap gap-1">
-                          {member.roles.map((role) => (
-                            <span
-                              key={role}
-                              className="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded"
-                            >
-                              {role}
-                            </span>
-                          ))}
-                        </div>
+                      {isOwner && (
+                        <span className="flex items-center gap-1 text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded shrink-0">
+                          <Star size={10} /> Ответственный
+                        </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 h-2 bg-slate-200 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all ${
-                            memberTaskCount > maxTasksPerMember * 0.8
-                              ? "bg-orange-500"
-                              : "bg-blue-500"
-                          }`}
-                          style={{ width: `${barWidth}%` }}
-                        />
+                    {user.email && (
+                      <div className="flex items-center gap-1 mb-1">
+                        <span className="text-xs text-slate-500 truncate">{user.email}</span>
+                        <button onClick={() => { navigator.clipboard.writeText(user.email); toast.success("Email скопирован"); }}
+                          className="p-0.5 text-slate-400 hover:text-blue-600 transition-colors shrink-0"><Copy size={11} /></button>
                       </div>
-                      <span className="text-xs text-slate-600 font-medium whitespace-nowrap">
-                        {memberTaskCount} задач
-                      </span>
-                    </div>
+                    )}
+                    <span className="text-xs text-slate-600">Задач в работе: <strong>{inProgressCount}</strong></span>
                   </div>
                 </div>
               );

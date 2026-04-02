@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
-import { Link, useParams, useNavigate, useBlocker } from "react-router";
+import { Link, useParams, useNavigate, useBlocker, useSearchParams } from "react-router";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import {
@@ -173,12 +173,17 @@ export default function ProjectDetail() {
 
   // UI state
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"overview" | "boards" | "backlog" | "metrics" | "params">("overview");
+  const [urlSearchParams] = useSearchParams();
+  const initialTab = urlSearchParams.get("tab") as "overview" | "boards" | "backlog" | "metrics" | "params" | null;
+  const [activeTab, setActiveTab] = useState<"overview" | "boards" | "backlog" | "metrics" | "params">(
+    initialTab && ["overview", "boards", "backlog", "metrics", "params"].includes(initialTab) ? initialTab : "overview"
+  );
   const [activeBoardId, setActiveBoardId] = useState<string | null>(null);
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [showEditMemberModal, setShowEditMemberModal] = useState(false);
   const [showBoardSettingsModal, setShowBoardSettingsModal] = useState(false);
   const [boardRefreshKey, setBoardRefreshKey] = useState(0);
+  const [deleteBoardTarget, setDeleteBoardTarget] = useState<string | null>(null);
   const [selectedBoard, setSelectedBoard] = useState<BoardTab | null>(null);
   const [selectedMember, setSelectedMember] = useState<ProjectMemberResponse | null>(null);
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
@@ -206,7 +211,7 @@ export default function ProjectDetail() {
   // Block route navigation when params tab has errors
   const blocker = useBlocker(hasParamErrors);
   const [showBlockerModal, setShowBlockerModal] = useState(false);
-  useBodyScrollLock(showAddMemberModal || showEditMemberModal || showBoardSettingsModal || showBlockerModal);
+  useBodyScrollLock(showAddMemberModal || showEditMemberModal || showBoardSettingsModal || showBlockerModal || !!deleteBoardTarget);
 
   useEffect(() => {
     if (blocker.state === "blocked") {
@@ -360,6 +365,7 @@ export default function ProjectDetail() {
 
   const handleAddMember = async () => {
     if (!project || !selectedUserId) return;
+    if (newMemberRoles.length === 0) { toast.error("Выберите хотя бы одну роль"); return; }
     try {
       await addProjectMember(project.id, {
         userId: selectedUserId,
@@ -379,6 +385,7 @@ export default function ProjectDetail() {
 
   const handleEditMember = async () => {
     if (!project || !selectedMember) return;
+    if (selectedRoles.length === 0) { toast.error("Выберите хотя бы одну роль"); return; }
     try {
       await updateMemberRoles(project.id, selectedMember.id, selectedRoles);
       toast.success("Роли участника обновлены");
@@ -405,7 +412,7 @@ export default function ProjectDetail() {
     // Protect last admin
     const adminRole = projectRoles.find(r => r.isAdmin);
     if (adminRole) {
-      const admins = members.filter(m => m.roles.includes(adminRole.id));
+      const admins = members.filter(m => (m.roles || []).includes(adminRole.id));
       if (admins.length === 1 && admins[0].id === memberId) {
         toast.error("Нельзя удалить последнего администратора проекта. Сначала назначьте роль администратора другому участнику.");
         return;
@@ -429,9 +436,8 @@ export default function ProjectDetail() {
         projectId: project.id,
         name,
         description,
-        order: boardTabs.length + 1,
+        order: (boardTabs.length > 0 ? Math.max(...boardTabs.map(b => b.order)) : 0) + 1,
       });
-      toast.success("Доска создана");
       await loadBoards();
       setActiveBoardId(newBoard.id);
     } catch (e: any) {
@@ -439,19 +445,30 @@ export default function ProjectDetail() {
     }
   };
 
-  const handleDeleteBoard = async (boardId: string) => {
+  const handleDeleteBoard = (boardId: string) => {
     const board = boardTabs.find(b => b.id === boardId);
     if (board?.isDefault) return;
-    if (!confirm("Вы уверены, что хотите удалить эту доску?")) return;
+    setDeleteBoardTarget(boardId);
+  };
+
+  const confirmDeleteBoard = async () => {
+    if (!deleteBoardTarget) return;
     try {
-      await deleteBoardApi(boardId);
-      toast.success("Доска удалена");
-      if (activeBoardId === boardId) {
-        setActiveBoardId(null);
+      await deleteBoardApi(deleteBoardTarget);
+      if (activeBoardId === deleteBoardTarget) {
+        const idx = boardTabs.findIndex(b => b.id === deleteBoardTarget);
+        const remaining = boardTabs.filter(b => b.id !== deleteBoardTarget);
+        if (remaining.length > 0) {
+          setActiveBoardId(idx > 0 ? remaining[idx - 1].id : remaining[0].id);
+        } else {
+          setActiveBoardId(null);
+        }
       }
       loadBoards();
     } catch (e: any) {
       toast.error(e.message || "Ошибка удаления доски");
+    } finally {
+      setDeleteBoardTarget(null);
     }
   };
 
@@ -468,13 +485,20 @@ export default function ProjectDetail() {
       // Auto-create swimlanes if group-by is set
       if (val) {
         const freshFields = await getBoardFields(activeBoardId);
+        const freshBoard = await getBoard(activeBoardId);
         const field = freshFields.find(f => f.id === val);
         let expectedValues: string[] | null = null;
         if (field) {
           if (field.fieldType === "checkbox") {
             expectedValues = [`${field.name}: да`, `${field.name}: нет`];
           } else if (field.fieldType === "select" || field.fieldType === "priority") {
-            expectedValues = (field.options && field.options.length > 0) ? field.options : null;
+            const priorityFieldId = freshFields.find(f => f.isSystem && (f.fieldType === "priority" || f.name.toLowerCase().includes("приоритизаци")))?.id;
+            if (field.id === priorityFieldId) {
+              const defaults = (refs?.priorityTypeOptions || []).find(o => o.key === freshBoard.priorityType)?.defaultValues || [];
+              expectedValues = (freshBoard.priorityOptions && freshBoard.priorityOptions.length > 0) ? freshBoard.priorityOptions : defaults.length > 0 ? defaults : null;
+            } else {
+              expectedValues = (field.options && field.options.length > 0) ? field.options : null;
+            }
           }
         }
         if (expectedValues && expectedValues.length > 0) {
@@ -768,6 +792,7 @@ export default function ProjectDetail() {
               <ProjectOverview
                 projectId={project.id}
                 projectType={projectType}
+                projectOwnerId={project.ownerId}
                 members={members}
                 memberUsers={memberUsers}
               />
@@ -811,7 +836,7 @@ export default function ProjectDetail() {
               {/* Board Controls */}
               {activeBoard && (() => {
                 const priorityTypeLabel = (refs?.priorityTypeOptions || []).find(o => o.key === currentPriorityType)?.name;
-                const priorityFieldId = boardFields.find(f => f.isSystem && (f.fieldType === "priority" || f.description?.toLowerCase().includes("приоритизаци") || f.name.toLowerCase().includes("приоритизаци")))?.id;
+                const priorityFieldId = boardFields.find(f => f.isSystem && (f.fieldType === "priority" || f.name.toLowerCase().includes("приоритизаци")))?.id;
                 function getFieldDisplayName(f: BoardField): string {
                   if (f.id === priorityFieldId && priorityTypeLabel) return priorityTypeLabel;
                   return f.name;
@@ -897,7 +922,7 @@ export default function ProjectDetail() {
                   projectCreatedAt={project.createdAt}
                   members={members.map(m => {
                     const u = memberUsers.get(m.userId);
-                    return { userId: m.userId, fullName: u?.fullName || m.userId };
+                    return { userId: m.userId, fullName: u?.fullName || m.userId, email: u?.email, avatarUrl: u?.avatarUrl ?? undefined };
                   })}
                   refs={refs}
                   params={projectParams}
@@ -973,9 +998,9 @@ export default function ProjectDetail() {
                         </div>
                         <div className="flex items-center gap-4">
                           <div className="text-right">
-                            {member.roles.length > 0 ? (
+                            {(member.roles || []).length > 0 ? (
                               <div className="flex flex-wrap gap-1 justify-end">
-                                {member.roles.map((roleId) => {
+                                {(member.roles || []).map((roleId) => {
                                   const roleDef = projectRoles.find(r => r.id === roleId);
                                   return (
                                     <span
@@ -995,7 +1020,7 @@ export default function ProjectDetail() {
                               <button
                                 onClick={() => {
                                   setSelectedMember(member);
-                                  setSelectedRoles([...member.roles]);
+                                  setSelectedRoles([...(member.roles || [])]);
                                   setShowEditMemberModal(true);
                                 }}
                                 className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
@@ -1135,7 +1160,7 @@ export default function ProjectDetail() {
                 </button>
                 <button
                   onClick={handleAddMember}
-                  disabled={!selectedUserId}
+                  disabled={!selectedUserId || newMemberRoles.length === 0}
                   className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Добавить
@@ -1224,7 +1249,8 @@ export default function ProjectDetail() {
                 </button>
                 <button
                   onClick={handleEditMember}
-                  className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                  disabled={selectedRoles.length === 0}
+                  className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Сохранить
                 </button>
@@ -1256,6 +1282,33 @@ export default function ProjectDetail() {
             setBoardRefreshKey(k => k + 1);
           }}
         />
+      )}
+
+      {/* Delete board confirmation */}
+      {deleteBoardTarget && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full">
+            <div className="flex items-start gap-3 mb-4">
+              <Trash2 size={24} className="text-red-600 shrink-0 mt-0.5" />
+              <div>
+                <h2 className="text-lg font-bold text-slate-800">Удалить доску</h2>
+                <p className="text-sm text-slate-600 mt-1">
+                  Вы уверены, что хотите удалить доску «{boardTabs.find(b => b.id === deleteBoardTarget)?.name}»? Это действие необратимо.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteBoardTarget(null)}
+                className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium">
+                Отмена
+              </button>
+              <button onClick={confirmDeleteBoard}
+                className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium">
+                Удалить
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Navigation blocker modal */}

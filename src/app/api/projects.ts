@@ -15,6 +15,8 @@ export interface ProjectResponse {
   projectType: 'scrum' | 'kanban';
   ownerId: string;
   status: 'active' | 'archived' | 'paused';
+  sprintDurationWeeks?: number;
+  incompleteTasksAction?: 'backlog' | 'next_sprint';
   createdAt: string;
   owner?: ProjectOwner;
 }
@@ -53,6 +55,8 @@ export function updateProject(projectId: string, data: Partial<{
   description: string | null;
   status: 'active' | 'archived' | 'paused';
   ownerId: string;
+  sprintDurationWeeks: number;
+  incompleteTasksAction: 'backlog' | 'next_sprint';
 }>) {
   return apiRequest<ProjectResponse>(`/projects/${projectId}`, {
     method: 'PATCH',

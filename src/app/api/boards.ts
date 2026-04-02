@@ -12,12 +12,12 @@ export interface BoardResponse {
   priorityType?: string;
   estimationUnit?: string;
   swimlaneGroupBy?: string | null;
+  priorityOptions?: string[];
 }
 
 export interface BoardField {
   id: string;
   name: string;
-  description: string | null;
   fieldType: string;
   isSystem: boolean;
   isRequired: boolean;
@@ -79,6 +79,7 @@ export function updateBoard(boardId: string, data: Partial<{
   priorityType: string;
   estimationUnit: string;
   swimlaneGroupBy: string | null;
+  priorityOptions: string[];
 }>) {
   return apiRequest<BoardResponse>(`/boards/${boardId}`, {
     method: 'PATCH',
@@ -232,7 +233,6 @@ export function getBoardFields(boardId: string) {
 
 export function createBoardField(boardId: string, data: {
   name: string;
-  description?: string;
   fieldType: string;
   isRequired?: boolean;
   options?: string[];
@@ -245,7 +245,6 @@ export function createBoardField(boardId: string, data: {
 
 export function updateBoardField(boardId: string, fieldId: string, data: Partial<{
   name: string;
-  description: string | null;
   isRequired: boolean;
   options: string[];
 }>) {

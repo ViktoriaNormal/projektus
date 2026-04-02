@@ -152,8 +152,6 @@ export interface TemplateReferences {
   estimationUnits: { key: string; name: string; availableFor: string[] }[];
   priorityTypeOptions: { key: string; name: string; availableFor: string[]; defaultValues: string[] }[];
   projectStatuses?: { key: string; name: string }[];
-  systemTaskFields: { key: string; name: string; fieldType: string; isRequired: boolean; availableFor: string[]; description?: string }[];
-  systemProjectParams: { key: string; name: string; fieldType: string; isRequired: boolean; options: string[] | null }[];
   permissionAreas: { area: string; name: string; description: string; availableFor: string[] }[];
   accessLevels: { key: string; name: string }[];
 }
@@ -179,7 +177,6 @@ export interface TemplateBoardSwimlane {
 export interface TemplateBoardField {
   id: string;
   name: string;
-  description: string | null;
   fieldType: string;
   isSystem: boolean;
   isRequired: boolean;
@@ -195,6 +192,7 @@ export interface TemplateBoard {
   priorityType: string;
   estimationUnit: string;
   swimlaneGroupBy: string | null;
+  priorityOptions: string[];
   columns: TemplateBoardColumn[];
   swimlanes: TemplateBoardSwimlane[];
   fields: TemplateBoardField[];
@@ -203,7 +201,6 @@ export interface TemplateBoard {
 export interface TemplateProjectParam {
   id: string;
   name: string;
-  description: string | null;
   fieldType: string;
   isSystem: boolean;
   isRequired: boolean;
@@ -283,6 +280,7 @@ export function createTemplateBoard(templateId: string, data: {
 export function updateTemplateBoard(templateId: string, boardId: string, data: Partial<{
   name: string; description: string | null; isDefault: boolean; order: number;
   priorityType: string; estimationUnit: string; swimlaneGroupBy: string | null;
+  priorityOptions: string[];
 }>) {
   return apiRequest<TemplateBoard>(`/admin/project-templates/${templateId}/boards/${boardId}`, {
     method: 'PATCH',
@@ -373,7 +371,7 @@ export function reorderTemplateBoardSwimlanes(templateId: string, boardId: strin
 // ── Template Board Fields ────────────────────────────────────
 
 export function createTemplateBoardField(templateId: string, boardId: string, data: {
-  name: string; description?: string; fieldType: string; isRequired?: boolean; options?: string[];
+  name: string; fieldType: string; isRequired?: boolean; options?: string[];
 }) {
   return apiRequest<TemplateBoardField>(`/admin/project-templates/${templateId}/boards/${boardId}/fields`, {
     method: 'POST',
@@ -382,7 +380,7 @@ export function createTemplateBoardField(templateId: string, boardId: string, da
 }
 
 export function updateTemplateBoardField(templateId: string, boardId: string, fieldId: string, data: Partial<{
-  name: string; description: string | null; isRequired: boolean; options: string[];
+  name: string; isRequired: boolean; options: string[];
 }>) {
   return apiRequest<TemplateBoardField>(`/admin/project-templates/${templateId}/boards/${boardId}/fields/${fieldId}`, {
     method: 'PATCH',

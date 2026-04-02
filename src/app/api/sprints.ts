@@ -23,9 +23,10 @@ export function getProjectSprints(projectId: string) {
 
 export function createSprint(projectId: string, data: {
   name: string;
-  goal?: string;
+  goal?: string | null;
   startDate: string;
-  endDate: string;
+  durationWeeks?: number;
+  durationDays?: number;
 }) {
   return apiRequest<SprintResponse>(`/projects/${projectId}/sprints`, {
     method: 'POST',
@@ -41,7 +42,8 @@ export function updateSprint(sprintId: string, data: Partial<{
   name: string;
   goal: string | null;
   startDate: string;
-  endDate: string;
+  durationWeeks: number;
+  durationDays: number;
 }>) {
   return apiRequest<SprintResponse>(`/sprints/${sprintId}`, {
     method: 'PATCH',
@@ -61,9 +63,10 @@ export function startSprint(sprintId: string) {
   });
 }
 
-export function completeSprint(sprintId: string) {
+export function completeSprint(sprintId: string, incompleteTasksAction?: 'backlog' | 'next_sprint') {
   return apiRequest<SprintResponse>(`/sprints/${sprintId}/complete`, {
     method: 'POST',
+    body: JSON.stringify({ incompleteTasksAction: incompleteTasksAction || 'backlog' }),
   });
 }
 
@@ -95,6 +98,10 @@ export function reorderBacklog(projectId: string, taskIds: string[]) {
 
 export function getSprintBacklog(projectId: string) {
   return apiRequest<TaskResponse[]>(`/projects/${projectId}/backlog/sprint`);
+}
+
+export function getSprintTasks(sprintId: string) {
+  return apiRequest<TaskResponse[]>(`/sprints/${sprintId}/tasks`);
 }
 
 export function moveTasksToSprint(projectId: string, data: {
