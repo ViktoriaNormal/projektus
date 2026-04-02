@@ -20,7 +20,7 @@ import { toast } from "sonner";
 import { UserAvatar } from "../components/UserAvatar";
 import {
   getBoard, getBoardColumns, getBoardSwimlanes, getBoardFields, getBoardNotes, createColumnNote, createSwimlaneNote, updateNote, deleteNote,
-  createColumn, updateColumn, deleteColumn, reorderColumns, updateSwimlane, reorderSwimlanes,
+  createColumn, updateColumn, deleteColumn, reorderColumns, createSwimlane, updateSwimlane, reorderSwimlanes,
   type BoardResponse, type BoardField, type ColumnResponse, type SwimlaneResponse, type NoteResponse,
 } from "../api/boards";
 import { searchTasks, updateTask, type TaskResponse } from "../api/tasks";
@@ -43,7 +43,7 @@ interface BoardProps {
   onBoardChanged?: () => void;
 }
 
-const FILTERABLE_TYPES = new Set(["priority", "select", "checkbox", "multiselect", "user", "user_list", "sprint", "sprint_list", "tags"]);
+const FILTERABLE_TYPES = new Set(["priority", "select", "checkbox", "multiselect", "user", "user_list", "tags"]);
 
 // ── Computed Swimlanes ────────────────────────────────────────
 
@@ -81,7 +81,6 @@ function getTaskValueForField(
         const names = task.tags?.map(t => t.name).sort();
         return names && names.length > 0 ? names.join(", ") : null;
       }
-      default: return null;
     }
   }
   const fvs = fieldValuesMap.get(task.id);
@@ -166,7 +165,6 @@ function computeSwimlanesFromTasks(
     const resolve = field.fieldType === "user" ? resolveUser : resolveSprint;
     const lanes = [...groups.entries()].map(([val, ids]) => make(resolve(val), ids, val));
     if (nullIds.length > 0) lanes.push(make("Значение не задано", nullIds, null));
-    addMissingBackendLanes(lanes);
     return sortByOrder(lanes);
   }
 
@@ -186,7 +184,6 @@ function computeSwimlanesFromTasks(
     }
     const lanes = [...groups.entries()].map(([key, { ids, raw }]) => make(key, ids, raw));
     if (nullIds.length > 0) lanes.push(make("Значение не задано", nullIds, null));
-    addMissingBackendLanes(lanes);
     return sortByOrder(lanes);
   }
 
@@ -201,7 +198,6 @@ function computeSwimlanesFromTasks(
   }
   const lanes = [...groups.entries()].map(([val, ids]) => make(val, ids));
   if (nullIds.length > 0) lanes.push(make("Значение не задано", nullIds, null));
-  addMissingBackendLanes(lanes);
   return sortByOrder(lanes);
 }
 
@@ -704,6 +700,8 @@ function NotePopover({ note, onSave, align = "right" }: { note: string | null; o
 
 export default function Board({ boardId, projectId, projectType, onBoardChanged }: BoardProps) {
   const navigate = useNavigate();
+  const onBoardChangedRef = useRef(onBoardChanged);
+  onBoardChangedRef.current = onBoardChanged;
   const [columns, setColumns] = useState<ColumnResponse[]>([]);
   const [computedSwimlanes, setComputedSwimlanes] = useState<ComputedSwimlane[]>([]);
   const [tasks, setTasks] = useState<TaskResponse[]>([]);
@@ -867,6 +865,36 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged 
             boardTasks, swimField, fvMap, backendSwims.sort((a, b) => a.order - b.order),
             cache, allSprints, boardMeta.priorityOptions, wMap,
           );
+
+          // For dynamic field types: remove stale backend swimlanes not in computed set
+          const isDynamic = !["select", "priority", "checkbox"].includes(swimField.fieldType);
+          if (isDynamic) {
+            const computedNames = new Set(computed.map(s => s.name));
+            for (const bs of backendSwims) {
+              if (!computedNames.has(bs.name)) {
+                try { await deleteSwimlane(boardId, bs.id); } catch { /**/ }
+              }
+            }
+          }
+
+          // Auto-create backend swimlanes for computed lanes without backendId
+          const lanesToCreate = computed.filter(s => !s.backendId);
+          if (lanesToCreate.length > 0) {
+            let maxOrder = Math.max(0, ...computed.filter(s => s.order != null).map(s => s.order!));
+            for (const lane of lanesToCreate) {
+              try {
+                const created = await createSwimlane(boardId, { name: lane.name, order: ++maxOrder });
+                lane.backendId = created.id;
+                lane.order = maxOrder;
+              } catch { /**/ }
+            }
+          }
+
+          // Notify parent if backend swimlanes changed
+          if (isDynamic || lanesToCreate.length > 0) {
+            onBoardChangedRef.current?.();
+          }
+
           setComputedSwimlanes(computed);
         } else {
           setComputedSwimlanes([]);

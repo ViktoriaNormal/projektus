@@ -38,6 +38,8 @@ import { getProjectBoards, createBoard, updateBoard, deleteBoard as deleteBoardA
 import { getProjectRoles, type ProjectRole } from "../api/project-roles";
 import { getProjectParams, type ProjectParam } from "../api/project-params";
 import { searchUsers, getUser, type UserProfileResponse } from "../api/users";
+import { searchTasks } from "../api/tasks";
+import { getTaskWatchers } from "../api/watchers";
 import { toast } from "sonner";
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -475,8 +477,9 @@ export default function ProjectDetail() {
   const handleSetSwimlaneGroupBy = async (val: string) => {
     if (!activeBoardId) return;
     try {
-      // Delete existing swimlanes
-      for (const sw of boardSwimlanes) {
+      // Delete existing swimlanes (fetch fresh to include any auto-created ones)
+      const freshSwims = await getBoardSwimlanes(activeBoardId);
+      for (const sw of freshSwims) {
         try { await deleteSwimlane(activeBoardId, sw.id); } catch { /**/ }
       }
       await updateBoard(activeBoardId, { swimlaneGroupBy: val || null });
@@ -486,7 +489,9 @@ export default function ProjectDetail() {
       if (val) {
         const freshFields = await getBoardFields(activeBoardId);
         const freshBoard = await getBoard(activeBoardId);
-        const field = freshFields.find(f => f.id === val);
+        const field = val === "__tags__"
+          ? { id: "__tags__", name: "Теги", fieldType: "tags", isSystem: true, isRequired: false, options: null } as BoardField
+          : freshFields.find(f => f.id === val);
         let expectedValues: string[] | null = null;
         if (field) {
           if (field.fieldType === "checkbox") {
@@ -499,6 +504,52 @@ export default function ProjectDetail() {
             } else {
               expectedValues = (field.options && field.options.length > 0) ? field.options : null;
             }
+          } else if (field.fieldType === "user") {
+            // Create swimlanes from actual task executor/owner values
+            const tasks = await searchTasks({ projectId: projectId! });
+            const n = field.name.toLowerCase();
+            const isOwner = n.includes("автор") || n.includes("owner");
+            const uniqueIds = new Set<string>();
+            for (const t of tasks) {
+              const uid = isOwner ? t.ownerUserId : t.executorUserId;
+              if (uid) uniqueIds.add(uid);
+            }
+            const names: string[] = [];
+            for (const uid of uniqueIds) {
+              const u = memberUsers.get(uid);
+              if (u) names.push(u.fullName);
+              else { try { const fetched = await getUser(uid); names.push(fetched.fullName); } catch { names.push(uid); } }
+            }
+            expectedValues = names.length > 0 ? names : null;
+          } else if (field.fieldType === "user_list") {
+            // Create swimlanes from actual watcher combinations
+            const tasks = await searchTasks({ projectId: projectId! });
+            const memberToUser = new Map(members.map(m => [m.id, m.userId]));
+            const combos = new Set<string>();
+            await Promise.allSettled(tasks.map(async (t) => {
+              try {
+                const watchers = await getTaskWatchers(t.id);
+                const names = watchers
+                  .map(w => memberToUser.get(w.memberId))
+                  .filter((uid): uid is string => !!uid)
+                  .map(uid => memberUsers.get(uid)?.fullName || uid)
+                  .sort();
+                if (names.length > 0) combos.add(names.join(", "));
+              } catch { /**/ }
+            }));
+            expectedValues = combos.size > 0 ? [...combos] : null;
+          } else if (field.fieldType === "tags") {
+            // Create swimlanes from actual task tag combinations
+            const tasks = await searchTasks({ projectId: projectId! });
+            const combos = new Set<string>();
+            for (const t of tasks) {
+              if (t.tags && t.tags.length > 0) {
+                combos.add(t.tags.map(tag => tag.name).sort().join(", "));
+              }
+            }
+            expectedValues = combos.size > 0 ? [...combos] : null;
+          } else if (field.fieldType === "multiselect" && field.options?.length) {
+            expectedValues = field.options;
           }
         }
         if (expectedValues && expectedValues.length > 0) {
@@ -865,7 +916,7 @@ export default function ProjectDetail() {
                         className="w-full max-w-md px-4 py-3 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white">
                         <option value="">Без дорожек</option>
                         {boardFields
-                          .filter(f => ["priority", "select", "checkbox", "multiselect", "user", "user_list", "sprint", "sprint_list", "tags"].includes(f.fieldType) && f.fieldType !== "column" && !f.name.toLowerCase().includes("статус"))
+                          .filter(f => ["priority", "select", "checkbox", "multiselect", "user", "user_list", "tags"].includes(f.fieldType) && f.fieldType !== "column" && !f.name.toLowerCase().includes("статус"))
                           .map(f => (
                             <option key={f.id} value={f.id}>{getFieldDisplayName(f)}</option>
                           ))}

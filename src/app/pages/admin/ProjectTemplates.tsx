@@ -1649,7 +1649,7 @@ function BoardSwimlanesTab({
           >
             <option value="">Без дорожек</option>
             {boardFields
-              .filter(f => ["priority", "select", "checkbox", "multiselect", "user", "user_list", "sprint", "sprint_list", "tags"].includes(f.fieldType) && f.fieldType !== "column" && !f.name.toLowerCase().includes("статус"))
+              .filter(f => ["priority", "select", "checkbox", "multiselect", "user", "user_list", "tags"].includes(f.fieldType) && f.fieldType !== "column" && !f.name.toLowerCase().includes("статус"))
               .map(f => (
                 <option key={f.id} value={f.id}>{getFieldDisplayName(f)}</option>
               ))}
