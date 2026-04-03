@@ -10,6 +10,7 @@ import {
   type SystemRole, type PermissionDescriptor, type RolePermission,
 } from '../../api/admin';
 import { ApiError } from '../../api/client';
+import { useAuth } from '../../contexts/AuthContext';
 
 // ── Access Levels ────────────────────────────────────────────
 const ACCESS_LEVELS: { key: RolePermission["access"]; name: string }[] = [
@@ -69,6 +70,8 @@ function DebouncedInput({ value, onSave, className, placeholder, required, requi
 
 // ── Main Component ──────────────────────────────────────────
 export default function AdminRoles() {
+  const { hasFullPermission } = useAuth();
+  const canEdit = hasFullPermission('system.roles.manage');
   const [roles, setRoles] = useState<SystemRole[]>([]);
   const [permCatalog, setPermCatalog] = useState<PermissionDescriptor[]>([]);
   const [loading, setLoading] = useState(true);
@@ -225,7 +228,7 @@ export default function AdminRoles() {
             Системные роли и права доступа
           </p>
         </div>
-        {!showAddForm && (
+        {!showAddForm && canEdit && (
           <button
             onClick={() => setShowAddForm(true)}
             className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all shadow-md hover:shadow-lg flex items-center gap-2"
@@ -335,7 +338,7 @@ export default function AdminRoles() {
                     {role.description && <p className="text-sm text-slate-500 mt-0.5">{role.description}</p>}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    {!role.isAdmin && (
+                    {!role.isAdmin && canEdit && (
                       <button
                         onClick={(e) => { e.stopPropagation(); setDeleteTarget(role); }}
                         className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
@@ -361,8 +364,8 @@ export default function AdminRoles() {
                           placeholder="Название роли..."
                           required
                           requiredMessage="Название роли не может быть пустым"
-                          disabled={role.isAdmin}
-                          title={role.isAdmin ? "Название администратора нельзя изменить" : undefined}
+                          disabled={role.isAdmin || !canEdit}
+                          title={role.isAdmin ? "Название администратора нельзя изменить" : !canEdit ? "Недостаточно прав для редактирования" : undefined}
                         />
                       </div>
                       <div>
@@ -372,8 +375,8 @@ export default function AdminRoles() {
                           onSave={(val) => handleUpdateRole(role.id, { description: val })}
                           className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                           placeholder="Краткое описание роли..."
-                          disabled={role.isAdmin}
-                          title={role.isAdmin ? "Описание администратора нельзя изменить" : undefined}
+                          disabled={role.isAdmin || !canEdit}
+                          title={role.isAdmin ? "Описание администратора нельзя изменить" : !canEdit ? "Недостаточно прав для редактирования" : undefined}
                         />
                       </div>
                     </div>
@@ -399,8 +402,8 @@ export default function AdminRoles() {
                                 {ACCESS_LEVELS.map((level) => (
                                   <button
                                     key={level.key}
-                                    onClick={() => !role.isAdmin && handleUpdatePermission(role.id, permDef.code, level.key)}
-                                    disabled={role.isAdmin}
+                                    onClick={() => !role.isAdmin && canEdit && handleUpdatePermission(role.id, permDef.code, level.key)}
+                                    disabled={role.isAdmin || !canEdit}
                                     className={`px-2.5 py-1 text-xs rounded-md border transition-all ${
                                       currentAccess === level.key
                                         ? level.key === "full"
@@ -409,7 +412,7 @@ export default function AdminRoles() {
                                             ? "bg-amber-500 text-white border-amber-500"
                                             : "bg-slate-500 text-white border-slate-500"
                                         : "border-slate-200 text-slate-600 hover:bg-slate-100"
-                                    } ${role.isAdmin ? "opacity-60 cursor-not-allowed" : ""}`}
+                                    } ${role.isAdmin || !canEdit ? "opacity-60 cursor-not-allowed" : ""}`}
                                     title={role.isAdmin ? "Права администратора нельзя изменить" : level.name}
                                   >
                                     {level.key === "none" ? <EyeOff size={12} className="inline mr-1" /> : <Eye size={12} className="inline mr-1" />}

@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
+import { useProjectPermissions } from "../hooks/useProjectPermissions";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { UserAvatar } from "../components/UserAvatar";
@@ -35,6 +36,10 @@ export default function TaskDetail() {
   // Data state
   const [task, setTask] = useState<TaskResponse | null>(null);
   const [project, setProject] = useState<ProjectResponse | null>(null);
+  const [projectIdForPerms, setProjectIdForPerms] = useState<string | undefined>(undefined);
+  const { can: canArea, canEdit: canEditArea, loading: permLoading } = useProjectPermissions(projectIdForPerms);
+  const canViewTask = isCreateMode || canArea("project.tasks");
+  const canEditTask = isCreateMode || canEditArea("project.tasks");
   const [owner, setOwner] = useState<UserProfileResponse | null>(null);
   const [executor, setExecutor] = useState<UserProfileResponse | null>(null);
   const [members, setMembers] = useState<ProjectMemberResponse[]>([]);
@@ -103,7 +108,7 @@ export default function TaskDetail() {
       setEditDescription(t.description || "");
 
       // Load project & sprints
-      try { const p = await getProject(t.projectId); setProject(p); } catch { /**/ }
+      try { const p = await getProject(t.projectId); setProject(p); setProjectIdForPerms(p.id); } catch { /**/ }
       try { setProjectSprints(await getProjectSprints(t.projectId)); } catch { /**/ }
 
       // Load owner & executor (use userId fields for user profile lookup)
@@ -195,7 +200,7 @@ export default function TaskDetail() {
       ]);
       if (board) setBoardData(board);
 
-      if (proj) setProject(proj);
+      if (proj) { setProject(proj); setProjectIdForPerms(proj.id); }
       try { setProjectSprints(await getProjectSprints(pId)); } catch { /**/ }
       setColumns(cols.sort((a, b) => a.order - b.order));
       setBoardFields(fields);
@@ -323,6 +328,7 @@ export default function TaskDetail() {
   // ── Handlers ────────────────────────────────────────────────
 
   const handleUpdateField = async (field: string, value: any) => {
+    if (!canEditTask) return;
     if (!task) return;
     setTask(prev => prev ? { ...prev, [field]: value } : prev);
     if (isCreateMode) return;
@@ -543,6 +549,7 @@ export default function TaskDetail() {
 
   // Comments
   const handleAddComment = async () => {
+    if (!canEditTask) return;
     if (!task || !commentText.trim()) return;
     try {
       await createComment(task.id, {
@@ -689,6 +696,7 @@ export default function TaskDetail() {
 
   // Field values
   const handleSetFieldValue = async (fieldId: string, field: BoardField, rawValue: string) => {
+    if (!canEditTask) return;
     if (!task) return;
     const data: { valueText?: string | null; valueNumber?: number | null; valueDatetime?: string | null } = {};
     if (field.fieldType === "number") {
@@ -834,6 +842,17 @@ export default function TaskDetail() {
     );
   }
 
+  if (!isCreateMode && !permLoading && projectIdForPerms && !canViewTask) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 text-center">
+        <AlertTriangle size={48} className="text-amber-500 mb-3" />
+        <h2 className="text-xl font-bold mb-2">Нет доступа</h2>
+        <p className="text-slate-500 mb-4">У вас нет прав на просмотр задач этого проекта</p>
+        <button onClick={() => navigate(-1)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">Назад</button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Back button (view mode only) */}
@@ -903,9 +922,9 @@ export default function TaskDetail() {
             )}
 
             {/* Editable Title */}
-            <textarea value={editName} onChange={e => { setEditName(e.target.value); e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
-              onBlur={handleSaveName}
-              className="text-3xl font-bold mb-1 w-full px-3 py-2 border-2 border-transparent rounded-lg hover:border-slate-300 focus:border-blue-500 focus:outline-none transition-colors resize-none overflow-hidden"
+            <textarea value={editName} onChange={e => { if (!canEditTask) return; setEditName(e.target.value); e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
+              onBlur={handleSaveName} readOnly={!canEditTask}
+              className={`text-3xl font-bold mb-1 w-full px-3 py-2 border-2 border-transparent rounded-lg transition-colors resize-none overflow-hidden ${canEditTask ? "hover:border-slate-300 focus:border-blue-500 focus:outline-none" : "cursor-default"}`}
               rows={1} placeholder="Название задачи *" />
             {fieldErrorIds.has("_name") && (
               <div className="flex items-center gap-1.5 mb-2 ml-3 text-xs text-red-600">
@@ -915,15 +934,15 @@ export default function TaskDetail() {
             )}
 
             {/* Editable Description */}
-            <textarea value={editDescription} onChange={e => { setEditDescription(e.target.value); e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
-              onBlur={handleSaveDescription}
-              className="text-slate-600 w-full px-3 py-2 border-2 border-transparent rounded-lg hover:border-slate-300 focus:border-blue-500 focus:outline-none transition-colors resize-none overflow-hidden"
+            <textarea value={editDescription} onChange={e => { if (!canEditTask) return; setEditDescription(e.target.value); e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
+              onBlur={handleSaveDescription} readOnly={!canEditTask}
+              className={`text-slate-600 w-full px-3 py-2 border-2 border-transparent rounded-lg transition-colors resize-none overflow-hidden ${canEditTask ? "hover:border-slate-300 focus:border-blue-500 focus:outline-none" : "cursor-default"}`}
               rows={2} placeholder="Описание задачи" />
           </div>
-          {!isCreateMode && (
-            <button onClick={() => setShowDeleteModal(true)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Удалить задачу">
-              <Trash2 size={20} />
-            </button>
+          {!isCreateMode && canEditTask && (
+              <button onClick={() => setShowDeleteModal(true)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Удалить задачу">
+                <Trash2 size={20} />
+              </button>
           )}
         </div>
 
@@ -945,7 +964,7 @@ export default function TaskDetail() {
           {tags.map(tag => (
             <span key={tag.id} className="px-3 py-1 bg-blue-100 text-blue-700 text-sm rounded inline-flex items-center gap-2 group">
               <Tag size={14} /> {tag.name}
-              <button onClick={() => handleRemoveTag(tag.id)} className="opacity-0 group-hover:opacity-100 transition-opacity"><X size={14} /></button>
+              {canEditTask && <button onClick={() => handleRemoveTag(tag.id)} className="opacity-0 group-hover:opacity-100 transition-opacity"><X size={14} /></button>}
             </span>
           ))}
           {showTagInput ? (
@@ -986,12 +1005,12 @@ export default function TaskDetail() {
                 ) : null;
               })()}
             </div>
-          ) : (
+          ) : canEditTask ? (
             <button onClick={handleOpenTagInput}
               className="px-3 py-1 border-2 border-dashed border-slate-300 text-slate-600 text-sm rounded hover:border-blue-400 hover:text-blue-600 transition-colors flex items-center gap-1">
               <Plus size={14} /> Добавить тег
             </button>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -1016,7 +1035,7 @@ export default function TaskDetail() {
           {activeTab === "details" && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Left Column - System Fields */}
-              <div className="space-y-6">
+              <div className={`space-y-6 ${!canEditTask && !isCreateMode ? "pointer-events-none opacity-75" : ""}`}>
                 <div>
                   <h2 className="text-xl font-bold mb-4">Детали</h2>
 
@@ -1323,7 +1342,7 @@ export default function TaskDetail() {
                 )}
 
                 {/* Watchers */}
-                <div>
+                <div className={!canEditTask && !isCreateMode ? "pointer-events-none" : ""}>
                   <h3 className="text-lg font-bold flex items-center gap-2 mb-3"><Eye size={18} /> Наблюдатели ({watchers.length})</h3>
                   <UserMultiSelect
                     options={memberUserOptionsById}
@@ -1346,13 +1365,13 @@ export default function TaskDetail() {
                 <div>
                   <div className="flex items-center justify-between mb-4">
                     <h2 className="text-lg font-bold flex items-center gap-2"><CheckSquare size={18} /> Чек-листы ({checklists.length})</h2>
-                    <button onClick={() => setShowChecklistModal(true)}
+                    {canEditTask && <button onClick={() => setShowChecklistModal(true)}
                       className="px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors flex items-center gap-1">
                       <Plus size={16} /> Добавить
-                    </button>
+                    </button>}
                   </div>
                   {checklists.length > 0 ? (
-                    <div className="space-y-4">
+                    <div className={`space-y-4 ${!canEditTask && !isCreateMode ? "pointer-events-none" : ""}`}>
                       {checklists.map(checklist => (
                         <div key={checklist.id} className="border border-slate-200 rounded-lg p-3">
                           <div className="flex items-center justify-between mb-2">
@@ -1407,7 +1426,7 @@ export default function TaskDetail() {
                 <div>
                   <div className="flex items-center justify-between mb-4">
                     <h2 className="text-lg font-bold flex items-center gap-2"><Paperclip size={18} /> Вложения ({attachments.length})</h2>
-                    <button onClick={() => setShowAttachmentModal(true)} className="px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors flex items-center gap-1"><Plus size={16} /> Добавить</button>
+                    {canEditTask && <button onClick={() => setShowAttachmentModal(true)} className="px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors flex items-center gap-1"><Plus size={16} /> Добавить</button>}
                   </div>
                   {attachments.length > 0 ? (
                     <div className="space-y-2">
@@ -1429,7 +1448,7 @@ export default function TaskDetail() {
                                   <Download size={14} />
                                 </button>
                               )}
-                              <button onClick={() => handleDeleteAttachment(att.id)} className="opacity-0 group-hover:opacity-100 p-1 text-red-600 hover:bg-red-50 rounded"><Trash2 size={14} /></button>
+                              {canEditTask && <button onClick={() => handleDeleteAttachment(att.id)} className="opacity-0 group-hover:opacity-100 p-1 text-red-600 hover:bg-red-50 rounded"><Trash2 size={14} /></button>}
                             </div>
                           </div>
                         </div>
@@ -1444,10 +1463,10 @@ export default function TaskDetail() {
                 <div>
                   <div className="flex items-center justify-between mb-4">
                     <h2 className="text-lg font-bold flex items-center gap-2"><LinkIcon size={18} /> Связи</h2>
-                    <button onClick={() => setShowLinkModal(true)}
+                    {canEditTask && <button onClick={() => setShowLinkModal(true)}
                       className="px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors flex items-center gap-1">
                       <Plus size={16} /> Добавить
-                    </button>
+                    </button>}
                   </div>
                   <div className="space-y-2">
                     {blockingDeps.map(dep => {
@@ -1534,8 +1553,10 @@ export default function TaskDetail() {
                           <span className="font-semibold text-sm">{author?.fullName || "Пользователь"}</span>
                           <div className="flex items-center gap-2">
                             <span className="text-xs text-slate-500">{new Date(c.createdAt).toLocaleString("ru-RU")}</span>
-                            <button onClick={() => handleReply(c)} className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors text-xs">Ответить</button>
-                            <button onClick={() => handleDeleteComment(c.id)} className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"><Trash2 size={12} /></button>
+                            {canEditTask && (<>
+                              <button onClick={() => handleReply(c)} className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors text-xs">Ответить</button>
+                              <button onClick={() => handleDeleteComment(c.id)} className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"><Trash2 size={12} /></button>
+                            </>)}
                           </div>
                         </div>
                         {parentComment && (
@@ -1575,6 +1596,7 @@ export default function TaskDetail() {
               )}
 
               {/* Comment input with mention support */}
+              {canEditTask && (<>
               <div className="relative">
                 <textarea ref={commentTextareaRef} value={commentText} onChange={handleCommentInput}
                   onKeyDown={e => { if (e.key === "Escape") setShowMentionDropdown(false); if (e.key === "Enter" && !e.shiftKey && !showMentionDropdown) { e.preventDefault(); handleAddComment(); } }}
@@ -1610,6 +1632,7 @@ export default function TaskDetail() {
                   <Send size={16} /> Отправить
                 </button>
               </div>
+              </>)}
             </div>
             );
           })()}

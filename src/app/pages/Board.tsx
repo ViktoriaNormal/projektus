@@ -41,6 +41,8 @@ interface BoardProps {
   projectType?: string;
   onBoardChanged?: () => void;
   onSwimlanesComputed?: (count: number) => void;
+  canEditTasks?: boolean;
+  canEditBoard?: boolean;
 }
 
 const FILTERABLE_TYPES = new Set(["priority", "select", "checkbox", "multiselect", "user", "user_list", "tags"]);
@@ -241,15 +243,17 @@ function validateColumnOrder(cols: ColumnResponse[]): string | null {
 
 // ── Task Card ───────────────────────────────────────────────
 
-function TaskCard({ task, userCache, moveTask, returnUrl }: {
+function TaskCard({ task, userCache, moveTask, returnUrl, canDrag = true }: {
   task: TaskResponse;
   userCache: Map<string, UserProfileResponse>;
   moveTask: (taskId: string, columnId: string, swimlaneId: string | null) => void;
   returnUrl?: string;
+  canDrag?: boolean;
 }) {
   const [{ isDragging }, drag] = useDrag({
     type: ItemType.TASK,
     item: { id: task.id, columnId: task.columnId, swimlaneId: task.swimlaneId },
+    canDrag,
     collect: (monitor) => ({ isDragging: monitor.isDragging() }),
   });
 
@@ -259,7 +263,7 @@ function TaskCard({ task, userCache, moveTask, returnUrl }: {
     <Link
       to={`/tasks/${task.id}${returnUrl ? `?returnUrl=${returnUrl}` : ""}`}
       ref={drag}
-      className={`bg-white p-3 rounded-lg shadow-md border border-slate-200 hover:shadow-xl hover:border-blue-400 transition-all cursor-move flex items-center gap-3 ${
+      className={`bg-white p-3 rounded-lg shadow-md border border-slate-200 hover:shadow-xl hover:border-blue-400 transition-all ${canDrag ? "cursor-move" : "cursor-pointer"} flex items-center gap-3 ${
         isDragging ? "opacity-50 scale-95" : ""
       }`}
     >
@@ -331,7 +335,7 @@ function DropZone({
 
 function ColumnHeader({
   column, index, columns, moveColumn, taskCount, isScrum,
-  onUpdate, onAddAfter, onRemove, note, onSaveNote,
+  onUpdate, onAddAfter, onRemove, note, onSaveNote, readOnly = false,
 }: {
   column: ColumnResponse;
   index: number;
@@ -344,16 +348,19 @@ function ColumnHeader({
   onRemove: (colId: string) => void;
   note: string | null;
   onSaveNote: (val: string | null) => void;
+  readOnly?: boolean;
 }) {
   const [{ isDragging }, drag] = useDrag({
     type: ItemType.COLUMN,
     item: { index },
+    canDrag: !readOnly,
     collect: (monitor) => ({ isDragging: monitor.isDragging() }),
   });
 
   const [, drop] = useDrop({
     accept: ItemType.COLUMN,
     hover: (item: { index: number }) => {
+      if (readOnly) return;
       if (item.index !== index) { moveColumn(item.index, index); item.index = index; }
     },
   });
@@ -393,12 +400,12 @@ function ColumnHeader({
         <div className="flex-1 min-w-0">
           {/* Name */}
           <div className="flex items-center gap-2">
-            {editingName ? (
+            {editingName && !readOnly ? (
               <input ref={nameInputRef} autoFocus value={nameVal} onChange={e => setNameVal(e.target.value)}
                 onBlur={saveName} onKeyDown={e => { if (e.key === "Enter") saveName(); if (e.key === "Escape") { setNameVal(column.name); setEditingName(false); } }}
                 className="text-slate-700 text-sm font-semibold bg-white border border-blue-400 rounded px-1.5 py-0.5 w-full focus:outline-none focus:ring-1 focus:ring-blue-500" />
             ) : (
-              <span className="text-slate-700 truncate cursor-pointer hover:text-blue-600" onClick={() => { if (!locked) { setEditingName(true); } }}>
+              <span className={`text-slate-700 truncate ${!readOnly && !locked ? "cursor-pointer hover:text-blue-600" : ""}`} onClick={() => { if (!locked && !readOnly) { setEditingName(true); } }}>
                 {column.name}
               </span>
             )}
@@ -406,12 +413,12 @@ function ColumnHeader({
           </div>
           {/* WIP */}
           {showWip && column.wipLimit != null && !editingWip && (
-            <div className="text-xs text-slate-500 font-normal mt-1 cursor-pointer hover:text-blue-600"
-              onClick={() => { setWipVal(column.wipLimit != null ? String(column.wipLimit) : ""); setEditingWip(true); }}>
+            <div className={`text-xs text-slate-500 font-normal mt-1 ${!readOnly ? "cursor-pointer hover:text-blue-600" : ""}`}
+              onClick={() => { if (!readOnly) { setWipVal(column.wipLimit != null ? String(column.wipLimit) : ""); setEditingWip(true); } }}>
               WIP: {taskCount} / {column.wipLimit}
             </div>
           )}
-          {showWip && editingWip && (
+          {showWip && editingWip && !readOnly && (
             <div className="flex items-center gap-1 mt-1">
               <span className="text-xs text-slate-500">WIP:</span>
               <input ref={wipInputRef} autoFocus value={wipVal} onChange={e => setWipVal(e.target.value)}
@@ -422,6 +429,7 @@ function ColumnHeader({
           )}
         </div>
         {/* Actions */}
+        {!readOnly && (
         <div className="flex items-center gap-0.5 shrink-0">
           <NotePopover note={note} onSave={onSaveNote} />
           <button onClick={() => onAddAfter(index)} className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Добавить колонку после">
@@ -464,6 +472,7 @@ function ColumnHeader({
             </div>
           )}
         </div>
+        )}
       </div>
     </th>
   );
@@ -472,7 +481,7 @@ function ColumnHeader({
 // ── Swimlane Row ────────────────────────────────────────────
 
 function SwimlaneRow({
-  swimlane, index, columns, tasks, userCache, moveTask, onAddTask, canAddTaskInColumn, getAddTaskHint, returnUrl, moveSwimlane, canDrag, note, onSaveNote, isScrum, onUpdateWip,
+  swimlane, index, columns, tasks, userCache, moveTask, onAddTask, canAddTaskInColumn, getAddTaskHint, returnUrl, moveSwimlane, canDrag, note, onSaveNote, isScrum, onUpdateWip, canEditTasks = true,
 }: {
   swimlane: ComputedSwimlane;
   index: number;
@@ -490,6 +499,7 @@ function SwimlaneRow({
   onSaveNote?: (val: string | null) => void;
   isScrum?: boolean;
   onUpdateWip?: (swimlaneId: string, value: number | null) => void;
+  canEditTasks?: boolean;
 }) {
   const [{ isDragging }, drag] = useDrag({
     type: ItemType.SWIMLANE,
@@ -560,7 +570,7 @@ function SwimlaneRow({
               canAddTask={canAddTaskInColumn ? canAddTaskInColumn(column) : true}
               addTaskHint={getAddTaskHint?.(column)}>
               {cellTasks.map((task) => (
-                <TaskCard key={task.id} task={task} userCache={userCache} moveTask={moveTask} returnUrl={returnUrl} />
+                <TaskCard key={task.id} task={task} userCache={userCache} moveTask={moveTask} returnUrl={returnUrl} canDrag={canEditTasks} />
               ))}
             </DropZone>
           </td>
@@ -631,7 +641,7 @@ function NotePopover({ note, onSave, align = "right" }: { note: string | null; o
 
 // ── Main Board Component ────────────────────────────────────
 
-export default function Board({ boardId, projectId, projectType, onBoardChanged, onSwimlanesComputed }: BoardProps) {
+export default function Board({ boardId, projectId, projectType, onBoardChanged, onSwimlanesComputed, canEditTasks = true, canEditBoard = true }: BoardProps) {
   const navigate = useNavigate();
   const onBoardChangedRef = useRef(onBoardChanged);
   onBoardChangedRef.current = onBoardChanged;
@@ -966,6 +976,7 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
   }
 
   const moveTask = async (taskId: string, columnId: string, swimlaneId: string | null) => {
+    if (!canEditTasks) return;
     setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, columnId } : t));
 
     // Find if task moved to a different swimlane and determine the target field value
@@ -1051,8 +1062,8 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
 
   // Determine which columns can have the "Add task" button
   const canAddTaskInColumn = (col: ColumnResponse): boolean => {
+    if (!canEditTasks) return false;
     if (isScrum) {
-      // No active sprint — no task creation allowed
       if (!activeSprintName) return false;
       return col.systemType === "initial" && columns.indexOf(col) === 0;
     }
@@ -1228,7 +1239,8 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
                       onAddAfter={handleAddColumnAfter}
                       onRemove={handleRemoveColumn}
                       note={getColumnNote(column.id)}
-                      onSaveNote={(val) => saveColumnNote(column.id, val)}
+                      onSaveNote={canEditBoard ? (val) => saveColumnNote(column.id, val) : () => {}}
+                      readOnly={!canEditBoard}
                     />
                   ))}
                 </tr>
@@ -1253,9 +1265,10 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
                         moveSwimlane={moveSwimlane}
                         canDrag={canDrag}
                         note={getSwimlaneNote(swimlane.backendId)}
-                        onSaveNote={swimlane.backendId ? (val) => saveSwimlaneNote(swimlane.backendId!, val) : undefined}
+                        onSaveNote={canEditBoard && swimlane.backendId ? (val) => saveSwimlaneNote(swimlane.backendId!, val) : undefined}
                         isScrum={isScrum}
                         onUpdateWip={(swimId, value) => handleUpdateSwimlane(swimId, "wipLimit", value)}
+                        canEditTasks={canEditTasks}
                       />
                     ));
                   })()
@@ -1274,7 +1287,7 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
                             addTaskHint={getAddTaskHint(column)}
                           >
                             {cellTasks.map((task) => (
-                              <TaskCard key={task.id} task={task} userCache={userCache} moveTask={moveTask} returnUrl={boardReturnUrl} />
+                              <TaskCard key={task.id} task={task} userCache={userCache} moveTask={moveTask} returnUrl={boardReturnUrl} canDrag={canEditTasks} />
                             ))}
                           </DropZone>
                         </td>

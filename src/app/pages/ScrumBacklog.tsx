@@ -49,9 +49,10 @@ function groupTasksByBoard(tasks: TaskResponse[], boards: BoardResponse[]): { bo
 
 interface ScrumBacklogProps {
   projectId: string;
+  canEdit?: boolean;
 }
 
-export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
+export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklogProps) {
   const navigate = useNavigate();
 
   // Data state
@@ -490,6 +491,7 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
   // ── Render task card ───────────────────────────────────────
 
   const renderTask = (task: TaskResponse, source: "backlog" | string, isDraggable: boolean = true) => {
+    isDraggable = isDraggable && canEdit;
     const executor = task.executorUserId ? userCache.get(task.executorUserId) : null;
     return (
       <div
@@ -557,14 +559,16 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
           <h2 className="text-2xl font-bold">Бэклог и Спринты</h2>
           <p className="text-sm text-slate-600 mt-1">Управление бэклогом продукта и спринтами</p>
         </div>
-        <button onClick={() => openSprintModal(null)}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2">
-          <Plus size={20} /> Создать спринт
-        </button>
+        {canEdit && (
+          <button onClick={() => openSprintModal(null)}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2">
+            <Plus size={20} /> Создать спринт
+          </button>
+        )}
       </div>
 
       {/* Sprint Duration Setting */}
-      <div className="bg-white border border-slate-200 rounded-lg p-4 flex items-center gap-4 flex-wrap">
+      <div className={`bg-white border border-slate-200 rounded-lg p-4 flex items-center gap-4 flex-wrap ${!canEdit ? "pointer-events-none opacity-60" : ""}`}>
         <div className="flex items-center gap-2">
           <Calendar size={18} className="text-blue-600" />
           <span className="text-sm font-medium text-slate-700">Длительность спринтов на проекте:</span>
@@ -645,10 +649,12 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
                   <h3 className="text-lg font-bold text-purple-900">Бэклог продукта</h3>
                   <p className="text-sm text-purple-700 mt-1">{backlogTasks.length} задач</p>
                 </div>
-                <button onClick={handleAddTaskToBacklog}
-                  className="p-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors" title="Добавить задачу в бэклог">
-                  <Plus size={18} />
-                </button>
+                {canEdit && (
+                  <button onClick={handleAddTaskToBacklog}
+                    className="p-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors" title="Добавить задачу в бэклог">
+                    <Plus size={18} />
+                  </button>
+                )}
               </div>
             </div>
             <div className="p-3 overflow-y-auto flex-1">
@@ -712,17 +718,19 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
                         </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button onClick={() => handleAddTaskToSprint(sprint.id)} className="p-1.5 hover:bg-white rounded-lg transition-colors" title="Добавить задачу в спринт">
-                        <Plus size={16} className="text-blue-600" />
-                      </button>
-                      <button onClick={() => openSprintModal(sprint)} className="p-1.5 hover:bg-white rounded-lg transition-colors" title="Редактировать">
-                        <Edit size={16} className="text-slate-600" />
-                      </button>
-                      <button onClick={() => handleDeleteSprint(sprint.id)} className="p-1.5 hover:bg-red-100 rounded-lg transition-colors" title="Удалить">
-                        <Trash2 size={16} className="text-red-600" />
-                      </button>
-                    </div>
+                    {canEdit && (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button onClick={() => handleAddTaskToSprint(sprint.id)} className="p-1.5 hover:bg-white rounded-lg transition-colors" title="Добавить задачу в спринт">
+                          <Plus size={16} className="text-blue-600" />
+                        </button>
+                        <button onClick={() => openSprintModal(sprint)} className="p-1.5 hover:bg-white rounded-lg transition-colors" title="Редактировать">
+                          <Edit size={16} className="text-slate-600" />
+                        </button>
+                        <button onClick={() => handleDeleteSprint(sprint.id)} className="p-1.5 hover:bg-red-100 rounded-lg transition-colors" title="Удалить">
+                          <Trash2 size={16} className="text-red-600" />
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-1 text-xs text-slate-600 mb-3">
@@ -742,20 +750,22 @@ export default function ScrumBacklog({ projectId }: ScrumBacklogProps) {
                     <div className="text-xs text-slate-500">{tasks.length} задач</div>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    {sprint.status === "planned" && (
-                      <button onClick={() => handleStartSprint(sprint.id)}
-                        className="flex-1 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-1.5 text-sm">
-                        <Play size={14} /> Запустить
-                      </button>
-                    )}
-                    {isActive && (
-                      <button onClick={() => handleCompleteSprint(sprint.id)}
-                        className="flex-1 px-3 py-1.5 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors flex items-center justify-center gap-1.5 text-sm">
-                        <CheckCircle2 size={14} /> Завершить
-                      </button>
-                    )}
-                  </div>
+                  {canEdit && (
+                    <div className="flex items-center gap-2">
+                      {sprint.status === "planned" && (
+                        <button onClick={() => handleStartSprint(sprint.id)}
+                          className="flex-1 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-1.5 text-sm">
+                          <Play size={14} /> Запустить
+                        </button>
+                      )}
+                      {isActive && (
+                        <button onClick={() => handleCompleteSprint(sprint.id)}
+                          className="flex-1 px-3 py-1.5 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors flex items-center justify-center gap-1.5 text-sm">
+                          <CheckCircle2 size={14} /> Завершить
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="p-3 overflow-y-auto flex-1">

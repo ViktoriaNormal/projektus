@@ -70,6 +70,7 @@ import {
   type TemplateRole,
   type TemplateRolePermission,
 } from "@/app/api/admin";
+import { useAuth } from "@/app/contexts/AuthContext";
 
 // ── Types (internal, for UI state) ──────────────────────────
 
@@ -87,6 +88,8 @@ interface TaskField {
 // ════════════════════════════════════════════════════════════════
 
 export default function ProjectTemplates() {
+  const { hasFullPermission } = useAuth();
+  const canEdit = hasFullPermission('system.project_templates.manage');
   const [templates, setTemplates] = useState<ProjectTemplateDetail[]>([]);
   const [refs, setRefs] = useState<TemplateReferences | null>(null);
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
@@ -160,7 +163,7 @@ export default function ProjectTemplates() {
             key={template.id}
             template={template}
             refs={refs}
-            onEdit={() => setEditingTemplateId(template.id)}
+            onEdit={canEdit ? () => setEditingTemplateId(template.id) : undefined}
           />
         ))}
       </div>
@@ -172,7 +175,7 @@ export default function ProjectTemplates() {
 // Template Card (list view) — full board preview
 // ════════════════════════════════════════════════════════════════
 
-function TemplateCard({ template, refs, onEdit }: { template: ProjectTemplateDetail; refs: TemplateReferences | null; onEdit: () => void }) {
+function TemplateCard({ template, refs, onEdit }: { template: ProjectTemplateDetail; refs: TemplateReferences | null; onEdit?: () => void }) {
 
   return (
     <div className="bg-white rounded-xl shadow-md border border-slate-100 hover:shadow-lg transition-all">
@@ -190,13 +193,15 @@ function TemplateCard({ template, refs, onEdit }: { template: ProjectTemplateDet
               )}
             </div>
           </div>
-          <button
-            onClick={onEdit}
-            className="p-2 hover:bg-blue-100 text-blue-600 rounded-lg transition-colors"
-            title="Редактировать"
-          >
-            <Edit size={18} />
-          </button>
+          {onEdit && (
+            <button
+              onClick={onEdit}
+              className="p-2 hover:bg-blue-100 text-blue-600 rounded-lg transition-colors"
+              title="Редактировать"
+            >
+              <Edit size={18} />
+            </button>
+          )}
         </div>
 
         {/* Meta */}

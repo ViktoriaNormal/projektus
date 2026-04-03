@@ -7,7 +7,9 @@ interface AuthContextValue {
   isLoading: boolean;
   isAdmin: boolean;
   permissions: string[];
+  permissionMap: Record<string, string>; // code -> access ("full" | "view")
   hasPermission: (perm: string) => boolean;
+  hasFullPermission: (perm: string) => boolean;
   setAuth: (data: AuthResponse) => void;
   updateUser: (user: UserResponse) => void;
   clearAuth: () => void;
@@ -25,10 +27,26 @@ function extractPermissions(roles: AuthResponse['roles']): string[] {
   return [...new Set(allPerms)];
 }
 
+function extractPermissionMap(roles: AuthResponse['roles']): Record<string, string> {
+  if (!roles || !Array.isArray(roles)) return {};
+  const map: Record<string, string> = {};
+  for (const role of roles) {
+    for (const p of role.permissions || []) {
+      if (p.access === 'none') continue;
+      // "full" takes priority over "view" if multiple roles
+      if (!map[p.code] || p.access === 'full') {
+        map[p.code] = p.access;
+      }
+    }
+  }
+  return map;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [permissions, setPermissions] = useState<string[]>([]);
+  const [permissionMap, setPermissionMap] = useState<Record<string, string>>({});
 
   const setAuth = useCallback((data: AuthResponse) => {
     localStorage.setItem('access_token', data.accessToken);
@@ -38,8 +56,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(data.user);
     }
     const perms = extractPermissions(data.roles);
+    const permMap = extractPermissionMap(data.roles);
     setPermissions(perms);
+    setPermissionMap(permMap);
     localStorage.setItem('permissions', JSON.stringify(perms));
+    localStorage.setItem('permissionMap', JSON.stringify(permMap));
   }, []);
 
   const updateUser = useCallback((updatedUser: UserResponse) => {
@@ -56,8 +77,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem('refresh_token');
     localStorage.removeItem('user');
     localStorage.removeItem('permissions');
+    localStorage.removeItem('permissionMap');
     setUser(null);
     setPermissions([]);
+    setPermissionMap({});
   }, []);
 
   useEffect(() => {
@@ -68,6 +91,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (cachedPerms) {
       try { setPermissions(JSON.parse(cachedPerms)); } catch { /* ignore */ }
+    }
+    const cachedPermMap = localStorage.getItem('permissionMap');
+    if (cachedPermMap) {
+      try { setPermissionMap(JSON.parse(cachedPermMap)); } catch { /* ignore */ }
     }
 
     if (savedUser && token) {
@@ -132,8 +159,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [permissions],
   );
 
+  const hasFullPermission = useCallback(
+    (perm: string) => permissionMap[perm] === 'full',
+    [permissionMap],
+  );
+
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, isAdmin, permissions, hasPermission, setAuth, updateUser, clearAuth }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, isAdmin, permissions, permissionMap, hasPermission, hasFullPermission, setAuth, updateUser, clearAuth }}>
       {children}
     </AuthContext.Provider>
   );

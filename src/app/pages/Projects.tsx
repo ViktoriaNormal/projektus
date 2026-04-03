@@ -43,7 +43,8 @@ function CopyButton({ text }: { text: string }) {
 
 
 export default function Projects() {
-  const { user: authUser } = useAuth();
+  const { user: authUser, hasFullPermission } = useAuth();
+  const canCreateProjects = hasFullPermission('system.projects.manage');
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
@@ -142,22 +143,24 @@ export default function Projects() {
           <h1 className="text-3xl font-bold">Проекты</h1>
           <p className="text-slate-600 mt-1">Управление всеми проектами системы</p>
         </div>
-        <button
-          onClick={() => {
-            setCreateName("");
-            setCreateDescription("");
-            setCreateType("scrum");
-            setOwnerSearch("");
-            setOwnerResults([]);
-            setShowOwnerSearch(false);
-            if (authUser?.id) getUser(authUser.id).then(setCreateOwner).catch(() => {});
-            setShowCreateModal(true);
-          }}
-          className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md hover:shadow-lg flex items-center gap-2"
-        >
-          <Plus size={20} />
-          Создать проект
-        </button>
+        {canCreateProjects && (
+          <button
+            onClick={() => {
+              setCreateName("");
+              setCreateDescription("");
+              setCreateType("scrum");
+              setOwnerSearch("");
+              setOwnerResults([]);
+              setShowOwnerSearch(false);
+              if (authUser?.id) getUser(authUser.id).then(setCreateOwner).catch(() => {});
+              setShowCreateModal(true);
+            }}
+            className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md hover:shadow-lg flex items-center gap-2"
+          >
+            <Plus size={20} />
+            Создать проект
+          </button>
+        )}
       </div>
 
       {/* Search, Filters & Sort */}

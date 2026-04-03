@@ -140,9 +140,7 @@ export default function Team() {
               className={`bg-white rounded-xl p-6 shadow-md border ${
                 isMe
                   ? 'border-blue-300 ring-1 ring-blue-200'
-                  : user.onVacation || user.isSick
-                    ? 'border-orange-200'
-                    : 'border-slate-100'
+                  : 'border-slate-100'
               }`}
             >
               <div className="flex flex-col items-center text-center">

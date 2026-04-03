@@ -2,8 +2,11 @@ import { useState, useEffect } from 'react';
 import { Key, Save, Info, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { getAdminPasswordPolicy, updateAdminPasswordPolicy } from '../../api/admin';
 import { ApiError } from '../../api/client';
+import { useAuth } from '../../contexts/AuthContext';
 
 export default function AdminPasswordPolicy() {
+  const { hasFullPermission } = useAuth();
+  const canEdit = hasFullPermission('system.password_policy.manage');
   const [policy, setPolicy] = useState({
     minLength: 8,
     requireDigits: true,
@@ -128,6 +131,7 @@ export default function AdminPasswordPolicy() {
                 onChange={(e) =>
                   setPolicy({ ...policy, minLength: parseInt(e.target.value) })
                 }
+                disabled={!canEdit}
                 className="flex-1"
               />
               <span className="w-12 text-center px-3 py-2 bg-slate-100 rounded-lg font-semibold">
@@ -152,6 +156,7 @@ export default function AdminPasswordPolicy() {
                 onChange={(e) =>
                   setPolicy({ ...policy, requireDigits: e.target.checked })
                 }
+                disabled={!canEdit}
                 className="w-5 h-5 text-purple-600 rounded focus:ring-2 focus:ring-purple-500"
               />
               <div className="flex-1">
@@ -169,6 +174,7 @@ export default function AdminPasswordPolicy() {
                 onChange={(e) =>
                   setPolicy({ ...policy, requireLowercase: e.target.checked })
                 }
+                disabled={!canEdit}
                 className="w-5 h-5 text-purple-600 rounded focus:ring-2 focus:ring-purple-500"
               />
               <div className="flex-1">
@@ -186,6 +192,7 @@ export default function AdminPasswordPolicy() {
                 onChange={(e) =>
                   setPolicy({ ...policy, requireUppercase: e.target.checked })
                 }
+                disabled={!canEdit}
                 className="w-5 h-5 text-purple-600 rounded focus:ring-2 focus:ring-purple-500"
               />
               <div className="flex-1">
@@ -203,6 +210,7 @@ export default function AdminPasswordPolicy() {
                 onChange={(e) =>
                   setPolicy({ ...policy, requireSpecial: e.target.checked })
                 }
+                disabled={!canEdit}
                 className="w-5 h-5 text-purple-600 rounded focus:ring-2 focus:ring-purple-500"
               />
               <div className="flex-1">
@@ -222,7 +230,8 @@ export default function AdminPasswordPolicy() {
             <textarea
               value={policy.notes}
               onChange={(e) => setPolicy({ ...policy, notes: e.target.value })}
-              className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+              disabled={!canEdit}
+              className={`w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 ${!canEdit ? "bg-slate-50 text-slate-500 cursor-not-allowed" : ""}`}
               rows={3}
               placeholder="Дополнительные требования или пояснения..."
             />
@@ -245,6 +254,7 @@ export default function AdminPasswordPolicy() {
           </div>
 
           {/* Save Button */}
+          {canEdit && (
           <div className="flex justify-end gap-3 pt-4">
             <button
               onClick={handleSave}
@@ -259,6 +269,7 @@ export default function AdminPasswordPolicy() {
               {saving ? 'Сохранение...' : 'Сохранить изменения'}
             </button>
           </div>
+          )}
         </div>
       </div>
     </div>

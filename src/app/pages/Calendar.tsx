@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useSearchParams } from "react-router";
 import { ChevronLeft, ChevronRight, Plus, Clock, MapPin, Loader2, Copy, Check, Info } from "lucide-react";
 import { getProjects, type ProjectResponse } from "../api/projects";
 import { MeetingModal } from "../components/modals/MeetingModal";
@@ -212,6 +213,7 @@ function LegendItem({ color, label, tooltip }: { color: string; label: string; t
 
 export default function Calendar() {
   const { user: authUser } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedMeeting, setSelectedMeeting] = useState<MeetingDetailsResponse | undefined>(undefined);
@@ -222,10 +224,24 @@ export default function Calendar() {
   const [weekLoading, setWeekLoading] = useState(true);
   const [defaultDate, setDefaultDate] = useState<string>("");
   const [projects, setProjects] = useState<ProjectResponse[]>([]);
+  const meetingParamHandled = useRef(false);
 
   useEffect(() => {
     getProjects().then(setProjects).catch(() => setProjects([]));
   }, []);
+
+  // Open meeting modal from notification link (?meeting=id)
+  useEffect(() => {
+    const meetingId = searchParams.get("meeting");
+    if (meetingId && !meetingParamHandled.current) {
+      meetingParamHandled.current = true;
+      getMeeting(meetingId).then(details => {
+        setSelectedMeeting(details);
+        setShowMeetingModal(true);
+      }).catch(() => { /* meeting not found */ });
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const loadMonthMeetings = useCallback(async () => {
     setLoading(true);
@@ -269,6 +285,13 @@ export default function Calendar() {
   useEffect(() => {
     loadWeekMeetings();
   }, [loadWeekMeetings]);
+
+  // Reload when meeting is accepted/declined from notifications
+  useEffect(() => {
+    const handler = () => reloadAll();
+    window.addEventListener("meeting-response-changed", handler);
+    return () => window.removeEventListener("meeting-response-changed", handler);
+  }, [reloadAll]);
 
   const daysInMonth = new Date(
     currentDate.getFullYear(),
@@ -328,8 +351,15 @@ export default function Calendar() {
     }
   };
 
-  const handleCreateFromCell = () => {
-    setDefaultDate("");
+  const handleCreateFromCell = (day?: number) => {
+    if (day) {
+      const y = currentDate.getFullYear();
+      const m = String(currentDate.getMonth() + 1).padStart(2, "0");
+      const d = String(day).padStart(2, "0");
+      setDefaultDate(`${y}-${m}-${d}`);
+    } else {
+      setDefaultDate("");
+    }
     setSelectedMeeting(undefined);
     setShowCreateModal(true);
   };
@@ -442,28 +472,31 @@ export default function Calendar() {
                 const day = i + 1;
                 const dayMeetings = getMeetingsForDate(day);
                 const hasMeetings = dayMeetings.length > 0;
+                const now = new Date();
                 const isToday =
-                  day === new Date().getDate() &&
-                  currentDate.getMonth() === new Date().getMonth() &&
-                  currentDate.getFullYear() === new Date().getFullYear();
+                  day === now.getDate() &&
+                  currentDate.getMonth() === now.getMonth() &&
+                  currentDate.getFullYear() === now.getFullYear();
+                const cellDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), day, 23, 59, 59);
+                const isPast = cellDate < new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
                 return (
                   <div
                     key={day}
                     className={`group relative aspect-square border border-slate-200 rounded-lg p-1.5 flex flex-col ${
-                      isToday ? "bg-blue-50 border-blue-300" : ""
+                      isToday ? "bg-blue-50 border-blue-300" : isPast ? "opacity-50" : ""
                     }`}
                   >
                     {/* Day number + plus for cells with meetings */}
                     <div className="flex items-center justify-between shrink-0">
-                      <span className={`text-sm font-semibold ${isToday ? "text-blue-600" : ""}`}>
+                      <span className={`text-sm font-semibold ${isToday ? "text-blue-600" : isPast ? "text-slate-400" : ""}`}>
                         {day}
                       </span>
-                      {hasMeetings && (
+                      {hasMeetings && !isPast && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleCreateFromCell();
+                            handleCreateFromCell(day);
                           }}
                           className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-blue-100 rounded text-blue-600"
                           title="Создать встречу"
@@ -495,12 +528,12 @@ export default function Calendar() {
                           </div>
                         ))}
                       </div>
-                    ) : (
+                    ) : !isPast ? (
                       <div className="flex-1 flex items-center justify-center">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleCreateFromCell();
+                            handleCreateFromCell(day);
                           }}
                           className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-blue-100 rounded-lg text-blue-400 hover:text-blue-600"
                           title="Создать встречу"
@@ -508,6 +541,8 @@ export default function Calendar() {
                           <Plus size={20} />
                         </button>
                       </div>
+                    ) : (
+                      <div className="flex-1" />
                     )}
                   </div>
                 );

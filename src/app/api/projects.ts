@@ -105,3 +105,40 @@ export function removeMember(projectId: string, memberId: string) {
     method: 'DELETE',
   });
 }
+
+// ── Project Permissions ────────────────────────────────────
+
+export interface ProjectPermission {
+  area: string;
+  access: 'full' | 'view' | 'none';
+}
+
+// BACKEND TODO:
+// GET /projects/{projectId}/my-permissions — возвращает эффективные права текущего пользователя.
+// Логика:
+//   system.projects.manage = full → все 7 areas = full
+//   system.projects.manage = view → все 7 areas = view
+//   system.projects.manage = none → берём из проектной роли пользователя
+//
+// 7 проектных permission areas (добавить в GET /permissions, scope="project"):
+//   project.boards    — Управление досками (availableFor: scrum, kanban)
+//   project.tasks     — Управление задачами (availableFor: scrum, kanban)
+//   project.sprints   — Управление спринтами (availableFor: scrum)
+//   project.settings  — Настройки проекта (availableFor: scrum, kanban)
+//   project.members   — Управление участниками (availableFor: scrum, kanban)
+//   project.roles     — Управление ролями проекта (availableFor: scrum, kanban)
+//   project.analytics — Аналитика и прогнозирование (availableFor: scrum, kanban)
+//
+// Формат ответа: { permissions: [{ area: "project.boards", access: "full" }, ...] }
+
+export function getMyProjectPermissions(projectId: string) {
+  return apiRequest<ProjectPermission[]>(`/projects/${projectId}/my-permissions`).then(result => {
+    if (Array.isArray(result)) return result;
+    if (result && typeof result === 'object') {
+      const obj = result as unknown as Record<string, unknown>;
+      if (Array.isArray(obj.permissions)) return obj.permissions as ProjectPermission[];
+      if (Array.isArray(obj.items)) return obj.items as ProjectPermission[];
+    }
+    return [];
+  });
+}

@@ -49,12 +49,17 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
   useBodyScrollLock(isOpen);
   const { user: authUser } = useAuth();
   const organizerId = meeting?.organizerId || authUser?.id || null;
+  const isOrganizer = mode === "create" || meeting?.organizerId === authUser?.id;
+  const readOnly = !isOrganizer;
 
   const [name, setName] = useState(meeting?.name || "");
   const [description, setDescription] = useState(meeting?.description || "");
   const [selectedProject, setSelectedProject] = useState<string | null>(meeting?.projectId || null);
   const [selectedType, setSelectedType] = useState(meeting?.meetingType || "");
-  const initStart = meeting?.startTime ? meeting.startTime.slice(0, 16) : defaultStartDate || getRoundedNow();
+  const initStart = meeting?.startTime ? meeting.startTime.slice(0, 16)
+    : defaultStartDate && !defaultStartDate.includes("T")
+      ? `${defaultStartDate}T${getRoundedNow().slice(11)}`
+      : defaultStartDate || getRoundedNow();
   const [startTime, setStartTime] = useState(initStart);
   const [endTime, setEndTime] = useState(meeting?.endTime ? meeting.endTime.slice(0, 16) : plusOneHour(initStart));
   const [location, setLocation] = useState(meeting?.location || "");
@@ -107,7 +112,9 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
       setExistingParticipantIds(ids);
       loadParticipantProfiles(ids);
     } else {
-      const start = defaultStartDate || getRoundedNow();
+      const start = defaultStartDate && !defaultStartDate.includes("T")
+        ? `${defaultStartDate}T${getRoundedNow().slice(11)}`
+        : defaultStartDate || getRoundedNow();
       setName("");
       setDescription("");
       setSelectedProject(null);
@@ -346,7 +353,8 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={readOnly}
+              className={`w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${readOnly ? "bg-slate-50 text-slate-500 cursor-not-allowed" : ""}`}
               placeholder="Введите название встречи..."
               required
             />
@@ -357,7 +365,8 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              disabled={readOnly}
+              className={`w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none ${readOnly ? "bg-slate-50 text-slate-500 cursor-not-allowed" : ""}`}
               placeholder="Описание встречи..."
               rows={2}
             />
@@ -376,7 +385,8 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
                   setSelectedType("");
                 }
               }}
-              className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={readOnly}
+              className={`w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${readOnly ? "bg-slate-50 text-slate-500 cursor-not-allowed" : ""}`}
             >
               <option value="">Без привязки к проекту</option>
               {realProjects.filter((p) => p.status === "active").map((project) => (
@@ -392,7 +402,8 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
             <select
               value={selectedType}
               onChange={(e) => setSelectedType(e.target.value)}
-              className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={readOnly}
+              className={`w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${readOnly ? "bg-slate-50 text-slate-500 cursor-not-allowed" : ""}`}
               required
             >
               <option value="">Выберите тип встречи</option>
@@ -426,7 +437,8 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
                   setStartTime(e.target.value);
                   if (e.target.value) setEndTime(plusOneHour(e.target.value));
                 }}
-                className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={readOnly}
+                className={`w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${readOnly ? "bg-slate-50 text-slate-500 cursor-not-allowed" : ""}`}
                 required
               />
             </div>
@@ -439,7 +451,8 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
                 type="datetime-local"
                 value={endTime}
                 onChange={(e) => setEndTime(e.target.value)}
-                className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={readOnly}
+                className={`w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${readOnly ? "bg-slate-50 text-slate-500 cursor-not-allowed" : ""}`}
                 required
               />
             </div>
@@ -454,7 +467,8 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
               type="text"
               value={location}
               onChange={(e) => setLocation(e.target.value)}
-              className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={readOnly}
+              className={`w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${readOnly ? "bg-slate-50 text-slate-500 cursor-not-allowed" : ""}`}
               placeholder="Конференц-зал, Online и т.д."
               required
             />
@@ -467,7 +481,7 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
                 <Users size={16} />
                 Участники ({selectedParticipants.length})
               </label>
-              {selectedProject && (
+              {selectedProject && isOrganizer && (
                 <button
                   type="button"
                   disabled={loadingProjectMembersRef.current}
@@ -509,15 +523,15 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
             {selectedParticipants.length > 0 && (
               <div className="mb-3 p-3 bg-slate-50 rounded-lg space-y-2 max-h-48 overflow-y-auto">
                 {selectedParticipants.map((user) => {
-                  const isOrganizer = user.id === organizerId;
+                  const isOrganizerUser = user.id === organizerId;
                   return (
-                    <div key={user.id} className={`flex items-center justify-between p-2 rounded-lg border ${isOrganizer ? "bg-amber-50 border-amber-200" : "bg-white border-slate-200"}`}>
+                    <div key={user.id} className={`flex items-center justify-between p-2 rounded-lg border ${isOrganizerUser ? "bg-amber-50 border-amber-200" : "bg-white border-slate-200"}`}>
                       <div className="flex items-center gap-2">
                         <UserAvatar user={{ fullName: user.fullName, avatarUrl: user.avatarUrl }} size="sm" />
                         <div>
                           <p className="text-sm font-medium flex items-center gap-1.5">
                             {user.fullName}
-                            {isOrganizer && (
+                            {isOrganizerUser && (
                               <span className="inline-flex items-center gap-0.5 text-xs text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full font-medium">
                                 <Crown size={10} />
                                 Организатор
@@ -527,7 +541,7 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
                           <p className="text-xs text-slate-500">{user.email}</p>
                         </div>
                       </div>
-                      {!isOrganizer && (
+                      {!isOrganizerUser && isOrganizer && (
                         <button
                           type="button"
                           onClick={() => removeParticipant(user.id)}
@@ -543,17 +557,19 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
             )}
 
             {/* Add Participant Button */}
-            <button
-              type="button"
-              onClick={() => setShowUserSearch(!showUserSearch)}
-              className="w-full px-4 py-2 border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50 rounded-lg transition-colors flex items-center justify-center gap-2 text-slate-600 hover:text-blue-600"
-            >
-              <Plus size={18} />
-              Добавить участника
-            </button>
+            {isOrganizer && (
+              <button
+                type="button"
+                onClick={() => setShowUserSearch(!showUserSearch)}
+                className="w-full px-4 py-2 border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50 rounded-lg transition-colors flex items-center justify-center gap-2 text-slate-600 hover:text-blue-600"
+              >
+                <Plus size={18} />
+                Добавить участника
+              </button>
+            )}
 
             {/* User Search Popup */}
-            {showUserSearch && (
+            {isOrganizer && showUserSearch && (
               <div className="mt-3 p-4 border border-slate-200 rounded-lg bg-slate-50">
                 <div className="relative mb-3">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
@@ -592,7 +608,7 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
           </div>
 
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
-            {mode === "edit" && meeting?.id && meeting.status !== "cancelled" && (
+            {mode === "edit" && meeting?.id && meeting.status !== "cancelled" && meeting.organizerId === authUser?.id && (
               <button
                 type="button"
                 onClick={() => setShowDeleteConfirm(true)}
@@ -610,18 +626,20 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
             >
               Отмена
             </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-5 h-11 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md font-medium flex items-center gap-2 disabled:opacity-60 whitespace-nowrap"
-            >
-              {saving ? (
-                <Loader2 size={18} className="animate-spin" />
-              ) : (
-                <Save size={18} />
-              )}
-              {mode === "create" ? "Создать встречу" : "Сохранить изменения"}
-            </button>
+            {isOrganizer && (
+              <button
+                type="submit"
+                disabled={saving}
+                className="px-5 h-11 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md font-medium flex items-center gap-2 disabled:opacity-60 whitespace-nowrap"
+              >
+                {saving ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : (
+                  <Save size={18} />
+                )}
+                {mode === "create" ? "Создать встречу" : "Сохранить изменения"}
+              </button>
+            )}
           </div>
 
           {mode === "create" && (

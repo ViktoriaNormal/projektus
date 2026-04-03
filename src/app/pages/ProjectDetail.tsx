@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
 import { Link, useParams, useNavigate, useBlocker, useSearchParams } from "react-router";
+import { useAuth } from "../contexts/AuthContext";
+import { useProjectPermissions } from "../hooks/useProjectPermissions";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import {
@@ -77,6 +79,7 @@ interface DraggableBoardTabProps {
   onSelect: (id: string) => void;
   onEdit: (board: BoardTab) => void;
   onDelete: (id: string) => void;
+  canEditBoard?: boolean;
 }
 
 const DraggableBoardTab = ({
@@ -87,10 +90,12 @@ const DraggableBoardTab = ({
   onSelect,
   onEdit,
   onDelete,
+  canEditBoard = true,
 }: DraggableBoardTabProps) => {
   const [{ isDragging }, drag] = useDrag({
     type: "BOARD_TAB",
     item: { index },
+    canDrag: canEditBoard,
     collect: (monitor) => ({
       isDragging: monitor.isDragging(),
     }),
@@ -99,6 +104,7 @@ const DraggableBoardTab = ({
   const [, drop] = useDrop({
     accept: "BOARD_TAB",
     hover: (item: { index: number }) => {
+      if (!canEditBoard) return;
       if (item.index !== index) {
         moveBoard(item.index, index);
         item.index = index;
@@ -109,7 +115,7 @@ const DraggableBoardTab = ({
   return (
     <div
       ref={(node) => drag(drop(node))}
-      className={`flex items-center gap-1.5 cursor-move ${isDragging ? "opacity-50" : ""}`}
+      className={`flex items-center gap-1.5 ${canEditBoard ? "cursor-move" : ""} ${isDragging ? "opacity-50" : ""}`}
     >
       <button
         onClick={() => onSelect(board.id)}
@@ -129,24 +135,26 @@ const DraggableBoardTab = ({
           <div className="text-xs opacity-75 mt-1 font-normal">{board.description}</div>
         )}
       </button>
-      <div className="flex items-center gap-0.5 pb-0.5">
-        <button
-          onClick={() => onEdit(board)}
-          className="p-1.5 hover:bg-slate-200 rounded transition-all"
-          title="Настройки доски"
-        >
-          <Settings size={14} className="text-slate-600" />
-        </button>
-        {!board.isDefault && (
+      {canEditBoard && (
+        <div className="flex items-center gap-0.5 pb-0.5">
           <button
-            onClick={() => onDelete(board.id)}
-            className="p-1.5 hover:bg-red-100 rounded transition-all"
-            title="Удалить доску"
+            onClick={() => onEdit(board)}
+            className="p-1.5 hover:bg-slate-200 rounded transition-all"
+            title="Настройки доски"
           >
-            <Trash2 size={14} className="text-red-600" />
+            <Settings size={14} className="text-slate-600" />
           </button>
-        )}
-      </div>
+          {!board.isDefault && (
+            <button
+              onClick={() => onDelete(board.id)}
+              className="p-1.5 hover:bg-red-100 rounded transition-all"
+              title="Удалить доску"
+            >
+              <Trash2 size={14} className="text-red-600" />
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 };
@@ -156,6 +164,9 @@ const DraggableBoardTab = ({
 export default function ProjectDetail() {
   const { id: projectId } = useParams();
   const navigate = useNavigate();
+  const { hasFullPermission } = useAuth();
+  const canEditProject = hasFullPermission('system.projects.manage');
+  const { can, canEdit, loading: permLoading } = useProjectPermissions(projectId);
 
   // Data state
   const [project, setProject] = useState<ProjectResponse | null>(null);
@@ -578,11 +589,11 @@ export default function ProjectDetail() {
 
   const tabs = [
     { id: "overview", label: "Обзор проекта", icon: BarChart3 },
-    { id: "boards", label: "Доски задач", icon: Layout },
-    ...(projectType === "scrum" ? [{ id: "backlog", label: "Бэклог и спринты", icon: FileText }] : []),
-    { id: "params", label: "Параметры и участники проекта", icon: Settings },
-    { id: "analytics", label: "Аналитика", icon: TrendingUp },
-    ...(projectType === "kanban" ? [{ id: "metrics", label: "Прогнозирование", icon: TrendingUp }] : []),
+    ...(can("project.boards") || can("project.tasks") ? [{ id: "boards", label: "Доски задач", icon: Layout }] : []),
+    ...(projectType === "scrum" && can("project.sprints") ? [{ id: "backlog", label: "Бэклог и спринты", icon: FileText }] : []),
+    ...(can("project.settings") || can("project.members") || can("project.roles") ? [{ id: "params", label: "Параметры и участники проекта", icon: Settings }] : []),
+    ...(can("project.analytics") ? [{ id: "analytics", label: "Аналитика", icon: TrendingUp }] : []),
+    ...(projectType === "kanban" && can("project.analytics") ? [{ id: "metrics", label: "Прогнозирование", icon: TrendingUp }] : []),
   ];
 
   const activeBoard = boardTabs.find((b) => b.id === activeBoardId);
@@ -633,19 +644,21 @@ export default function ProjectDetail() {
           >
             {statusLabel}
           </span>
-          <div className="ml-auto">
-            <button
-              onClick={() => setShowDeleteProject(!showDeleteProject)}
-              className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-              title={showDeleteProject ? "Скрыть" : "Удалить проект"}
-            >
-              {showDeleteProject ? (
-                <ChevronUp size={20} className="text-slate-600" />
-              ) : (
-                <Trash2 size={20} className="text-red-600" />
-              )}
-            </button>
-          </div>
+          {(canEditProject || canEdit("project.settings")) && (
+            <div className="ml-auto">
+              <button
+                onClick={() => setShowDeleteProject(!showDeleteProject)}
+                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                title={showDeleteProject ? "Скрыть" : "Удалить проект"}
+              >
+                {showDeleteProject ? (
+                  <ChevronUp size={20} className="text-slate-600" />
+                ) : (
+                  <Trash2 size={20} className="text-red-600" />
+                )}
+              </button>
+            </div>
+          )}
         </div>
         {showDeleteProject && (
           <div className="mt-4 p-4 bg-red-50 rounded-lg border border-red-200">
@@ -825,17 +838,20 @@ export default function ProjectDetail() {
                           setShowBoardSettingsModal(true);
                         }}
                         onDelete={handleDeleteBoard}
+                        canEditBoard={canEdit("project.boards")}
                       />
                     ))}
-                    <button
-                      onClick={async () => {
-                        await handleCreateBoard("Новая доска", "");
-                      }}
-                      className="px-4 py-2 border border-dashed border-slate-300 rounded-t-lg hover:border-blue-400 hover:text-blue-600 hover:bg-white transition-all flex items-center gap-2 text-slate-600 whitespace-nowrap"
-                    >
-                      <Plus size={16} />
-                      Добавить доску
-                    </button>
+                    {canEdit("project.boards") && (
+                      <button
+                        onClick={async () => {
+                          await handleCreateBoard("Новая доска", "");
+                        }}
+                        className="px-4 py-2 border border-dashed border-slate-300 rounded-t-lg hover:border-blue-400 hover:text-blue-600 hover:bg-white transition-all flex items-center gap-2 text-slate-600 whitespace-nowrap"
+                      >
+                        <Plus size={16} />
+                        Добавить доску
+                      </button>
+                    )}
                   </div>
                 </div>
               </DndProvider>
@@ -868,7 +884,7 @@ export default function ProjectDetail() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium mb-2">Группировать задачи по:</label>
-                      <select value={swimlaneGroupBy} onChange={e => handleSetSwimlaneGroupBy(e.target.value)}
+                      <select value={swimlaneGroupBy} onChange={e => handleSetSwimlaneGroupBy(e.target.value)} disabled={!canEdit("project.boards")}
                         className="w-full max-w-md px-4 py-3 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white">
                         <option value="">Без дорожек</option>
                         {boardFields
@@ -889,7 +905,9 @@ export default function ProjectDetail() {
               {activeBoard ? (
                 <Board key={`${activeBoardId}-${boardRefreshKey}`} boardId={activeBoardId} projectId={project.id} projectType={projectType}
                   onBoardChanged={() => { loadBoards(); loadBoardDetails(); }}
-                  onSwimlanesComputed={setComputedSwimlaneCount} />
+                  onSwimlanesComputed={setComputedSwimlaneCount}
+                  canEditTasks={canEdit("project.tasks")}
+                  canEditBoard={canEdit("project.boards")} />
               ) : (
                 <div className="text-center py-12 bg-slate-50 rounded-xl border-2 border-dashed border-slate-300">
                   <Layout size={48} className="mx-auto text-slate-400 mb-4" />
@@ -908,7 +926,7 @@ export default function ProjectDetail() {
           {/* Backlog Tab */}
           {activeTab === "backlog" && (
             <div className="space-y-6">
-              <ScrumBacklog projectId={project.id} />
+              <ScrumBacklog projectId={project.id} canEdit={canEdit("project.sprints")} />
             </div>
           )}
 
@@ -930,7 +948,8 @@ export default function ProjectDetail() {
           {activeTab === "params" && (
             <div className="space-y-8">
               {/* Параметры проекта (объединённый блок) */}
-              {refs && (
+              {can("project.settings") && refs && (
+                <div className={!canEdit("project.settings") ? "pointer-events-none opacity-75" : ""}>
                 <ProjectParamsSection
                   projectId={project.id}
                   projectKey={project.key}
@@ -959,10 +978,12 @@ export default function ProjectDetail() {
                     }
                   }}
                 />
+                </div>
               )}
 
               {/* Роли на проекте (из шаблона + кастомные) */}
-              {refs && (
+              {can("project.roles") && refs && (
+                <div className={!canEdit("project.roles") ? "pointer-events-none opacity-75" : ""}>
                 <ProjectRolesSection
                   projectId={project.id}
                   projectType={projectType}
@@ -970,10 +991,11 @@ export default function ProjectDetail() {
                   roles={projectRoles}
                   onReload={loadProjectRoles}
                 />
+                </div>
               )}
 
               {/* Участники проекта */}
-              <div className="bg-white rounded-xl shadow-md border border-slate-100 overflow-hidden p-6">
+              {can("project.members") && <div className="bg-white rounded-xl shadow-md border border-slate-100 overflow-hidden p-6">
                 <div className="flex items-center justify-between mb-4">
                   <div>
                     <h3 className="text-lg font-bold">Участники проекта</h3>
@@ -981,13 +1003,15 @@ export default function ProjectDetail() {
                       Всего участников: {members.length}
                     </p>
                   </div>
-                  <button
-                    onClick={() => setShowAddMemberModal(true)}
-                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
-                  >
-                    <Plus size={20} />
-                    Добавить участника
-                  </button>
+                  {canEdit("project.members") && (
+                    <button
+                      onClick={() => setShowAddMemberModal(true)}
+                      className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
+                    >
+                      <Plus size={20} />
+                      Добавить участника
+                    </button>
+                  )}
                 </div>
 
                 <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg mb-4">
@@ -1036,7 +1060,8 @@ export default function ProjectDetail() {
                               <p className="text-sm text-slate-500">Без роли</p>
                             )}
                           </div>
-                          <div className="flex items-center gap-1">
+                          {canEdit("project.members") && (
+                            <div className="flex items-center gap-1">
                               <button
                                 onClick={() => {
                                   setSelectedMember(member);
@@ -1055,13 +1080,14 @@ export default function ProjectDetail() {
                               >
                                 <Trash2 size={18} />
                               </button>
-                          </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
                   })}
                 </div>
-              </div>
+              </div>}
             </div>
           )}
         </div>

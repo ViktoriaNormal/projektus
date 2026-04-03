@@ -12,6 +12,7 @@ import {
 import { getPasswordPolicy, type PasswordPolicy } from '../../api/auth';
 import { ApiError } from '../../api/client';
 import { UserAvatar } from '../../components/UserAvatar';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface UserForm {
   username: string;
@@ -34,6 +35,8 @@ const emptyForm: UserForm = {
 };
 
 export default function AdminUsers() {
+  const { hasFullPermission } = useAuth();
+  const canEdit = hasFullPermission('system.users.manage');
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [roles, setRoles] = useState<SystemRole[]>([]);
   const [loading, setLoading] = useState(true);
@@ -265,13 +268,15 @@ export default function AdminUsers() {
             Создание и управление учётными записями
           </p>
         </div>
-        <button
-          onClick={openCreate}
-          className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all shadow-md hover:shadow-lg flex items-center gap-2"
-        >
-          <Plus size={20} />
-          Создать пользователя
-        </button>
+        {canEdit && (
+          <button
+            onClick={openCreate}
+            className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all shadow-md hover:shadow-lg flex items-center gap-2"
+          >
+            <Plus size={20} />
+            Создать пользователя
+          </button>
+        )}
       </div>
 
       {msg && (
@@ -452,6 +457,7 @@ export default function AdminUsers() {
                     </span>
                   </td>
                   <td className="px-6 py-4">
+                    {canEdit && (
                     <div className="flex items-center justify-end gap-2">
                       <button
                         onClick={() => openEdit(user)}
@@ -468,6 +474,7 @@ export default function AdminUsers() {
                         <Trash2 size={18} />
                       </button>
                     </div>
+                    )}
                   </td>
                 </tr>
               ))}

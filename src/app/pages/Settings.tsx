@@ -1,83 +1,125 @@
-import { Bell, Mail, Save, Clock } from "lucide-react";
-import { useState } from "react";
+import { Bell, Save, Loader2 } from "lucide-react";
+import { useState, useEffect } from "react";
+import {
+  getNotificationSettings,
+  updateNotificationSettings,
+  type NotificationSettingResponse,
+} from "../api/notifications";
+
+const NOTIFICATION_TYPES = [
+  {
+    category: "События, связанные с задачами",
+    items: [
+      {
+        id: "task_assigned",
+        label: "Назначение пользователя исполнителем задачи",
+        description: "Уведомление при назначении вас исполнителем задачи",
+      },
+      {
+        id: "comment_mention",
+        label: "Упоминание пользователя в комментарии",
+        description: "Уведомление при упоминании вас в комментарии к задаче",
+      },
+      {
+        id: "task_status_change_author",
+        label: "Изменение статуса задачи (автор)",
+        description: "Уведомление при изменении статуса задачи, где вы являетесь автором",
+      },
+      {
+        id: "task_status_change_assignee",
+        label: "Изменение статуса задачи (исполнитель)",
+        description: "Уведомление при изменении статуса задачи, где вы являетесь исполнителем",
+      },
+      {
+        id: "task_status_change_watcher",
+        label: "Изменение статуса задачи (наблюдатель)",
+        description: "Уведомление при изменении статуса задачи, где вы являетесь наблюдателем",
+      },
+    ],
+  },
+  {
+    category: "События, связанные со встречами",
+    items: [
+      {
+        id: "meeting_invite",
+        label: "Получение приглашения на новую встречу",
+        description: "Уведомление при получении приглашения на встречу",
+      },
+      {
+        id: "meeting_change",
+        label: "Изменение параметров встречи",
+        description: "Уведомление при изменении параметров встречи, в которой вы участвуете",
+      },
+      {
+        id: "meeting_cancel",
+        label: "Отмена встречи",
+        description: "Уведомление при отмене встречи, в которой вы являетесь участником",
+      },
+    ],
+  },
+];
 
 export default function Settings() {
+  const [settings, setSettings] = useState<Map<string, NotificationSettingResponse>>(new Map());
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [deadlineTime, setDeadlineTime] = useState({ value: 1, unit: "days" });
 
-  const handleSave = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+  useEffect(() => {
+    setLoading(true);
+    getNotificationSettings()
+      .then(data => {
+        const map = new Map<string, NotificationSettingResponse>();
+        data.forEach(s => map.set(s.eventType, s));
+        setSettings(map);
+      })
+      .catch(() => setSettings(new Map()))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const isEnabled = (eventType: string): boolean => {
+    const s = settings.get(eventType);
+    return s ? s.enabled : true; // default enabled
   };
 
-  const notificationSettings = [
-    {
-      category: "События, связанные с задачами",
-      items: [
-        {
-          id: "task_assigned",
-          label: "Назначение пользователя исполнителем задачи",
-          description: "Уведомление при назначении вас исполнителем задачи",
-        },
-        {
-          id: "comment_mention",
-          label: "Упоминание пользователя в комментарии",
-          description: "Уведомление при упоминании вас в комментарии к задаче",
-        },
-        {
-          id: "task_status_change_author",
-          label: "Изменение статуса задачи (автор)",
-          description: "Уведомление при изменении статуса задачи, где вы являетесь автором",
-        },
-        {
-          id: "task_status_change_assignee",
-          label: "Изменение статуса задачи (исполнитель)",
-          description: "Уведомление при изменении статуса задачи, где вы являетесь исполнителем",
-        },
-        {
-          id: "task_status_change_watcher",
-          label: "Изменение статуса задачи (наблюдатель)",
-          description: "Уведомление при изменении статуса задачи, где вы являетесь наблюдателем",
-        },
-        {
-          id: "task_deadline_approaching",
-          label: "Приближение крайнего срока выполнения задачи",
-          description: "Уведомление за указанное время до наступления дедлайна",
-          hasTimeConfig: true,
-        },
-        {
-          id: "task_deadline_reached",
-          label: "Наступление крайнего срока выполнения задачи",
-          description: "Уведомление в момент наступления крайнего срока",
-        },
-      ],
-    },
-    {
-      category: "События, связанные со встречами",
-      items: [
-        {
-          id: "meeting_invite",
-          label: "Получение приглашения на новую встречу",
-          description: "Уведомление при получении приглашения на встречу",
-        },
-        {
-          id: "meeting_change",
-          label: "Изменение параметров встречи",
-          description: "Уведомление при изменении параметров встречи, в которой вы участвуете",
-        },
-        {
-          id: "meeting_cancel",
-          label: "Отмена встречи",
-          description: "Уведомление при отмене встречи, в которой вы являетесь участником",
-        },
-        {
-          id: "meeting_reminder",
-          label: "Напоминание о предстоящем событии",
-          description: "Напоминание перед началом встречи",
-        },
-      ],
-    },
-  ];
+  const toggleEnabled = (eventType: string) => {
+    setSettings(prev => {
+      const next = new Map(prev);
+      const current = next.get(eventType);
+      if (current) {
+        next.set(eventType, { ...current, enabled: !current.enabled });
+      } else {
+        next.set(eventType, { eventType, enabled: false });
+      }
+      return next;
+    });
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const allTypes = NOTIFICATION_TYPES.flatMap(c => c.items.map(i => i.id));
+      const payload: NotificationSettingResponse[] = allTypes.map(eventType => {
+        const s = settings.get(eventType);
+        return {
+          eventType,
+          enabled: s?.enabled ?? true,
+        };
+      });
+      await updateNotificationSettings(payload);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch { /* silent */ }
+    setSaving(false);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 size={32} className="animate-spin text-blue-600" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -94,13 +136,11 @@ export default function Settings() {
           Настройка уведомлений
         </h2>
         <p className="text-slate-600 mb-6">
-          Выберите, как вы хотите получать уведомления о различных событиях в
-          системе. Для каждого события можно настроить отдельные каналы
-          доставки.
+          Выберите, о каких событиях вы хотите получать уведомления в системе.
         </p>
 
         <div className="space-y-6">
-          {notificationSettings.map((category, catIndex) => (
+          {NOTIFICATION_TYPES.map((category, catIndex) => (
             <div key={catIndex}>
               <h3 className="font-semibold text-lg mb-3 text-slate-800">
                 {category.category}
@@ -109,65 +149,26 @@ export default function Settings() {
                 {category.items.map((item) => (
                   <div
                     key={item.id}
-                    className="p-4 border border-slate-200 rounded-lg hover:border-blue-300 transition-colors"
+                    className="p-4 border border-slate-200 rounded-lg"
                   >
-                    <div className="mb-3">
-                      <div className="font-medium mb-1">{item.label}</div>
-                      <p className="text-xs text-slate-500">
-                        {item.description}
-                      </p>
-                    </div>
-
-                    {item.hasTimeConfig && (
-                      <div className="mb-3 p-3 bg-slate-50 rounded-lg">
-                        <label className="block text-sm font-medium mb-2 flex items-center gap-1">
-                          <Clock size={14} />
-                          Предупреждать за:
-                        </label>
-                        <div className="flex gap-2">
-                          <input
-                            type="number"
-                            min="1"
-                            max="30"
-                            defaultValue={deadlineTime.value}
-                            className="w-20 px-3 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                          />
-                          <select
-                            defaultValue={deadlineTime.unit}
-                            className="px-3 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                          >
-                            <option value="hours">часов</option>
-                            <option value="days">дней</option>
-                          </select>
-                        </div>
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 mb-2">
+                        <div className="font-medium mb-1">{item.label}</div>
+                        <p className="text-xs text-slate-500">
+                          {item.description}
+                        </p>
                       </div>
-                    )}
-
-                    <div className="flex gap-6">
-                      <label className="flex items-center gap-2 cursor-pointer">
+                      <label className="flex items-center gap-2 cursor-pointer shrink-0 ml-4">
                         <input
                           type="checkbox"
-                          defaultChecked
+                          checked={isEnabled(item.id)}
+                          onChange={() => toggleEnabled(item.id)}
                           className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
                         />
-                        <Bell size={16} className="text-slate-400" />
-                        <span className="text-sm">Внутри системы</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          defaultChecked={
-                            item.id.includes("assigned") ||
-                            item.id.includes("mention") ||
-                            item.id.includes("invite") ||
-                            item.id.includes("deadline_reached")
-                          }
-                          className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
-                        />
-                        <Mail size={16} className="text-slate-400" />
-                        <span className="text-sm">По email</span>
+                        <span className="text-sm text-slate-600">Включено</span>
                       </label>
                     </div>
+
                   </div>
                 ))}
               </div>
@@ -178,16 +179,17 @@ export default function Settings() {
         <div className="flex justify-end gap-3 pt-6">
           <button
             onClick={handleSave}
-            className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md flex items-center gap-2"
+            disabled={saving}
+            className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md flex items-center gap-2 disabled:opacity-50"
           >
-            <Save size={20} />
+            {saving ? <Loader2 size={20} className="animate-spin" /> : <Save size={20} />}
             Сохранить настройки
           </button>
         </div>
 
         {saved && (
           <div className="mt-4 bg-green-50 border border-green-200 rounded-lg p-4 text-green-900 text-sm">
-            ✓ Настройки успешно сохранены
+            Настройки успешно сохранены
           </div>
         )}
       </div>
@@ -198,17 +200,15 @@ export default function Settings() {
         <div className="space-y-2 text-sm text-slate-700">
           <div className="flex gap-2">
             <span className="flex-shrink-0">•</span>
-            <span>Внутрисистемные уведомления отображаются в колокольчике в верхней панели</span>
+            <span>Уведомления отображаются в колокольчике в верхней панели</span>
           </div>
           <div className="flex gap-2">
             <span className="flex-shrink-0">•</span>
-            <span>Email-уведомления отправляются на ваш адрес: {" "}
-              <strong>{" admin@company.ru"}</strong>
-            </span>
+            <span>Приглашения на встречи можно принять или отклонить прямо из уведомления</span>
           </div>
           <div className="flex gap-2">
             <span className="flex-shrink-0">•</span>
-            <span>Вы можете настроить каналы уведомлений индивидуально для каждого типа события</span>
+            <span>Нажмите на уведомление о задаче, чтобы перейти к ней</span>
           </div>
         </div>
       </div>

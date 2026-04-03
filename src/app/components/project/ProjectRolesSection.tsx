@@ -94,7 +94,7 @@ export default function ProjectRolesSection({
     if (!newRoleName.trim()) return;
     try {
       const defaultPerms: ProjectRolePermission[] = permissionAreas.map(a => ({
-        area: `project.${a.area}`,
+        area: a.area.startsWith("project.") ? a.area : `project.${a.area}`,
         access: "none" as const,
       }));
       const newRole = await createProjectRole(projectId, {
@@ -252,8 +252,8 @@ export default function ProjectRolesSection({
                       <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Права доступа</p>
                       <div className="space-y-1.5">
                         {permissionAreas.map((areaDef) => {
-                          const permArea = `project.${areaDef.area}`;
-                          const perm = role.permissions.find(p => p.area === permArea);
+                          const permArea = areaDef.area.startsWith("project.") ? areaDef.area : `project.${areaDef.area}`;
+                          const perm = role.permissions.find(p => p.area === permArea || p.area === areaDef.area);
                           const currentAccess = perm?.access || (isAdmin ? "full" : "none");
                           const allAccessLevels = [...accessLevels, ...(accessLevels.find(l => l.key === "none") ? [] : [{ key: "none", name: "Нет доступа" }])];
                           return (
