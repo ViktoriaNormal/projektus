@@ -129,6 +129,24 @@ export interface DistributionResponse {
   interpretation: string;
 }
 
+// ── Monte Carlo Forecast Types ───────────────────────────────
+
+export interface MonteCarloPercentile {
+  percentile: number;  // e.g. 50, 75, 85, 90, 95
+  date: string;        // ISO date, e.g. "2026-03-19"
+}
+
+export interface MonteCarloChartPoint {
+  date: string;        // formatted date for chart X axis, e.g. "19.03"
+  probability: number; // 0-100
+}
+
+export interface MonteCarloResponse {
+  percentiles: MonteCarloPercentile[];
+  chart: MonteCarloChartPoint[];
+  targetDateProbability?: number; // probability (0-100) of completing by target date, if target date was provided
+}
+
 // ── Filter params ────────────────────────────────────────────
 
 export interface AnalyticsFilters {
@@ -215,4 +233,14 @@ export function getCycleTimeDistribution(projectId: string, params?: AnalyticsFi
 
 export function getThroughputDistribution(projectId: string, params?: AnalyticsFilters) {
   return apiRequest<DistributionResponse>(`/projects/${projectId}/analytics/kanban/throughput-distribution${kanbanQs(params)}`);
+}
+
+// ── Monte Carlo Forecast ────────────────────────────────────
+
+export function getMonteCarloForecast(projectId: string, taskCount: number, targetDate?: string, weeks?: number, params?: AnalyticsFilters) {
+  const qs = new URLSearchParams({ task_count: String(taskCount) });
+  if (targetDate) qs.set('target_date', targetDate);
+  if (weeks && weeks !== 12) qs.set('weeks', String(weeks));
+  appendFilterParams(qs, params);
+  return apiRequest<MonteCarloResponse>(`/projects/${projectId}/analytics/kanban/monte-carlo?${qs}`);
 }
