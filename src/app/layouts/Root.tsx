@@ -4,7 +4,6 @@ import {
   FolderKanban,
   CheckSquare,
   Calendar,
-  BarChart3,
   Settings,
   Users,
   Shield,
@@ -56,7 +55,6 @@ export default function Root() {
     { path: "/tasks", icon: CheckSquare, label: "Мои задачи" },
     { path: "/calendar", icon: Calendar, label: "Календарь" },
     { path: "/team", icon: UsersRound, label: "Коллеги" },
-    { path: "/analytics", icon: BarChart3, label: "Аналитика" },
   ];
 
   const adminItems = [
@@ -158,12 +156,12 @@ export default function Root() {
         </div>
       </header>
 
-      <div className="flex">
+      <div className="flex min-h-[calc(100vh-57px)]">
         {/* Sidebar */}
         <aside
           className={`${
             sidebarOpen ? "translate-x-0" : "-translate-x-full"
-          } lg:translate-x-0 fixed lg:static inset-y-0 left-0 z-30 w-64 bg-white border-r border-slate-200 transition-transform duration-300 ease-in-out mt-[57px] lg:mt-0`}
+          } lg:translate-x-0 fixed lg:static inset-y-0 left-0 z-30 w-64 bg-white border-r border-slate-200 transition-transform duration-300 ease-in-out mt-[57px] lg:mt-0 shrink-0`}
         >
           <nav className="p-4 space-y-1">
             {navItems.map((item) => (

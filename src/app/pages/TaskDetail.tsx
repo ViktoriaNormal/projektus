@@ -665,13 +665,13 @@ export default function TaskDetail() {
       if (!watchers.some(w => w.memberId === memberId)) {
         setWatchers(prev => [...prev, { taskId: "", memberId }]);
       }
-      setShowWatcherModal(false);
+
       return;
     }
     try {
       await addWatcher(task.id, memberId);
       setWatchers(await getTaskWatchers(task.id));
-      setShowWatcherModal(false);
+
     } catch (e: any) { toast.error(e.message || "Ошибка"); }
   };
 

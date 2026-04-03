@@ -3,10 +3,12 @@ import { Link } from "react-router";
 import { Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 import { searchTasks, type TaskResponse } from "../api/tasks";
-import { getProjects, type ProjectResponse } from "../api/projects";
+import { getProjects, getProjectMembers, type ProjectResponse } from "../api/projects";
 import { getUser, type UserProfileResponse } from "../api/users";
 import { getBoardColumns, type ColumnResponse } from "../api/boards";
 import { getTaskTags, type TagResponse } from "../api/tags";
+import { getTaskWatchers } from "../api/watchers";
+import { useAuth } from "../contexts/AuthContext";
 import { UserAvatar } from "../components/UserAvatar";
 
 function toAvatarUser(u: UserProfileResponse) {
@@ -41,16 +43,18 @@ const PRIORITY_COLORS: Record<string, string> = {
 };
 
 export default function Tasks() {
+  const { user: currentUser } = useAuth();
   const [tasks, setTasks] = useState<TaskResponse[]>([]);
   const [projects, setProjects] = useState<ProjectResponse[]>([]);
   const [userCache, setUserCache] = useState<Map<string, UserProfileResponse>>(new Map());
   const [columnCache, setColumnCache] = useState<Map<string, ColumnResponse>>(new Map());
   const [tagCache, setTagCache] = useState<Map<string, TagResponse[]>>(new Map());
+  const [watcherTaskIds, setWatcherTaskIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [filterPriority, setFilterPriority] = useState<string>("all");
-  const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [filterProject, setFilterProject] = useState<string>("all");
+  const [filterRole, setFilterRole] = useState<string>("all");
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -101,12 +105,38 @@ export default function Tasks() {
         );
         setTagCache(newTagCache);
       }
+
+      // Resolve watchers to detect "Я наблюдатель" role
+      if (currentUser) {
+        // Build memberId → userId map for all projects
+        const projectIds = new Set(allTasks.map(t => t.projectId));
+        const memberToUser = new Map<string, string>();
+        await Promise.allSettled(
+          [...projectIds].map(async (pid) => {
+            try {
+              const members = await getProjectMembers(pid);
+              members.forEach(m => memberToUser.set(m.id, m.userId));
+            } catch { /**/ }
+          })
+        );
+        const watcherIds = new Set<string>();
+        await Promise.allSettled(
+          allTasks.map(async (t) => {
+            try {
+              const watchers = await getTaskWatchers(t.id);
+              const isWatcher = watchers.some(w => memberToUser.get(w.memberId) === currentUser.id);
+              if (isWatcher) watcherIds.add(t.id);
+            } catch { /**/ }
+          })
+        );
+        setWatcherTaskIds(watcherIds);
+      }
     } catch {
       toast.error("Ошибка загрузки задач");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -115,11 +145,12 @@ export default function Tasks() {
     const matchesSearch =
       task.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       task.key.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesPriority =
-      filterPriority === "all" || task.priority === filterPriority;
-    const taskStatus = getTaskStatus(task, columnCache);
-    const matchesStatus = filterStatus === "all" || taskStatus === filterStatus;
-    return matchesSearch && matchesPriority && matchesStatus;
+    const matchesProject = filterProject === "all" || task.projectId === filterProject;
+    let matchesRole = true;
+    if (filterRole === "owner") matchesRole = task.ownerUserId === currentUser?.id;
+    else if (filterRole === "executor") matchesRole = task.executorUserId === currentUser?.id;
+    else if (filterRole === "watcher") matchesRole = watcherTaskIds.has(task.id);
+    return matchesSearch && matchesProject && matchesRole;
   });
 
   if (loading) {
@@ -147,7 +178,7 @@ export default function Tasks() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
             <input
               type="text"
-              placeholder="Поиск задач..."
+              placeholder="Поиск по названию или ключу задачи"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -155,26 +186,25 @@ export default function Tasks() {
           </div>
 
           <select
-            value={filterPriority}
-            onChange={(e) => setFilterPriority(e.target.value)}
+            value={filterProject}
+            onChange={(e) => setFilterProject(e.target.value)}
             className="px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           >
-            <option value="all">Все приоритеты</option>
-            <option value="Критичный">Критичный</option>
-            <option value="Высокий">Высокий</option>
-            <option value="Средний">Средний</option>
-            <option value="Низкий">Низкий</option>
+            <option value="all">Все проекты</option>
+            {projects.filter(p => tasks.some(t => t.projectId === p.id)).map(p => (
+              <option key={p.id} value={p.id}>{p.key} — {p.name}</option>
+            ))}
           </select>
 
           <select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
+            value={filterRole}
+            onChange={(e) => setFilterRole(e.target.value)}
             className="px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           >
-            <option value="all">Все статусы</option>
-            <option value="Бэклог">Бэклог</option>
-            <option value="В работе">В работе</option>
-            <option value="Выполнено">Выполнено</option>
+            <option value="all">Все роли</option>
+            <option value="owner">Я автор</option>
+            <option value="executor">Я исполнитель</option>
+            <option value="watcher">Я наблюдатель</option>
           </select>
         </div>
       </div>

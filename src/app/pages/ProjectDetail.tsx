@@ -28,6 +28,7 @@ import Board from "./Board";
 import BoardSettingsModal from "../components/modals/BoardSettingsModal";
 import ScrumBacklog from "./ScrumBacklog";
 import KanbanMetrics from "./KanbanMetrics";
+import Analytics from "./Analytics";
 import ProjectOverview from "./ProjectOverview";
 import ProjectParamsSection from "../components/project/ProjectParamsSection";
 import type { ParamValidationError } from "../components/project/ProjectParamsSection";
@@ -38,8 +39,6 @@ import { getProjectBoards, createBoard, updateBoard, deleteBoard as deleteBoardA
 import { getProjectRoles, type ProjectRole } from "../api/project-roles";
 import { getProjectParams, type ProjectParam } from "../api/project-params";
 import { searchUsers, getUser, type UserProfileResponse } from "../api/users";
-import { searchTasks } from "../api/tasks";
-import { getTaskWatchers } from "../api/watchers";
 import { toast } from "sonner";
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -166,6 +165,7 @@ export default function ProjectDetail() {
   const [memberUsers, setMemberUsers] = useState<Map<string, UserProfileResponse>>(new Map());
   const [boardColumns, setBoardColumns] = useState<ColumnResponse[]>([]);
   const [boardSwimlanes, setBoardSwimlanes] = useState<SwimlaneResponse[]>([]);
+  const [computedSwimlaneCount, setComputedSwimlaneCount] = useState<number | null>(null);
   const [boardFields, setBoardFields] = useState<BoardField[]>([]);
   const [swimlaneGroupBy, setSwimlaneGroupBy] = useState<string>("");
   const [currentPriorityType, setCurrentPriorityType] = useState<string>("");
@@ -176,9 +176,9 @@ export default function ProjectDetail() {
   // UI state
   const [loading, setLoading] = useState(true);
   const [urlSearchParams] = useSearchParams();
-  const initialTab = urlSearchParams.get("tab") as "overview" | "boards" | "backlog" | "metrics" | "params" | null;
-  const [activeTab, setActiveTab] = useState<"overview" | "boards" | "backlog" | "metrics" | "params">(
-    initialTab && ["overview", "boards", "backlog", "metrics", "params"].includes(initialTab) ? initialTab : "overview"
+  const initialTab = urlSearchParams.get("tab") as "overview" | "boards" | "backlog" | "metrics" | "params" | "analytics" | null;
+  const [activeTab, setActiveTab] = useState<"overview" | "boards" | "backlog" | "metrics" | "params" | "analytics">(
+    initialTab && ["overview", "boards", "backlog", "metrics", "params", "analytics"].includes(initialTab) ? initialTab : "overview"
   );
   const [activeBoardId, setActiveBoardId] = useState<string | null>(null);
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
@@ -485,13 +485,12 @@ export default function ProjectDetail() {
       await updateBoard(activeBoardId, { swimlaneGroupBy: val || null });
       setSwimlaneGroupBy(val);
 
-      // Auto-create swimlanes if group-by is set
+      // Auto-create swimlanes for static types (checkbox/select/priority)
+      // Dynamic types (user, user_list, tags, etc.) are auto-created by Board.tsx from task data
       if (val) {
         const freshFields = await getBoardFields(activeBoardId);
         const freshBoard = await getBoard(activeBoardId);
-        const field = val === "__tags__"
-          ? { id: "__tags__", name: "Теги", fieldType: "tags", isSystem: true, isRequired: false, options: null } as BoardField
-          : freshFields.find(f => f.id === val);
+        const field = freshFields.find(f => f.id === val);
         let expectedValues: string[] | null = null;
         if (field) {
           if (field.fieldType === "checkbox") {
@@ -504,50 +503,6 @@ export default function ProjectDetail() {
             } else {
               expectedValues = (field.options && field.options.length > 0) ? field.options : null;
             }
-          } else if (field.fieldType === "user") {
-            // Create swimlanes from actual task executor/owner values
-            const tasks = await searchTasks({ projectId: projectId! });
-            const n = field.name.toLowerCase();
-            const isOwner = n.includes("автор") || n.includes("owner");
-            const uniqueIds = new Set<string>();
-            for (const t of tasks) {
-              const uid = isOwner ? t.ownerUserId : t.executorUserId;
-              if (uid) uniqueIds.add(uid);
-            }
-            const names: string[] = [];
-            for (const uid of uniqueIds) {
-              const u = memberUsers.get(uid);
-              if (u) names.push(u.fullName);
-              else { try { const fetched = await getUser(uid); names.push(fetched.fullName); } catch { names.push(uid); } }
-            }
-            expectedValues = names.length > 0 ? names : null;
-          } else if (field.fieldType === "user_list") {
-            // Create swimlanes from actual watcher combinations
-            const tasks = await searchTasks({ projectId: projectId! });
-            const memberToUser = new Map(members.map(m => [m.id, m.userId]));
-            const combos = new Set<string>();
-            await Promise.allSettled(tasks.map(async (t) => {
-              try {
-                const watchers = await getTaskWatchers(t.id);
-                const names = watchers
-                  .map(w => memberToUser.get(w.memberId))
-                  .filter((uid): uid is string => !!uid)
-                  .map(uid => memberUsers.get(uid)?.fullName || uid)
-                  .sort();
-                if (names.length > 0) combos.add(names.join(", "));
-              } catch { /**/ }
-            }));
-            expectedValues = combos.size > 0 ? [...combos] : null;
-          } else if (field.fieldType === "tags") {
-            // Create swimlanes from actual task tag combinations
-            const tasks = await searchTasks({ projectId: projectId! });
-            const combos = new Set<string>();
-            for (const t of tasks) {
-              if (t.tags && t.tags.length > 0) {
-                combos.add(t.tags.map(tag => tag.name).sort().join(", "));
-              }
-            }
-            expectedValues = combos.size > 0 ? [...combos] : null;
           } else if (field.fieldType === "multiselect" && field.options?.length) {
             expectedValues = field.options;
           }
@@ -625,8 +580,9 @@ export default function ProjectDetail() {
     { id: "overview", label: "Обзор проекта", icon: BarChart3 },
     { id: "boards", label: "Доски задач", icon: Layout },
     ...(projectType === "scrum" ? [{ id: "backlog", label: "Бэклог и спринты", icon: FileText }] : []),
-    ...(projectType === "kanban" ? [{ id: "metrics", label: "Метрики Kanban", icon: TrendingUp }] : []),
     { id: "params", label: "Параметры и участники проекта", icon: Settings },
+    { id: "analytics", label: "Аналитика", icon: TrendingUp },
+    ...(projectType === "kanban" ? [{ id: "metrics", label: "Прогнозирование", icon: TrendingUp }] : []),
   ];
 
   const activeBoard = boardTabs.find((b) => b.id === activeBoardId);
@@ -908,7 +864,7 @@ export default function ProjectDetail() {
                           </div>
                         </div>
                       </div>
-                      <div><span className="font-semibold">Дорожек:</span> {boardSwimlanes.length}</div>
+                      <div><span className="font-semibold">Дорожек:</span> {computedSwimlaneCount ?? boardSwimlanes.length}</div>
                     </div>
                     <div>
                       <label className="block text-sm font-medium mb-2">Группировать задачи по:</label>
@@ -932,7 +888,8 @@ export default function ProjectDetail() {
               {/* Board Content */}
               {activeBoard ? (
                 <Board key={`${activeBoardId}-${boardRefreshKey}`} boardId={activeBoardId} projectId={project.id} projectType={projectType}
-                  onBoardChanged={() => { loadBoards(); loadBoardDetails(); }} />
+                  onBoardChanged={() => { loadBoards(); loadBoardDetails(); }}
+                  onSwimlanesComputed={setComputedSwimlaneCount} />
               ) : (
                 <div className="text-center py-12 bg-slate-50 rounded-xl border-2 border-dashed border-slate-300">
                   <Layout size={48} className="mx-auto text-slate-400 mb-4" />
@@ -955,10 +912,17 @@ export default function ProjectDetail() {
             </div>
           )}
 
-          {/* Metrics Tab */}
+          {/* Metrics Tab (Kanban) */}
           {activeTab === "metrics" && (
             <div className="space-y-6">
               <KanbanMetrics projectId={project.id} />
+            </div>
+          )}
+
+          {/* Analytics Tab */}
+          {activeTab === "analytics" && (
+            <div className="space-y-6">
+              <Analytics projectId={project.id} projectType={projectType} />
             </div>
           )}
 

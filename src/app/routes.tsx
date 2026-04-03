@@ -8,7 +8,6 @@ import Board from "./pages/Board";
 import Tasks from "./pages/Tasks";
 import TaskDetail from "./pages/TaskDetail";
 import Calendar from "./pages/Calendar";
-import Analytics from "./pages/Analytics";
 import Team from "./pages/Team";
 import AdminUsers from "./pages/admin/Users";
 import AdminRoles from "./pages/admin/Roles";
@@ -34,7 +33,6 @@ export const router = createBrowserRouter([
       { path: "tasks", Component: Tasks },
       { path: "tasks/:id", Component: TaskDetail },
       { path: "calendar", Component: Calendar },
-      { path: "analytics", Component: Analytics },
       { path: "team", Component: Team },
       {
         path: "admin",
