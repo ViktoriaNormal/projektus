@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
 import { Link, useParams, useNavigate, useBlocker, useSearchParams } from "react-router";
 import { useAuth } from "../contexts/AuthContext";
 import { useProjectPermissions } from "../hooks/useProjectPermissions";
@@ -24,6 +23,8 @@ import {
   Info,
   AlertCircle,
   Layers,
+  Archive,
+  ArchiveRestore,
 } from "lucide-react";
 import { UserAvatar } from "../components/UserAvatar";
 import Board from "./Board";
@@ -35,6 +36,13 @@ import ProjectOverview from "./ProjectOverview";
 import ProjectParamsSection from "../components/project/ProjectParamsSection";
 import type { ParamValidationError } from "../components/project/ProjectParamsSection";
 import ProjectRolesSection from "../components/project/ProjectRolesSection";
+import { Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle } from "../components/ui/Modal";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
+import { ScrollableTabs } from "../components/ui/ScrollableTabs";
+import { Select, SelectOption } from "../components/ui/Select";
+import { formatDate } from "../lib/format";
+import { toastError } from "../lib/errors";
+import { EmptyState } from "../components/ui/EmptyState";
 import { getProject, updateProject, deleteProject as deleteProjectApi, type ProjectResponse } from "../api/projects";
 import { getProjectMembers, addProjectMember, updateMemberRoles, removeMember, type ProjectMemberResponse } from "../api/projects";
 import { getProjectBoards, createBoard, updateBoard, deleteBoard as deleteBoardApi, getBoardColumns, getBoardSwimlanes, getBoardFields, getBoard, getProjectReferences, createSwimlane, deleteSwimlane, type BoardResponse, type BoardField, type ColumnResponse, type SwimlaneResponse, type ProjectReferences } from "../api/boards";
@@ -202,6 +210,7 @@ export default function ProjectDetail() {
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showDeleteProject, setShowDeleteProject] = useState(false);
+  const [archivingProject, setArchivingProject] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
 
   // Add member modal state
@@ -224,7 +233,6 @@ export default function ProjectDetail() {
   // Block route navigation when params tab has errors
   const blocker = useBlocker(hasParamErrors);
   const [showBlockerModal, setShowBlockerModal] = useState(false);
-  useBodyScrollLock(showAddMemberModal || showEditMemberModal || showBoardSettingsModal || showBlockerModal || !!deleteBoardTarget);
 
   useEffect(() => {
     if (blocker.state === "blocked") {
@@ -359,7 +367,7 @@ export default function ProjectDetail() {
       setProject(updated);
       toast.success("Проект сохранён");
     } catch (e: any) {
-      toast.error(e.message || "Ошибка сохранения проекта");
+      toastError(e, "Ошибка сохранения проекта");
     } finally {
       setSavingProject(false);
     }
@@ -372,7 +380,23 @@ export default function ProjectDetail() {
       toast.success("Проект удалён");
       navigate("/projects");
     } catch (e: any) {
-      toast.error(e.message || "Ошибка удаления проекта");
+      toastError(e, "Ошибка удаления проекта");
+    }
+  };
+
+  const handleToggleArchive = async () => {
+    if (!project) return;
+    const nextStatus = project.status === "archived" ? "active" : "archived";
+    setArchivingProject(true);
+    try {
+      const updated = await updateProject(project.id, { status: nextStatus });
+      setProject(updated);
+      setEditStatus(updated.status);
+      toast.success(nextStatus === "archived" ? "Проект архивирован" : "Проект разархивирован");
+    } catch (e: any) {
+      toastError(e, "Ошибка изменения статуса проекта");
+    } finally {
+      setArchivingProject(false);
     }
   };
 
@@ -392,7 +416,7 @@ export default function ProjectDetail() {
       setSearchResults([]);
       loadMembers();
     } catch (e: any) {
-      toast.error(e.message || "Ошибка добавления участника");
+      toastError(e, "Ошибка добавления участника");
     }
   };
 
@@ -407,7 +431,7 @@ export default function ProjectDetail() {
       setSelectedRoles([]);
       loadMembers();
     } catch (e: any) {
-      toast.error(e.message || "Ошибка обновления участника");
+      toastError(e, "Ошибка обновления участника");
     }
   };
 
@@ -438,7 +462,7 @@ export default function ProjectDetail() {
       toast.success("Участник удалён");
       loadMembers();
     } catch (e: any) {
-      toast.error(e.message || "Ошибка удаления участника");
+      toastError(e, "Ошибка удаления участника");
     }
   };
 
@@ -454,7 +478,7 @@ export default function ProjectDetail() {
       await loadBoards();
       setActiveBoardId(newBoard.id);
     } catch (e: any) {
-      toast.error(e.message || "Ошибка создания доски");
+      toastError(e, "Ошибка создания доски");
     }
   };
 
@@ -479,7 +503,7 @@ export default function ProjectDetail() {
       }
       loadBoards();
     } catch (e: any) {
-      toast.error(e.message || "Ошибка удаления доски");
+      toastError(e, "Ошибка удаления доски");
     } finally {
       setDeleteBoardTarget(null);
     }
@@ -526,7 +550,7 @@ export default function ProjectDetail() {
       }
       await loadBoardDetails();
       setBoardRefreshKey(k => k + 1);
-    } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    } catch (e: any) { toastError(e, "Ошибка"); }
   };
 
   const moveBoard = (dragIndex: number, hoverIndex: number) => {
@@ -609,11 +633,11 @@ export default function ProjectDetail() {
   // ── Render ──────────────────────────────────────────────────
 
   return (
-    <div className="max-w-[1600px] mx-auto space-y-6">
+    <div className="max-w-[1600px] mx-auto space-y-6 min-w-0">
       {/* Compact Header */}
       <div className="bg-white rounded-xl p-4 shadow-md border border-slate-100">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center flex-wrap gap-x-3 gap-y-2 min-w-0">
+          <div className="flex items-center gap-2 shrink-0">
             <span className="px-3 py-1 bg-blue-100 text-blue-700 text-sm font-mono font-bold rounded">
               {project.key}
             </span>
@@ -629,12 +653,12 @@ export default function ProjectDetail() {
               <Copy size={16} className={copiedKey ? "text-green-600" : "text-slate-600"} />
             </button>
           </div>
-          <h1 className="text-2xl font-bold">{project.name}</h1>
-          <span className="px-3 py-1 bg-slate-100 text-slate-700 text-sm font-semibold rounded">
+          <h1 className="text-xl md:text-2xl font-bold break-words min-w-0 flex-1 basis-full md:basis-auto">{project.name}</h1>
+          <span className="px-3 py-1 bg-slate-100 text-slate-700 text-sm font-semibold rounded shrink-0">
             {projectType === "scrum" ? "Scrum" : "Kanban"}
           </span>
           <span
-            className={`px-3 py-1 text-sm font-semibold rounded ${
+            className={`px-3 py-1 text-sm font-semibold rounded shrink-0 ${
               project.status === "active"
                 ? "bg-green-100 text-green-700"
                 : project.status === "paused"
@@ -645,7 +669,21 @@ export default function ProjectDetail() {
             {statusLabel}
           </span>
           {(canEditProject || canEdit("project.settings")) && (
-            <div className="ml-auto">
+            <div className="ml-auto flex items-center gap-1 shrink-0">
+              <button
+                onClick={handleToggleArchive}
+                disabled={archivingProject}
+                className="p-2 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title={project.status === "archived" ? "Разархивировать проект" : "Архивировать проект"}
+              >
+                {archivingProject ? (
+                  <Loader2 size={20} className="text-slate-600 animate-spin" />
+                ) : project.status === "archived" ? (
+                  <ArchiveRestore size={20} className="text-blue-600" />
+                ) : (
+                  <Archive size={20} className="text-slate-600" />
+                )}
+              </button>
               <button
                 onClick={() => setShowDeleteProject(!showDeleteProject)}
                 className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
@@ -772,39 +810,39 @@ export default function ProjectDetail() {
           {activeTab === "overview" && (
             <div className="space-y-6">
               {/* Full Header - only on overview */}
-              <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 rounded-2xl p-8 text-white shadow-lg">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <span className="px-3 py-1 bg-white/20 backdrop-blur-sm text-white text-sm font-mono font-bold rounded">
-                        {project.key}
-                      </span>
-                      <span className="px-3 py-1 bg-white/20 backdrop-blur-sm text-white text-sm font-semibold rounded">
-                        {projectType === "scrum" ? "Scrum" : "Kanban"}
-                      </span>
-                      <span
-                        className={`px-3 py-1 text-sm font-semibold rounded ${
-                          project.status === "active"
-                            ? "bg-green-500/30 text-white"
-                            : project.status === "paused"
-                            ? "bg-yellow-500/30 text-white"
-                            : "bg-slate-500/30 text-white"
-                        }`}
-                      >
-                        {statusLabel}
-                      </span>
-                    </div>
-                    <h1 className="text-4xl font-bold mb-2">{project.name}</h1>
-                    <p className="text-blue-100">{project.description}</p>
+              <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 rounded-2xl p-4 md:p-8 text-white shadow-lg min-w-0">
+                <div className="mb-4">
+                  <div className="flex items-center gap-2 flex-wrap mb-2">
+                    <span className="px-3 py-1 bg-white/20 backdrop-blur-sm text-white text-sm font-mono font-bold rounded">
+                      {project.key}
+                    </span>
+                    <span className="px-3 py-1 bg-white/20 backdrop-blur-sm text-white text-sm font-semibold rounded">
+                      {projectType === "scrum" ? "Scrum" : "Kanban"}
+                    </span>
+                    <span
+                      className={`px-3 py-1 text-sm font-semibold rounded ${
+                        project.status === "active"
+                          ? "bg-green-500/30 text-white"
+                          : project.status === "paused"
+                          ? "bg-yellow-500/30 text-white"
+                          : "bg-slate-500/30 text-white"
+                      }`}
+                    >
+                      {statusLabel}
+                    </span>
                   </div>
+                  <h1 className="text-2xl md:text-4xl font-bold mb-2 break-words">{project.name}</h1>
+                  {project.description && (
+                    <p className="text-blue-100 break-words">{project.description}</p>
+                  )}
                 </div>
-                <div className="flex items-center gap-6 text-blue-100">
-                  <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-blue-100 text-sm md:text-base">
+                  <div className="flex items-center gap-2 min-w-0">
                     {owner && <UserAvatar user={toAvatarUser(owner)} size="sm" />}
-                    <span>Ответственный: {owner?.fullName ?? "—"}</span>
+                    <span className="min-w-0 break-words">Ответственный: {owner?.fullName ?? "—"}</span>
                   </div>
-                  <span>•</span>
-                  <span>Создан: {new Date(project.createdAt).toLocaleDateString("ru-RU")}</span>
+                  <span className="hidden sm:inline">•</span>
+                  <span>Создан: {formatDate(project.createdAt, "dmy")}</span>
                 </div>
               </div>
 
@@ -823,8 +861,20 @@ export default function ProjectDetail() {
           {activeTab === "boards" && (
             <div className="space-y-6">
               <DndProvider backend={HTML5Backend}>
-                <div className="border-b border-slate-200 bg-slate-50 -mx-6 px-6">
-                  <div className="flex items-center gap-2 overflow-x-auto pb-0">
+                <div className="border-b border-slate-200 bg-slate-50 -mx-6 px-6 py-2">
+                  <ScrollableTabs
+                    trailing={canEdit("project.boards") ? (
+                      <button
+                        onClick={async () => {
+                          await handleCreateBoard("Новая доска", "");
+                        }}
+                        className="px-4 py-2 border border-dashed border-slate-300 rounded-t-lg hover:border-blue-400 hover:text-blue-600 hover:bg-white transition-all flex items-center gap-2 text-slate-600 whitespace-nowrap"
+                      >
+                        <Plus size={16} />
+                        <span className="hidden sm:inline">Добавить доску</span>
+                      </button>
+                    ) : null}
+                  >
                     {boardTabs.map((board, index) => (
                       <DraggableBoardTab
                         key={board.id}
@@ -841,18 +891,7 @@ export default function ProjectDetail() {
                         canEditBoard={canEdit("project.boards")}
                       />
                     ))}
-                    {canEdit("project.boards") && (
-                      <button
-                        onClick={async () => {
-                          await handleCreateBoard("Новая доска", "");
-                        }}
-                        className="px-4 py-2 border border-dashed border-slate-300 rounded-t-lg hover:border-blue-400 hover:text-blue-600 hover:bg-white transition-all flex items-center gap-2 text-slate-600 whitespace-nowrap"
-                      >
-                        <Plus size={16} />
-                        Добавить доску
-                      </button>
-                    )}
-                  </div>
+                  </ScrollableTabs>
                 </div>
               </DndProvider>
 
@@ -884,18 +923,24 @@ export default function ProjectDetail() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium mb-2">Группировать задачи по:</label>
-                      <select value={swimlaneGroupBy} onChange={e => handleSetSwimlaneGroupBy(e.target.value)} disabled={!canEdit("project.boards")}
-                        className="w-full max-w-md px-4 py-3 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white">
-                        <option value="">Без дорожек</option>
-                        {boardFields
-                          .filter(f => ["priority", "select", "checkbox", "multiselect", "user", "user_list", "tags"].includes(f.fieldType) && f.fieldType !== "column" && !f.name.toLowerCase().includes("статус"))
-                          .map(f => (
-                            <option key={f.id} value={f.id}>{getFieldDisplayName(f)}</option>
-                          ))}
-                        {!boardFields.some(f => f.fieldType === "tags") && (
-                          <option value="__tags__">Теги</option>
-                        )}
-                      </select>
+                      <div className="max-w-md">
+                        <Select
+                          value={swimlaneGroupBy}
+                          onValueChange={handleSetSwimlaneGroupBy}
+                          disabled={!canEdit("project.boards")}
+                          ariaLabel="Группировка задач"
+                        >
+                          <SelectOption value="">Без дорожек</SelectOption>
+                          {boardFields
+                            .filter(f => ["priority", "select", "checkbox", "multiselect", "user", "user_list", "tags"].includes(f.fieldType) && f.fieldType !== "column" && !f.name.toLowerCase().includes("статус"))
+                            .map(f => (
+                              <SelectOption key={f.id} value={f.id}>{getFieldDisplayName(f)}</SelectOption>
+                            ))}
+                          {!boardFields.some(f => f.fieldType === "tags") && (
+                            <SelectOption value="__tags__">Теги</SelectOption>
+                          )}
+                        </Select>
+                      </div>
                     </div>
                   </div>
                 );
@@ -909,15 +954,19 @@ export default function ProjectDetail() {
                   canEditTasks={canEdit("project.tasks")}
                   canEditBoard={canEdit("project.boards")} />
               ) : (
-                <div className="text-center py-12 bg-slate-50 rounded-xl border-2 border-dashed border-slate-300">
-                  <Layout size={48} className="mx-auto text-slate-400 mb-4" />
-                  <p className="text-slate-600 mb-4">Нет досок задач</p>
-                  <button
-                    onClick={() => handleCreateBoard("Основная доска", "")}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                  >
-                    Создать первую доску
-                  </button>
+                <div className="bg-slate-50 rounded-xl border-2 border-dashed border-slate-300">
+                  <EmptyState
+                    icon={<Layout size={48} />}
+                    title="Нет досок задач"
+                    action={(
+                      <button
+                        onClick={() => handleCreateBoard("Основная доска", "")}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                      >
+                        Создать первую доску
+                      </button>
+                    )}
+                  />
                 </div>
               )}
             </div>
@@ -974,7 +1023,7 @@ export default function ProjectDetail() {
                       await loadProjectParams();
                       toast.success("Параметры проекта обновлены");
                     } catch (e: any) {
-                      toast.error(e.message || "Не удалось сохранить");
+                      toastError(e, "Не удалось сохранить");
                     }
                   }}
                 />
@@ -995,9 +1044,9 @@ export default function ProjectDetail() {
               )}
 
               {/* Участники проекта */}
-              {can("project.members") && <div className="bg-white rounded-xl shadow-md border border-slate-100 overflow-hidden p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
+              {can("project.members") && <div className="bg-white rounded-xl shadow-md border border-slate-100 overflow-hidden p-4 md:p-6">
+                <div className="flex items-start justify-between gap-3 mb-4 flex-wrap">
+                  <div className="min-w-0">
                     <h3 className="text-lg font-bold">Участники проекта</h3>
                     <p className="text-sm text-slate-600">
                       Всего участников: {members.length}
@@ -1006,10 +1055,11 @@ export default function ProjectDetail() {
                   {canEdit("project.members") && (
                     <button
                       onClick={() => setShowAddMemberModal(true)}
-                      className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
+                      className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2 shrink-0"
                     >
                       <Plus size={20} />
-                      Добавить участника
+                      <span className="hidden sm:inline">Добавить участника</span>
+                      <span className="sm:hidden">Добавить</span>
                     </button>
                   )}
                 </div>
@@ -1031,19 +1081,19 @@ export default function ProjectDetail() {
                     return (
                       <div
                         key={member.id}
-                        className="flex items-center justify-between p-4 border border-slate-200 rounded-lg hover:border-blue-300 transition-colors"
+                        className="flex flex-col md:flex-row md:items-center md:justify-between p-4 border border-slate-200 rounded-lg hover:border-blue-300 transition-colors gap-3"
                       >
-                        <div className="flex items-center gap-3 flex-1">
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
                           <UserAvatar user={toAvatarUser(user)} size="md" />
-                          <div className="flex-1">
-                            <p className="font-medium">{user.fullName}</p>
-                            <p className="text-sm text-slate-600">{user.email}</p>
+                          <div className="min-w-0 flex-1">
+                            <p className="font-medium truncate">{user.fullName}</p>
+                            <p className="text-sm text-slate-600 truncate">{user.email}</p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-4">
-                          <div className="text-right">
+                        <div className="flex items-center justify-between md:justify-end gap-3 md:gap-4">
+                          <div className="min-w-0 md:text-right">
                             {(member.roles || []).length > 0 ? (
-                              <div className="flex flex-wrap gap-1 justify-end">
+                              <div className="flex flex-wrap gap-1 md:justify-end">
                                 {(member.roles || []).map((roleId) => {
                                   const roleDef = projectRoles.find(r => r.id === roleId);
                                   return (
@@ -1061,7 +1111,7 @@ export default function ProjectDetail() {
                             )}
                           </div>
                           {canEdit("project.members") && (
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-1 shrink-0">
                               <button
                                 onClick={() => {
                                   setSelectedMember(member);
@@ -1094,178 +1144,87 @@ export default function ProjectDetail() {
       </div>
 
       {/* Add Member Modal */}
-      {showAddMemberModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">Добавить участника</h2>
-              <button
-                onClick={() => {
-                  setShowAddMemberModal(false);
-                  setSelectedUserId(null);
-                  setNewMemberRoles([]);
-                  setUserSearchQuery("");
-                  setSearchResults([]);
-                }}
-                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Поиск пользователя *</label>
-                <div className="relative">
-                  <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="text"
-                    value={userSearchQuery}
-                    onChange={(e) => handleSearchUsers(e.target.value)}
-                    placeholder="Введите имя или email..."
-                    className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                {searchResults.length > 0 && !selectedUserId && (
-                  <div className="mt-2 border border-slate-200 rounded-lg max-h-48 overflow-y-auto">
-                    {searchResults.map((user) => (
-                      <button
-                        key={user.id}
-                        onClick={() => {
-                          setSelectedUserId(user.id);
-                          setUserSearchQuery(user.fullName);
-                          setSearchResults([]);
-                        }}
-                        className="w-full flex items-center gap-3 px-3 py-2 hover:bg-slate-50 transition-colors text-left"
-                      >
-                        <UserAvatar user={toAvatarUser(user)} size="sm" />
-                        <div>
-                          <p className="text-sm font-medium">{user.fullName}</p>
-                          <p className="text-xs text-slate-500">{user.email}</p>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {selectedUserId && (
-                  <div className="mt-2 flex items-center gap-2 p-2 bg-blue-50 rounded-lg">
-                    <span className="text-sm text-blue-700 flex-1">{userSearchQuery}</span>
-                    <button
-                      onClick={() => {
-                        setSelectedUserId(null);
-                        setUserSearchQuery("");
-                      }}
-                      className="text-blue-500 hover:text-blue-700"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                )}
+      <Modal
+        open={showAddMemberModal}
+        onOpenChange={(next) => {
+          setShowAddMemberModal(next);
+          if (!next) {
+            setSelectedUserId(null);
+            setNewMemberRoles([]);
+            setUserSearchQuery("");
+            setSearchResults([]);
+          }
+        }}
+        size="md"
+      >
+        <ModalHeader>
+          <ModalTitle>Добавить участника</ModalTitle>
+        </ModalHeader>
+        <ModalBody>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-2">Поиск пользователя *</label>
+              <div className="relative">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={userSearchQuery}
+                  onChange={(e) => handleSearchUsers(e.target.value)}
+                  placeholder="Введите имя или email..."
+                  className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
               </div>
-
-              {selectedUserId && projectRoles.length > 0 && (
-                <div>
-                  <label className="block text-sm font-medium mb-2">Роли (опционально)</label>
-                  <div className="border border-slate-200 rounded-lg p-3 space-y-1 max-h-48 overflow-y-auto">
-                    {projectRoles.map((role) => (
-                      <label key={role.id} className="flex items-center gap-3 p-2 hover:bg-slate-50 rounded-lg cursor-pointer transition-colors">
-                        <input
-                          type="checkbox"
-                          checked={newMemberRoles.includes(role.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setNewMemberRoles([...newMemberRoles, role.id]);
-                            } else {
-                              setNewMemberRoles(newMemberRoles.filter(r => r !== role.id));
-                            }
-                          }}
-                          className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
-                        />
-                        <div>
-                          <span className="text-sm font-medium">{role.name}</span>
-                          {role.description && <p className="text-xs text-slate-500">{role.description}</p>}
-                        </div>
-                      </label>
-                    ))}
-                  </div>
+              {searchResults.length > 0 && !selectedUserId && (
+                <div className="mt-2 border border-slate-200 rounded-lg max-h-48 overflow-y-auto">
+                  {searchResults.map((user) => (
+                    <button
+                      key={user.id}
+                      onClick={() => {
+                        setSelectedUserId(user.id);
+                        setUserSearchQuery(user.fullName);
+                        setSearchResults([]);
+                      }}
+                      className="w-full flex items-center gap-3 px-3 py-2 hover:bg-slate-50 transition-colors text-left"
+                    >
+                      <UserAvatar user={toAvatarUser(user)} size="sm" />
+                      <div>
+                        <p className="text-sm font-medium">{user.fullName}</p>
+                        <p className="text-xs text-slate-500">{user.email}</p>
+                      </div>
+                    </button>
+                  ))}
                 </div>
               )}
-
-              <div className="flex gap-3 pt-4">
-                <button
-                  onClick={() => {
-                    setShowAddMemberModal(false);
-                    setSelectedUserId(null);
-                    setNewMemberRoles([]);
-                    setUserSearchQuery("");
-                    setSearchResults([]);
-                  }}
-                  className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium"
-                >
-                  Отмена
-                </button>
-                <button
-                  onClick={handleAddMember}
-                  disabled={!selectedUserId || newMemberRoles.length === 0}
-                  className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Добавить
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Edit Member Modal */}
-      {showEditMemberModal && selectedMember && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">Изменить роли участника</h2>
-              <button
-                onClick={() => {
-                  setShowEditMemberModal(false);
-                  setSelectedMember(null);
-                  setSelectedRoles([]);
-                }}
-                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Участник</label>
-                <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
-                  {memberUsers.get(selectedMember.userId) && (
-                    <>
-                      <UserAvatar
-                        user={toAvatarUser(memberUsers.get(selectedMember.userId)!)}
-                        size="sm"
-                      />
-                      <span className="font-medium">
-                        {memberUsers.get(selectedMember.userId)!.fullName}
-                      </span>
-                    </>
-                  )}
+              {selectedUserId && (
+                <div className="mt-2 flex items-center gap-2 p-2 bg-blue-50 rounded-lg">
+                  <span className="text-sm text-blue-700 flex-1">{userSearchQuery}</span>
+                  <button
+                    onClick={() => {
+                      setSelectedUserId(null);
+                      setUserSearchQuery("");
+                    }}
+                    className="text-blue-500 hover:text-blue-700"
+                  >
+                    <X size={14} />
+                  </button>
                 </div>
-              </div>
+              )}
+            </div>
 
+            {selectedUserId && projectRoles.length > 0 && (
               <div>
-                <label className="block text-sm font-medium mb-2">Роли</label>
-                <div className="border border-slate-200 rounded-lg p-3 space-y-1 max-h-60 overflow-y-auto">
+                <label className="block text-sm font-medium mb-2">Роли (опционально)</label>
+                <div className="border border-slate-200 rounded-lg p-3 space-y-1 max-h-48 overflow-y-auto">
                   {projectRoles.map((role) => (
                     <label key={role.id} className="flex items-center gap-3 p-2 hover:bg-slate-50 rounded-lg cursor-pointer transition-colors">
                       <input
                         type="checkbox"
-                        checked={selectedRoles.includes(role.id)}
+                        checked={newMemberRoles.includes(role.id)}
                         onChange={(e) => {
                           if (e.target.checked) {
-                            setSelectedRoles([...selectedRoles, role.id]);
+                            setNewMemberRoles([...newMemberRoles, role.id]);
                           } else {
-                            setSelectedRoles(selectedRoles.filter(r => r !== role.id));
+                            setNewMemberRoles(newMemberRoles.filter(r => r !== role.id));
                           }
                         }}
                         className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
@@ -1276,35 +1235,122 @@ export default function ProjectDetail() {
                       </div>
                     </label>
                   ))}
-                  {projectRoles.length === 0 && (
-                    <p className="text-sm text-slate-400 italic p-2">Нет доступных ролей</p>
-                  )}
                 </div>
               </div>
-
-              <div className="flex gap-3 pt-4">
-                <button
-                  onClick={() => {
-                    setShowEditMemberModal(false);
-                    setSelectedMember(null);
-                    setSelectedRoles([]);
-                  }}
-                  className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium"
-                >
-                  Отмена
-                </button>
-                <button
-                  onClick={handleEditMember}
-                  disabled={selectedRoles.length === 0}
-                  className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Сохранить
-                </button>
-              </div>
-            </div>
+            )}
           </div>
-        </div>
-      )}
+        </ModalBody>
+        <ModalFooter>
+          <button
+            onClick={() => {
+              setShowAddMemberModal(false);
+              setSelectedUserId(null);
+              setNewMemberRoles([]);
+              setUserSearchQuery("");
+              setSearchResults([]);
+            }}
+            className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium"
+          >
+            Отмена
+          </button>
+          <button
+            onClick={handleAddMember}
+            disabled={!selectedUserId || newMemberRoles.length === 0}
+            className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Добавить
+          </button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Edit Member Modal */}
+      <Modal
+        open={showEditMemberModal && !!selectedMember}
+        onOpenChange={(next) => {
+          setShowEditMemberModal(next);
+          if (!next) {
+            setSelectedMember(null);
+            setSelectedRoles([]);
+          }
+        }}
+        size="md"
+      >
+        {selectedMember && (
+          <>
+            <ModalHeader>
+              <ModalTitle>Изменить роли участника</ModalTitle>
+            </ModalHeader>
+            <ModalBody>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">Участник</label>
+                  <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+                    {memberUsers.get(selectedMember.userId) && (
+                      <>
+                        <UserAvatar
+                          user={toAvatarUser(memberUsers.get(selectedMember.userId)!)}
+                          size="sm"
+                        />
+                        <span className="font-medium">
+                          {memberUsers.get(selectedMember.userId)!.fullName}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2">Роли</label>
+                  <div className="border border-slate-200 rounded-lg p-3 space-y-1 max-h-60 overflow-y-auto">
+                    {projectRoles.map((role) => (
+                      <label key={role.id} className="flex items-center gap-3 p-2 hover:bg-slate-50 rounded-lg cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={selectedRoles.includes(role.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedRoles([...selectedRoles, role.id]);
+                            } else {
+                              setSelectedRoles(selectedRoles.filter(r => r !== role.id));
+                            }
+                          }}
+                          className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                        />
+                        <div>
+                          <span className="text-sm font-medium">{role.name}</span>
+                          {role.description && <p className="text-xs text-slate-500">{role.description}</p>}
+                        </div>
+                      </label>
+                    ))}
+                    {projectRoles.length === 0 && (
+                      <p className="text-sm text-slate-400 italic p-2">Нет доступных ролей</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </ModalBody>
+            <ModalFooter>
+              <button
+                onClick={() => {
+                  setShowEditMemberModal(false);
+                  setSelectedMember(null);
+                  setSelectedRoles([]);
+                }}
+                className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium"
+              >
+                Отмена
+              </button>
+              <button
+                onClick={handleEditMember}
+                disabled={selectedRoles.length === 0}
+                className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Сохранить
+              </button>
+            </ModalFooter>
+          </>
+        )}
+      </Modal>
 
       {/* Board Settings Modal */}
       {showBoardSettingsModal && selectedBoard && selectedBoard.id && (
@@ -1331,57 +1377,46 @@ export default function ProjectDetail() {
       )}
 
       {/* Delete board confirmation */}
-      {deleteBoardTarget && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-sm w-full">
-            <div className="flex items-start gap-3 mb-4">
-              <Trash2 size={24} className="text-red-600 shrink-0 mt-0.5" />
-              <div>
-                <h2 className="text-lg font-bold text-slate-800">Удалить доску</h2>
-                <p className="text-sm text-slate-600 mt-1">
-                  Вы уверены, что хотите удалить доску «{boardTabs.find(b => b.id === deleteBoardTarget)?.name}»? Это действие необратимо.
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <button onClick={() => setDeleteBoardTarget(null)}
-                className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium">
-                Отмена
-              </button>
-              <button onClick={confirmDeleteBoard}
-                className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium">
-                Удалить
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={!!deleteBoardTarget}
+        onOpenChange={(next) => { if (!next) setDeleteBoardTarget(null); }}
+        title="Удалить доску"
+        description={`Вы уверены, что хотите удалить доску «${boardTabs.find(b => b.id === deleteBoardTarget)?.name ?? ""}»? Это действие необратимо.`}
+        variant="danger"
+        confirmLabel="Удалить"
+        onConfirm={confirmDeleteBoard}
+      />
 
       {/* Navigation blocker modal */}
-      {showBlockerModal && blocker.state === "blocked" && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full">
-            <div className="flex items-start gap-3 mb-4">
-              <AlertCircle size={24} className="text-red-600 shrink-0 mt-0.5" />
-              <div>
-                <h2 className="text-lg font-bold text-slate-800">Не все параметры заполнены</h2>
-                <p className="text-sm text-slate-600 mt-1">
-                  Заполните все обязательные параметры проекта перед переходом на другую страницу.
-                </p>
-                <ul className="text-xs text-red-700 mt-2 space-y-0.5">
-                  {paramErrors.map(e => <li key={e.paramId}>— {e.message}</li>)}
-                </ul>
-              </div>
+      <Modal
+        open={showBlockerModal && blocker.state === "blocked"}
+        onOpenChange={(next) => { if (!next) { setShowBlockerModal(false); blocker.reset?.(); } }}
+        size="md"
+        hideCloseButton
+      >
+        <ModalBody>
+          <div className="flex items-start gap-3">
+            <AlertCircle size={24} className="text-red-600 shrink-0 mt-0.5" />
+            <div>
+              <h2 className="text-lg font-bold text-slate-800">Не все параметры заполнены</h2>
+              <p className="text-sm text-slate-600 mt-1">
+                Заполните все обязательные параметры проекта перед переходом на другую страницу.
+              </p>
+              <ul className="text-xs text-red-700 mt-2 space-y-0.5">
+                {paramErrors.map(e => <li key={e.paramId}>— {e.message}</li>)}
+              </ul>
             </div>
-            <button
-              onClick={() => { setShowBlockerModal(false); blocker.reset?.(); }}
-              className="w-full px-4 py-2.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
-            >
-              Вернуться к параметрам
-            </button>
           </div>
-        </div>
-      )}
+        </ModalBody>
+        <ModalFooter>
+          <button
+            onClick={() => { setShowBlockerModal(false); blocker.reset?.(); }}
+            className="w-full px-4 py-2.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
+          >
+            Вернуться к параметрам
+          </button>
+        </ModalFooter>
+      </Modal>
     </div>
   );
 }

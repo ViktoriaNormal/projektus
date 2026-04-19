@@ -1,24 +1,18 @@
 import { useState, useEffect, useCallback } from "react";
-import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
 import { Link } from "react-router";
-import { Plus, Search, Loader2, X, Save, Copy, Check } from "lucide-react";
+import { Plus, Search, Loader2, Save, Copy, Check } from "lucide-react";
+import { PageSpinner } from "../components/ui/Spinner";
+import { EmptyState } from "../components/ui/EmptyState";
+import { formatDate } from "../lib/format";
+import { toastError } from "../lib/errors";
 import { toast } from "sonner";
 import { UserAvatar } from "../components/UserAvatar";
+import { Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle } from "../components/ui/Modal";
 import { getProjects, createProject, type ProjectResponse } from "../api/projects";
 import { getUser, searchUsers, type UserProfileResponse } from "../api/users";
 import { useAuth } from "../contexts/AuthContext";
-
-const statusLabels: Record<string, string> = {
-  active: "Активный",
-  paused: "Приостановлен",
-  archived: "Архивирован",
-};
-
-const statusColors: Record<string, string> = {
-  active: "bg-green-100 text-green-700 border-green-200",
-  paused: "bg-yellow-100 text-yellow-700 border-yellow-200",
-  archived: "bg-slate-100 text-slate-700 border-slate-200",
-};
+import { projectStatusColor, projectStatusLabel } from "../lib/status-colors";
+import { Select, SelectOption } from "../components/ui/Select";
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -53,7 +47,6 @@ export default function Projects() {
   const [owners, setOwners] = useState<Record<string, UserProfileResponse>>({});
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  useBodyScrollLock(showCreateModal);
   const [createName, setCreateName] = useState("");
   const [createDescription, setCreateDescription] = useState("");
   const [createType, setCreateType] = useState<"scrum" | "kanban">("scrum");
@@ -130,6 +123,9 @@ export default function Projects() {
     const matchesStatus = filterStatus === "all" || project.status === filterStatus;
     return matchesSearch && matchesType && matchesStatus;
   }).sort((a, b) => {
+    const aArchived = a.status === "archived" ? 1 : 0;
+    const bArchived = b.status === "archived" ? 1 : 0;
+    if (aArchived !== bArchived) return aArchived - bArchived;
     const dateA = new Date(a.createdAt).getTime();
     const dateB = new Date(b.createdAt).getTime();
     return sortOrder === "newest" ? dateB - dateA : dateA - dateB;
@@ -176,44 +172,27 @@ export default function Projects() {
           />
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <select
-            value={filterType}
-            onChange={(e) => setFilterType(e.target.value)}
-            className="px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          >
-            <option value="all">Все типы</option>
-            <option value="scrum">Scrum</option>
-            <option value="kanban">Kanban</option>
-          </select>
+          <Select value={filterType} onValueChange={setFilterType} ariaLabel="Фильтр по типу">
+            <SelectOption value="all">Все типы</SelectOption>
+            <SelectOption value="scrum">Scrum</SelectOption>
+            <SelectOption value="kanban">Kanban</SelectOption>
+          </Select>
 
-          <select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-            className="px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          >
-            <option value="all">Все статусы</option>
-            <option value="active">Активный</option>
-            <option value="paused">Приостановлен</option>
-            <option value="archived">Архивирован</option>
-          </select>
+          <Select value={filterStatus} onValueChange={setFilterStatus} ariaLabel="Фильтр по статусу">
+            <SelectOption value="all">Все статусы</SelectOption>
+            <SelectOption value="active">Активный</SelectOption>
+            <SelectOption value="archived">Архивирован</SelectOption>
+          </Select>
 
-          <select
-            value={sortOrder}
-            onChange={(e) => setSortOrder(e.target.value as "newest" | "oldest")}
-            className="px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          >
-            <option value="newest">Сначала новые</option>
-            <option value="oldest">Сначала старые</option>
-          </select>
+          <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as "newest" | "oldest")} ariaLabel="Сортировка">
+            <SelectOption value="newest">Сначала новые</SelectOption>
+            <SelectOption value="oldest">Сначала старые</SelectOption>
+          </Select>
         </div>
       </div>
 
       {/* Loading */}
-      {loading && (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 size={32} className="animate-spin text-blue-600" />
-        </div>
-      )}
+      {loading && <PageSpinner />}
 
       {/* Projects Grid */}
       {!loading && (
@@ -241,11 +220,9 @@ export default function Projects() {
                     {project.projectType === "scrum" ? "Scrum" : "Kanban"}
                   </span>
                   <span
-                    className={`ml-auto px-3 py-1 text-xs font-semibold rounded border ${
-                      statusColors[project.status] || statusColors.active
-                    }`}
+                    className={`ml-auto px-3 py-1 text-xs font-semibold rounded border ${projectStatusColor(project.status)}`}
                   >
-                    {statusLabels[project.status] || project.status}
+                    {projectStatusLabel(project.status)}
                   </span>
                 </div>
 
@@ -272,7 +249,7 @@ export default function Projects() {
                 </div>
 
                 <p className="text-xs text-slate-400">
-                  Дата создания: {new Date(project.createdAt).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" })}
+                  Дата создания: {formatDate(project.createdAt, "long")}
                 </p>
 
                 <div className="mt-auto pt-4">
@@ -290,59 +267,53 @@ export default function Projects() {
       )}
 
       {!loading && filteredProjects.length === 0 && (
-        <div className="text-center py-12 bg-white rounded-xl border border-slate-200">
-          <Search size={48} className="mx-auto text-slate-300 mb-4" />
-          <p className="text-slate-500 text-lg">Проекты не найдены</p>
-          <p className="text-slate-400 text-sm mt-1">
-            Попробуйте изменить критерии поиска
-          </p>
+        <div className="bg-white rounded-xl border border-slate-200">
+          <EmptyState
+            icon={<Search size={48} />}
+            title="Проекты не найдены"
+            description="Попробуйте изменить критерии поиска"
+          />
         </div>
       )}
 
       {/* Create Project Modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-lg w-full">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-2xl font-bold">Создать проект</h2>
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-              >
-                <X size={24} />
-              </button>
-            </div>
-
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                if (!createName.trim()) {
-                  toast.error("Введите название проекта");
-                  return;
-                }
-                if (!createOwner) {
-                  toast.error("Выберите ответственного за проект");
-                  return;
-                }
-                setCreating(true);
-                try {
-                  await createProject({
-                    name: createName.trim(),
-                    description: createDescription.trim() || undefined,
-                    projectType: createType,
-                    ownerId: createOwner.id,
-                  });
-                  toast.success("Проект создан");
-                  setShowCreateModal(false);
-                  await loadProjects();
-                } catch (err) {
-                  toast.error(err instanceof Error ? err.message : "Не удалось создать проект");
-                } finally {
-                  setCreating(false);
-                }
-              }}
-              className="space-y-4"
-            >
+      <Modal open={showCreateModal} onOpenChange={setShowCreateModal} size="lg">
+        <ModalHeader>
+          <ModalTitle>Создать проект</ModalTitle>
+        </ModalHeader>
+        <form
+          id="create-project-form"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!createName.trim()) {
+              toast.error("Введите название проекта");
+              return;
+            }
+            if (!createOwner) {
+              toast.error("Выберите ответственного за проект");
+              return;
+            }
+            setCreating(true);
+            try {
+              await createProject({
+                name: createName.trim(),
+                description: createDescription.trim() || undefined,
+                projectType: createType,
+                ownerId: createOwner.id,
+              });
+              toast.success("Проект создан");
+              setShowCreateModal(false);
+              await loadProjects();
+            } catch (err) {
+              toastError(err, "Не удалось создать проект");
+            } finally {
+              setCreating(false);
+            }
+          }}
+          className="contents"
+        >
+          <ModalBody>
+            <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-2">
                   Название проекта <span className="text-red-500">*</span>
@@ -363,14 +334,13 @@ export default function Projects() {
                 <label className="block text-sm font-medium mb-2">
                   Тип проекта <span className="text-red-500">*</span>
                 </label>
-                <select
+                <Select
                   value={createType}
-                  onChange={(e) => setCreateType(e.target.value as "scrum" | "kanban")}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onValueChange={(v) => setCreateType(v as "scrum" | "kanban")}
                 >
-                  <option value="scrum">Scrum</option>
-                  <option value="kanban">Kanban</option>
-                </select>
+                  <SelectOption value="scrum">Scrum</SelectOption>
+                  <SelectOption value="kanban">Kanban</SelectOption>
+                </Select>
                 <p className="text-xs text-slate-500 mt-1">Тип проекта нельзя будет изменить после создания</p>
               </div>
 
@@ -450,32 +420,31 @@ export default function Projects() {
                   placeholder="Опишите цели и задачи проекта..."
                 />
               </div>
-
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="px-6 h-11 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium text-sm"
-                >
-                  Отмена
-                </button>
-                <button
-                  type="submit"
-                  disabled={creating}
-                  className="px-5 h-11 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md font-medium flex items-center gap-2 disabled:opacity-60 whitespace-nowrap"
-                >
-                  {creating ? (
-                    <Loader2 size={18} className="animate-spin" />
-                  ) : (
-                    <Save size={18} />
-                  )}
-                  Создать проект
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+            </div>
+          </ModalBody>
+          <ModalFooter>
+            <button
+              type="button"
+              onClick={() => setShowCreateModal(false)}
+              className="px-6 h-11 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium text-sm"
+            >
+              Отмена
+            </button>
+            <button
+              type="submit"
+              disabled={creating}
+              className="px-5 h-11 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md font-medium flex items-center gap-2 disabled:opacity-60 whitespace-nowrap"
+            >
+              {creating ? (
+                <Loader2 size={18} className="animate-spin" />
+              ) : (
+                <Save size={18} />
+              )}
+              Создать проект
+            </button>
+          </ModalFooter>
+        </form>
+      </Modal>
     </div>
   );
 }

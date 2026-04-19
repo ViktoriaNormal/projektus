@@ -3,6 +3,7 @@ import { Key, Save, Info, Loader2, AlertCircle, CheckCircle2 } from 'lucide-reac
 import { getAdminPasswordPolicy, updateAdminPasswordPolicy } from '../../api/admin';
 import { ApiError } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
+import { PageSpinner } from '../../components/ui/Spinner';
 
 export default function AdminPasswordPolicy() {
   const { hasFullPermission } = useAuth();
@@ -74,11 +75,7 @@ export default function AdminPasswordPolicy() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 size={32} className="animate-spin text-purple-600" />
-      </div>
-    );
+    return <PageSpinner tone="text-purple-600" />;
   }
 
   return (

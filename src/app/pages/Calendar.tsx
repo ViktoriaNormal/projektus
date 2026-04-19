@@ -16,6 +16,8 @@ import {
   type CreateMeetingData,
   type UpdateMeetingData,
 } from "../api/meetings";
+import { formatDate } from "../lib/format";
+import { EmptyState } from "../components/ui/EmptyState";
 
 function getTodayStart(): Date {
   const today = new Date();
@@ -57,7 +59,7 @@ function formatInvitation(meeting: MeetingResponse, organizerName?: string): str
   const start = new Date(meeting.startTime);
   const end = new Date(meeting.endTime);
   const typeName = meetingTypeLabelMap[meeting.meetingType] || meeting.meetingType;
-  const date = start.toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  const date = formatDate(start, "weekday");
   const timeStart = start.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
   const timeEnd = end.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
 
@@ -176,7 +178,7 @@ function WeekMeetingCard({
               <Clock size={12} className="shrink-0" />
               <span>
                 {dayNames[start.getDay()]},{" "}
-                {start.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })}{" "}
+                {formatDate(start, "monthDay")}{" "}
                 {start.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
                 {" — "}
                 {end.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
@@ -197,15 +199,22 @@ function WeekMeetingCard({
 
 function LegendItem({ color, label, tooltip }: { color: string; label: string; tooltip: string }) {
   return (
-    <div className="flex items-center gap-2">
-      <div className={`w-4 h-4 ${color} rounded shrink-0`}></div>
-      <span className="text-sm">{label}</span>
-      <div className="relative group">
-        <Info size={14} className="text-slate-400 hover:text-blue-500 cursor-help transition-colors" />
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-slate-800 text-white text-xs rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 pointer-events-none">
-          {tooltip}
-          <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800"></div>
+    <div className="flex items-start gap-2">
+      <div className={`w-4 h-4 ${color} rounded shrink-0 mt-0.5`}></div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1">
+          <span className="text-sm font-medium">{label}</span>
+          {/* Hover tooltip for desktop only */}
+          <div className="relative group hidden md:inline-flex">
+            <Info size={14} className="text-slate-400 hover:text-blue-500 cursor-help transition-colors" />
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-slate-800 text-white text-xs rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 pointer-events-none">
+              {tooltip}
+              <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800"></div>
+            </div>
+          </div>
         </div>
+        {/* Inline description on mobile where hover doesn't work */}
+        <p className="md:hidden text-xs text-slate-500 mt-0.5 leading-snug">{tooltip}</p>
       </div>
     </div>
   );
@@ -322,6 +331,54 @@ export default function Calendar() {
     );
   };
 
+  // Mobile week view helpers
+  const weekStart = (() => {
+    const d = new Date(currentDate);
+    const dow = d.getDay(); // 0 = Sun
+    const diff = dow === 0 ? -6 : 1 - dow;
+    d.setDate(d.getDate() + diff);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  })();
+  const weekDays: Date[] = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(weekStart);
+    d.setDate(weekStart.getDate() + i);
+    return d;
+  });
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 6);
+
+  const previousWeek = () => {
+    const d = new Date(currentDate);
+    d.setDate(d.getDate() - 7);
+    setCurrentDate(d);
+  };
+  const nextWeek = () => {
+    const d = new Date(currentDate);
+    d.setDate(d.getDate() + 7);
+    setCurrentDate(d);
+  };
+
+  const getMeetingsForDay = (date: Date) => {
+    const now = new Date();
+    return monthMeetings
+      .filter((meeting) => {
+        if (meeting.status === "cancelled") return false;
+        const md = new Date(meeting.startTime);
+        return md.getDate() === date.getDate() && md.getMonth() === date.getMonth() && md.getFullYear() === date.getFullYear();
+      })
+      .sort((a, b) => Math.abs(new Date(a.startTime).getTime() - now.getTime()) - Math.abs(new Date(b.startTime).getTime() - now.getTime()));
+  };
+
+  const weekHeaderLabel = (() => {
+    const sameMonth = weekStart.getMonth() === weekEnd.getMonth();
+    const fmt = (d: Date) => d.toLocaleDateString("ru-RU", sameMonth ? { day: "numeric" } : { day: "numeric", month: "short" });
+    const endDate = sameMonth
+      ? `${weekEnd.getDate()} ${monthNames[weekEnd.getMonth()].toLowerCase().slice(0, 3)}.`
+      : fmt(weekEnd);
+    return `${fmt(weekStart)} — ${endDate} ${weekEnd.getFullYear()}`;
+  })();
+
   const getMeetingsForDate = (day: number) => {
     const now = new Date();
     return monthMeetings
@@ -426,8 +483,9 @@ export default function Calendar() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Calendar */}
-        <div className="lg:col-span-2 bg-white rounded-xl p-6 shadow-md border border-slate-100">
-          <div className="flex items-center justify-between mb-6">
+        <div className="lg:col-span-2 bg-white rounded-xl p-4 md:p-6 shadow-md border border-slate-100">
+          {/* Desktop header: month */}
+          <div className="hidden md:flex items-center justify-between mb-6">
             <h2 className="text-xl font-bold">
               {monthNames[currentDate.getMonth()]} {currentDate.getFullYear()}
             </h2>
@@ -446,17 +504,104 @@ export default function Calendar() {
               </button>
             </div>
           </div>
+          {/* Mobile header: week */}
+          <div className="md:hidden flex items-center justify-between mb-4 gap-2">
+            <h2 className="text-base font-bold min-w-0 truncate">{weekHeaderLabel}</h2>
+            <div className="flex gap-1 shrink-0">
+              <button
+                onClick={previousWeek}
+                className="p-2 hover:bg-slate-100 rounded-lg transition-colors min-h-[44px] min-w-[44px] inline-flex items-center justify-center"
+                aria-label="Предыдущая неделя"
+              >
+                <ChevronLeft size={20} />
+              </button>
+              <button
+                onClick={nextWeek}
+                className="p-2 hover:bg-slate-100 rounded-lg transition-colors min-h-[44px] min-w-[44px] inline-flex items-center justify-center"
+                aria-label="Следующая неделя"
+              >
+                <ChevronRight size={20} />
+              </button>
+            </div>
+          </div>
 
+          {/* Mobile week view */}
+          <div className="md:hidden">
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 size={28} className="animate-spin text-blue-600" />
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {weekDays.map((date) => {
+                  const dayMeetings = getMeetingsForDay(date);
+                  const now = new Date();
+                  const isToday = date.getDate() === now.getDate() && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+                  const isPast = date < new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                  const dowLabel = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"][date.getDay()];
+                  return (
+                    <div
+                      key={date.toISOString()}
+                      className={`border rounded-lg p-3 ${isToday ? "bg-blue-50 border-blue-300" : "border-slate-200"} ${isPast && !isToday ? "opacity-70" : ""}`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-baseline gap-2">
+                          <span className={`text-lg font-bold ${isToday ? "text-blue-600" : "text-slate-900"}`}>{date.getDate()}</span>
+                          <span className="text-xs uppercase text-slate-500 tracking-wider">{dowLabel}, {monthNames[date.getMonth()].toLowerCase()}</span>
+                        </div>
+                        {!isPast && (
+                          <button
+                            onClick={() => handleCreateFromCell(date.getDate())}
+                            className="p-1.5 hover:bg-blue-100 rounded text-blue-600 min-h-[44px] min-w-[44px] inline-flex items-center justify-center"
+                            title="Создать встречу"
+                            aria-label="Создать встречу"
+                          >
+                            <Plus size={16} />
+                          </button>
+                        )}
+                      </div>
+                      {dayMeetings.length > 0 ? (
+                        <div className="space-y-1">
+                          {dayMeetings.map((meeting) => (
+                            <div
+                              key={meeting.id}
+                              onClick={() => handleMeetingClick(meeting)}
+                              className={`text-xs px-2 py-1.5 rounded text-white cursor-pointer flex items-center justify-between gap-2 ${meetingTypeColors[meeting.meetingType] || "bg-slate-500"}`}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <p className="font-medium truncate">{meeting.name}</p>
+                                <p className="opacity-80">
+                                  {new Date(meeting.startTime).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
+                                  {" — "}
+                                  {new Date(meeting.endTime).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
+                                </p>
+                              </div>
+                              <CopyInviteButton meeting={meeting} organizerName={authUser?.fullName} size="sm" />
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-400">Нет встреч</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Desktop month view */}
+          <div className="hidden md:block">
           {loading ? (
             <div className="flex items-center justify-center py-20">
               <Loader2 size={32} className="animate-spin text-blue-600" />
             </div>
           ) : (
-            <div className="grid grid-cols-7 gap-2">
+            <div className="grid grid-cols-7 gap-1 sm:gap-2">
               {["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((day) => (
                 <div
                   key={day}
-                  className="text-center font-semibold text-slate-600 text-sm py-2"
+                  className="text-center font-semibold text-slate-600 text-xs sm:text-sm py-2"
                 >
                   {day}
                 </div>
@@ -464,7 +609,7 @@ export default function Calendar() {
 
               {Array.from({ length: firstDayOfMonth === 0 ? 6 : firstDayOfMonth - 1 }).map(
                 (_, i) => (
-                  <div key={`empty-${i}`} className="aspect-square" />
+                  <div key={`empty-${i}`} className="min-h-[72px] md:aspect-square md:min-h-0" />
                 )
               )}
 
@@ -483,7 +628,7 @@ export default function Calendar() {
                 return (
                   <div
                     key={day}
-                    className={`group relative aspect-square border border-slate-200 rounded-lg p-1.5 flex flex-col ${
+                    className={`group relative min-h-[72px] md:aspect-square md:min-h-0 border border-slate-200 rounded-lg p-1 sm:p-1.5 flex flex-col ${
                       isToday ? "bg-blue-50 border-blue-300" : isPast ? "opacity-50" : ""
                     }`}
                   >
@@ -498,7 +643,7 @@ export default function Calendar() {
                             e.stopPropagation();
                             handleCreateFromCell(day);
                           }}
-                          className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-blue-100 rounded text-blue-600"
+                          className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity p-0.5 hover:bg-blue-100 rounded text-blue-600"
                           title="Создать встречу"
                         >
                           <Plus size={14} />
@@ -535,7 +680,7 @@ export default function Calendar() {
                             e.stopPropagation();
                             handleCreateFromCell(day);
                           }}
-                          className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-blue-100 rounded-lg text-blue-400 hover:text-blue-600"
+                          className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity p-1.5 hover:bg-blue-100 rounded-lg text-blue-400 hover:text-blue-600"
                           title="Создать встречу"
                         >
                           <Plus size={20} />
@@ -549,6 +694,7 @@ export default function Calendar() {
               })}
             </div>
           )}
+          </div>
         </div>
 
         {/* Current Week Meetings */}
@@ -605,10 +751,7 @@ export default function Calendar() {
               })()}
             </div>
           ) : (
-            <div className="text-center py-8 text-slate-400">
-              <Clock size={48} className="mx-auto mb-3 opacity-50" />
-              <p className="text-sm">Нет встреч на сегодня</p>
-            </div>
+            <EmptyState icon={<Clock size={48} className="opacity-50" />} title="Нет встреч на сегодня" compact />
           )}
         </div>
       </div>

@@ -13,10 +13,12 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
-  ResponsiveContainer,
   ComposedChart,
 } from "recharts";
 import { TrendingUp, Activity, Clock, Zap, Loader2, X, Filter } from "lucide-react";
+import { ChartContainer, CHART_TOOLTIP_STYLE } from "../components/ui/ChartContainer";
+import { xAxisDefaults, yAxisDefaults } from "../components/ui/chart-axis";
+import { Select, SelectOption } from "../components/ui/Select";
 import { getProjectSprints, type SprintResponse } from "../api/sprints";
 import {
   getVelocityChart, getBurndownChart,
@@ -51,11 +53,7 @@ const VELOCITY_LIMIT_OPTIONS = [
 
 const FILTERABLE_TYPES = new Set(["priority", "select", "checkbox", "multiselect", "user", "user_list", "tags"]);
 
-const tooltipStyle = {
-  backgroundColor: "#fff",
-  border: "1px solid #e2e8f0",
-  borderRadius: "8px",
-};
+const tooltipStyle = CHART_TOOLTIP_STYLE;
 
 interface AnalyticsProps {
   projectId: string;
@@ -281,16 +279,14 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
             <Filter size={16} className="text-slate-500" />
             <label className="text-sm font-semibold text-slate-600 uppercase tracking-wide">Доска</label>
           </div>
-          <select
-            value={selectedBoardId}
-            onChange={(e) => setSelectedBoardId(e.target.value)}
-            className="px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-          >
-            <option value="">Все доски</option>
-            {boards.map(b => (
-              <option key={b.id} value={b.id}>{b.name}</option>
-            ))}
-          </select>
+          <div className="min-w-[200px] flex-1 max-w-sm">
+            <Select value={selectedBoardId} onValueChange={setSelectedBoardId} ariaLabel="Фильтр по доске">
+              <SelectOption value="">Все доски</SelectOption>
+              {boards.map(b => (
+                <SelectOption key={b.id} value={b.id}>{b.name}</SelectOption>
+              ))}
+            </Select>
+          </div>
         </div>
 
         {selectedBoardId && filterFields.length > 0 && (
@@ -327,15 +323,13 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
       {projectType === "scrum" && (
         <div className="flex items-center gap-3 flex-wrap">
           <label className="text-sm font-medium text-slate-600">Единица измерения для расчёта метрик и графиков:</label>
-          <select
-            value={metricType}
-            onChange={(e) => setMetricType(e.target.value)}
-            className="px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            {METRIC_OPTIONS.map(m => (
-              <option key={m.value} value={m.value}>{m.label}</option>
-            ))}
-          </select>
+          <div className="min-w-[200px]">
+            <Select value={metricType} onValueChange={setMetricType} ariaLabel="Единица измерения">
+              {METRIC_OPTIONS.map(m => (
+                <SelectOption key={m.value} value={m.value}>{m.label}</SelectOption>
+              ))}
+            </Select>
+          </div>
         </div>
       )}
 
@@ -446,32 +440,38 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
                 <TrendingUp className="text-blue-600" size={24} />
                 График скорости команды (Velocity)
               </h2>
-              <select
-                value={velocityLimit}
-                onChange={e => setVelocityLimit(Number(e.target.value))}
-                className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {VELOCITY_LIMIT_OPTIONS.map(o => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
+              <div className="min-w-[180px]">
+                <Select
+                  value={String(velocityLimit)}
+                  onValueChange={(v) => setVelocityLimit(Number(v))}
+                  ariaLabel="Период velocity"
+                >
+                  {VELOCITY_LIMIT_OPTIONS.map(o => (
+                    <SelectOption key={o.value} value={String(o.value)}>{o.label}</SelectOption>
+                  ))}
+                </Select>
+              </div>
             </div>
             {loadingVelocity ? (
               <div className="flex items-center justify-center h-[300px]">
                 <Loader2 size={32} className="animate-spin text-blue-600" />
               </div>
             ) : velocityData && velocityData.data.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
+              <ChartContainer
+                height={300}
+                scrollableOnMobile
+                minWidthOnMobile={Math.max(560, velocityData.data.length * 60)}
+              >
                 <BarChart data={velocityData.data}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="sprint" stroke="#64748b" />
-                  <YAxis stroke="#64748b" />
+                  <XAxis dataKey="sprint" {...xAxisDefaults({ count: velocityData.data.length })} />
+                  <YAxis {...yAxisDefaults()} />
                   <Tooltip contentStyle={tooltipStyle} />
                   <Legend />
                   <Bar dataKey="planned" fill="#3b82f6" name="Запланировано" radius={[8, 8, 0, 0]} />
                   <Bar dataKey="completed" fill="#10b981" name="Выполнено" radius={[8, 8, 0, 0]} />
                 </BarChart>
-              </ResponsiveContainer>
+              </ChartContainer>
             ) : (
               <div className="flex items-center justify-center h-[300px] text-slate-400">
                 <p>Нет данных для отображения. Завершите хотя бы один спринт.</p>
@@ -492,17 +492,15 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
                 <Activity className="text-green-600" size={24} />
                 Диаграмма сгорания задач (Burndown)
               </h2>
-              <select
-                value={burndownSprintId}
-                onChange={e => setBurndownSprintId(e.target.value)}
-                className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {sprints.map(s => (
-                  <option key={s.id} value={s.id}>
-                    {s.name} {s.status === "active" ? "(активный)" : s.status === "completed" ? "(завершён)" : "(запланирован)"}
-                  </option>
-                ))}
-              </select>
+              <div className="min-w-[200px]">
+                <Select value={burndownSprintId} onValueChange={setBurndownSprintId} ariaLabel="Спринт для burndown">
+                  {sprints.map(s => (
+                    <SelectOption key={s.id} value={s.id}>
+                      {s.name} {s.status === "active" ? "(активный)" : s.status === "completed" ? "(завершён)" : "(запланирован)"}
+                    </SelectOption>
+                  ))}
+                </Select>
+              </div>
             </div>
             {loadingBurndown ? (
               <div className="flex items-center justify-center h-[300px]">
@@ -513,11 +511,15 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
                 {burndownData.sprintName && (
                   <p className="text-sm text-slate-500 mb-3">Спринт: <strong>{burndownData.sprintName}</strong> ({metricLabel})</p>
                 )}
-                <ResponsiveContainer width="100%" height={300}>
+                <ChartContainer
+                  height={300}
+                  scrollableOnMobile
+                  minWidthOnMobile={Math.max(560, burndownData.data.length * 45)}
+                >
                   <LineChart data={burndownData.data}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="day" stroke="#64748b" />
-                    <YAxis stroke="#64748b" />
+                    <XAxis dataKey="day" {...xAxisDefaults({ count: burndownData.data.length })} />
+                    <YAxis {...yAxisDefaults()} />
                     <Tooltip contentStyle={tooltipStyle} />
                     <Legend />
                     <Line
@@ -536,7 +538,7 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
                       strokeWidth={3}
                     />
                   </LineChart>
-                </ResponsiveContainer>
+                </ChartContainer>
               </>
             ) : (
               <div className="flex items-center justify-center h-[300px] text-slate-400">
@@ -572,8 +574,8 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
             { title: "Накопительная диаграмма потока", icon: Activity, iconColor: "text-purple-600", bgColor: "bg-purple-50", textColor: "text-purple-800", titleColor: "text-purple-900", data: cumulativeFlow, render: (d: CumulativeFlowResponse) => (
               <AreaChart data={d.data}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="date" stroke="#64748b" />
-                <YAxis stroke="#64748b" />
+                <XAxis dataKey="date" {...xAxisDefaults({ count: d.data.length })} />
+                <YAxis {...yAxisDefaults()} />
                 <Tooltip contentStyle={tooltipStyle} />
                 <Legend />
                 {(d.columns || Object.keys(d.data[0] || {}).filter(k => k !== "date")).map((col, i) => {
@@ -582,11 +584,11 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
                 })}
               </AreaChart>
             )},
-            { title: "Диаграмма рассеяния времени производства", icon: Clock, iconColor: "text-blue-600", bgColor: "bg-blue-50", textColor: "text-blue-800", titleColor: "text-blue-900", data: cycleTimeScatter, render: (d: CycleTimeScatterResponse) => (
+            { title: "Диаграмма рассеяния времени производства", icon: Clock, iconColor: "text-blue-600", bgColor: "bg-blue-50", textColor: "text-blue-800", titleColor: "text-blue-900", data: cycleTimeScatter, scrollableOnMobile: true, render: (d: CycleTimeScatterResponse) => (
               <ScatterChart>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="task" stroke="#64748b" />
-                <YAxis dataKey="time" stroke="#64748b" label={{ value: "Дни", angle: -90 }} />
+                <XAxis dataKey="task" {...xAxisDefaults({ count: d.data.length, angleAfter: 6, height: 80 })} />
+                <YAxis dataKey="time" {...yAxisDefaults({ width: 48 })} label={{ value: "Дни", angle: -90 }} />
                 <Tooltip contentStyle={tooltipStyle} cursor={{ strokeDasharray: "3 3" }} />
                 <Scatter data={d.data} fill="#3b82f6" />
               </ScatterChart>
@@ -594,8 +596,8 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
             { title: "Скорость поставки (Throughput)", icon: Zap, iconColor: "text-orange-600", bgColor: "bg-orange-50", textColor: "text-orange-800", titleColor: "text-orange-900", data: throughputData, render: (d: ThroughputResponse) => (
               <BarChart data={d.data}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="week" stroke="#64748b" />
-                <YAxis stroke="#64748b" />
+                <XAxis dataKey="week" {...xAxisDefaults({ count: d.data.length })} />
+                <YAxis {...yAxisDefaults()} />
                 <Tooltip contentStyle={tooltipStyle} />
                 <Bar dataKey="count" fill="#f59e0b" name="Задач завершено" radius={[8, 8, 0, 0]} />
               </BarChart>
@@ -603,8 +605,8 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
             { title: "Среднее время производства (Cycle Time)", icon: Clock, iconColor: "text-indigo-600", bgColor: "bg-indigo-50", textColor: "text-indigo-800", titleColor: "text-indigo-900", data: avgCycleTime, render: (d: AvgCycleTimeResponse) => (
               <LineChart data={d.data}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="week" stroke="#64748b" />
-                <YAxis stroke="#64748b" label={{ value: "Дни", angle: -90, position: "insideLeft" }} />
+                <XAxis dataKey="week" {...xAxisDefaults({ count: d.data.length })} />
+                <YAxis {...yAxisDefaults({ width: 48 })} label={{ value: "Дни", angle: -90, position: "insideLeft" }} />
                 <Tooltip contentStyle={tooltipStyle} />
                 <Legend />
                 <Line type="monotone" dataKey="avg" stroke="#6366f1" strokeWidth={3} name="Среднее время" dot={{ fill: "#6366f1", r: 5 }} />
@@ -615,8 +617,8 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
             { title: "Тренд скорости поставки", icon: TrendingUp, iconColor: "text-emerald-600", bgColor: "bg-emerald-50", textColor: "text-emerald-800", titleColor: "text-emerald-900", data: throughputTrend, render: (d: ThroughputTrendResponse) => (
               <LineChart data={d.data}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="week" stroke="#64748b" />
-                <YAxis stroke="#64748b" label={{ value: "Задач/неделя", angle: -90, position: "insideLeft" }} />
+                <XAxis dataKey="week" {...xAxisDefaults({ count: d.data.length })} />
+                <YAxis {...yAxisDefaults({ width: 56 })} label={{ value: "Задач/неделя", angle: -90, position: "insideLeft" }} />
                 <Tooltip contentStyle={tooltipStyle} />
                 <Legend />
                 <Line type="monotone" dataKey="actual" stroke="#10b981" strokeWidth={3} name="Фактическая скорость" dot={{ fill: "#10b981", r: 5 }} />
@@ -626,8 +628,8 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
             { title: "Незавершённая работа (WIP)", icon: Activity, iconColor: "text-cyan-600", bgColor: "bg-cyan-50", textColor: "text-cyan-800", titleColor: "text-cyan-900", data: wipHistory, render: (d: WipHistoryResponse) => (
               <ComposedChart data={d.data}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="date" stroke="#64748b" />
-                <YAxis stroke="#64748b" />
+                <XAxis dataKey="date" {...xAxisDefaults({ count: d.data.length })} />
+                <YAxis {...yAxisDefaults()} />
                 <Tooltip contentStyle={tooltipStyle} />
                 <Legend />
                 <Line type="monotone" dataKey="wip" stroke="#06b6d4" strokeWidth={3} name="Текущий WIP" dot={{ fill: "#06b6d4", r: 5 }} />
@@ -637,8 +639,8 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
             { title: "Распределение времени производства", icon: Activity, iconColor: "text-violet-600", bgColor: "bg-violet-50", textColor: "text-violet-800", titleColor: "text-violet-900", data: cycleTimeDist, render: (d: DistributionResponse) => (
               <BarChart data={d.data}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="range" stroke="#64748b" label={{ value: "Диапазон (дни)", position: "insideBottom", offset: -5 }} />
-                <YAxis stroke="#64748b" label={{ value: "Количество задач", angle: -90, position: "insideLeft" }} />
+                <XAxis dataKey="range" {...xAxisDefaults({ count: d.data.length })} label={{ value: "Диапазон (дни)", position: "insideBottom", offset: -5 }} />
+                <YAxis {...yAxisDefaults({ width: 56 })} label={{ value: "Количество задач", angle: -90, position: "insideLeft" }} />
                 <Tooltip contentStyle={tooltipStyle} />
                 <Bar dataKey="count" fill="#8b5cf6" name="Задач" radius={[8, 8, 0, 0]} />
               </BarChart>
@@ -646,8 +648,8 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
             { title: "Распределение скорости поставки", icon: Activity, iconColor: "text-amber-600", bgColor: "bg-amber-50", textColor: "text-amber-800", titleColor: "text-amber-900", data: throughputDist, render: (d: DistributionResponse) => (
               <BarChart data={d.data}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="range" stroke="#64748b" label={{ value: "Задач в неделю", position: "insideBottom", offset: -5 }} />
-                <YAxis stroke="#64748b" label={{ value: "Недель", angle: -90, position: "insideLeft" }} />
+                <XAxis dataKey="range" {...xAxisDefaults({ count: d.data.length })} label={{ value: "Задач в неделю", position: "insideBottom", offset: -5 }} />
+                <YAxis {...yAxisDefaults({ width: 56 })} label={{ value: "Недель", angle: -90, position: "insideLeft" }} />
                 <Tooltip contentStyle={tooltipStyle} />
                 <Bar dataKey="count" fill="#f59e0b" name="Частота" radius={[8, 8, 0, 0]} />
               </BarChart>
@@ -655,16 +657,24 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
           ].map((chart, idx) => {
             const Icon = chart.icon;
             const hasData = chart.data && (chart.data as any).data?.length > 0;
+            const count = (chart.data as any)?.data?.length ?? 0;
+            // Dense scatter (tasks) needs wider per-point spacing than week-based charts
+            const perPoint = chart.scrollableOnMobile ? 28 : 48;
+            const minWidth = Math.max(560, count * perPoint);
             return (
-              <div key={idx} className="bg-white rounded-xl p-6 shadow-md border border-slate-100">
+              <div key={idx} className="bg-white rounded-xl p-4 md:p-6 shadow-md border border-slate-100">
                 <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
                   <Icon className={chart.iconColor} size={24} />
                   {chart.title}
                 </h2>
                 {hasData ? (
-                  <ResponsiveContainer width="100%" height={300}>
+                  <ChartContainer
+                    height={300}
+                    scrollableOnMobile
+                    minWidthOnMobile={minWidth}
+                  >
                     {chart.render(chart.data as any)}
-                  </ResponsiveContainer>
+                  </ChartContainer>
                 ) : (
                   <div className="flex items-center justify-center h-[300px] text-slate-400">
                     <p>Нет данных для отображения. Завершите несколько задач для построения графика.</p>

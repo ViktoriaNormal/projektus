@@ -46,18 +46,6 @@ export function login(username: string, password: string) {
   });
 }
 
-export function register(data: {
-  username: string;
-  email: string;
-  password: string;
-  fullName: string;
-}) {
-  return apiRequest<{ user: UserResponse }>('/auth/register', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-}
-
 export function refreshToken(rt: string) {
   return apiRequest<{ accessToken: string; refreshToken: string }>(
     '/auth/refresh',

@@ -21,6 +21,8 @@ import {
   MessageCircle,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { PageSpinner } from '../components/ui/Spinner';
+import { FormField } from '../components/ui/FormField';
 import {
   getUser,
   updateUser,
@@ -216,11 +218,7 @@ export default function Profile() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 size={32} className="animate-spin text-blue-600" />
-      </div>
-    );
+    return <PageSpinner />;
   }
 
   const displayUser = profile || authUser;
@@ -259,41 +257,32 @@ export default function Profile() {
                 </div>
               )}
 
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Имя пользователя <span className="text-red-500">*</span>
-                </label>
+              <FormField label="Имя пользователя" required>
                 <input
                   type="text"
                   value={displayUser?.username || ''}
                   disabled
                   className="w-full px-4 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-500 cursor-not-allowed"
                 />
-              </div>
+              </FormField>
 
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  ФИО <span className="text-red-500">*</span>
-                </label>
+              <FormField label="ФИО" required>
                 <input
                   type="text"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-              </div>
+              </FormField>
 
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Email <span className="text-red-500">*</span>
-                </label>
+              <FormField label="Email" required>
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-              </div>
+              </FormField>
 
               {/* Status checkboxes */}
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
@@ -390,30 +379,50 @@ export default function Profile() {
                 </div>
               )}
 
-              {/* Password policy — always visible */}
-              {policy && newPassword.length === 0 && (
-                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-                  <div className="flex items-start gap-2 text-sm text-blue-800">
-                    <Info size={16} className="shrink-0 mt-0.5" />
-                    <div>
-                      <p className="font-medium mb-1">Требования к паролю:</p>
-                      <ul className="space-y-0.5 text-blue-700">
-                        <li>- Минимум {policy.minLength} символов</li>
-                        {policy.requireDigits && <li>- Минимум 1 цифра</li>}
-                        {policy.requireLowercase && <li>- Минимум 1 строчная буква (a-z)</li>}
-                        {policy.requireUppercase && <li>- Минимум 1 заглавная буква (A-Z)</li>}
-                        {policy.requireSpecial && <li>- Минимум 1 спецсимвол (!@#$%^&*...)</li>}
-                      </ul>
-                      {policy.notes && <p className="mt-2 text-xs text-blue-600">{policy.notes}</p>}
+              {/* Password policy — always above inputs */}
+              {policy && (
+                newPassword.length === 0 ? (
+                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                    <div className="flex items-start gap-2 text-sm text-blue-800">
+                      <Info size={16} className="shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-medium mb-1">Требования к паролю:</p>
+                        <ul className="space-y-0.5 text-blue-700">
+                          <li>- Минимум {policy.minLength} символов</li>
+                          {policy.requireDigits && <li>- Минимум 1 цифра</li>}
+                          {policy.requireLowercase && <li>- Минимум 1 строчная буква (a-z)</li>}
+                          {policy.requireUppercase && <li>- Минимум 1 заглавная буква (A-Z)</li>}
+                          {policy.requireSpecial && <li>- Минимум 1 спецсимвол (!@#$%^&*...)</li>}
+                        </ul>
+                        {policy.notes && <p className="mt-2 text-xs text-blue-600">{policy.notes}</p>}
+                      </div>
                     </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2">
+                    <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                      <ShieldCheck size={16} />
+                      Требования к паролю
+                    </div>
+                    <ul className="space-y-1.5">
+                      {passwordChecks.map((check, i) => (
+                        <li key={i} className="flex items-center gap-2 text-sm">
+                          {check.passed ? (
+                            <Check size={14} className="text-green-600 shrink-0" />
+                          ) : (
+                            <X size={14} className="text-red-400 shrink-0" />
+                          )}
+                          <span className={check.passed ? 'text-green-700' : 'text-slate-600'}>
+                            {check.label}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )
               )}
 
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Текущий пароль <span className="text-red-500">*</span>
-                </label>
+              <FormField label="Текущий пароль" required>
                 <div className="relative">
                   <input
                     type={showOldPassword ? 'text' : 'password'}
@@ -432,12 +441,9 @@ export default function Profile() {
                     {showOldPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                   </button>
                 </div>
-              </div>
+              </FormField>
 
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Новый пароль <span className="text-red-500">*</span>
-                </label>
+              <FormField label="Новый пароль" required>
                 <div className="relative">
                   <input
                     type={showNewPassword ? 'text' : 'password'}
@@ -456,12 +462,9 @@ export default function Profile() {
                     {showNewPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                   </button>
                 </div>
-              </div>
+              </FormField>
 
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Подтвердите новый пароль <span className="text-red-500">*</span>
-                </label>
+              <FormField label="Подтвердите новый пароль" required>
                 <div className="relative">
                   <input
                     type={showConfirmPassword ? 'text' : 'password'}
@@ -492,31 +495,7 @@ export default function Profile() {
                     Пароли совпадают
                   </p>
                 )}
-              </div>
-
-              {/* Password policy — interactive checks while typing */}
-              {policy && newPassword.length > 0 && (
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2">
-                  <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                    <ShieldCheck size={16} />
-                    Требования к паролю
-                  </div>
-                  <ul className="space-y-1.5">
-                    {passwordChecks.map((check, i) => (
-                      <li key={i} className="flex items-center gap-2 text-sm">
-                        {check.passed ? (
-                          <Check size={14} className="text-green-600 shrink-0" />
-                        ) : (
-                          <X size={14} className="text-red-400 shrink-0" />
-                        )}
-                        <span className={check.passed ? 'text-green-700' : 'text-slate-600'}>
-                          {check.label}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+              </FormField>
 
               <button
                 onClick={handlePasswordChange}
@@ -610,7 +589,7 @@ export default function Profile() {
                                 key={perm.code}
                                 className="inline-block px-2 py-0.5 bg-purple-100 text-purple-800 text-xs rounded-md"
                               >
-                                {permCatalog.find((p) => p.key === perm.code)?.description || perm.code}
+                                {permCatalog.find((p) => p.code === perm.code)?.name || perm.code}
                               </span>
                             ))}
                           </div>
@@ -651,7 +630,7 @@ export default function Profile() {
                                 key={perm}
                                 className="inline-block px-2 py-0.5 bg-blue-50 text-blue-700 text-xs rounded-md border border-blue-200"
                               >
-                                {perm}
+                                {permCatalog.find((p) => p.code === perm)?.name || perm}
                               </span>
                             ))}
                           </div>

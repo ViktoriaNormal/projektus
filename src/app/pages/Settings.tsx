@@ -1,5 +1,6 @@
 import { Bell, Save, Loader2 } from "lucide-react";
 import { useState, useEffect } from "react";
+import { PageSpinner } from "../components/ui/Spinner";
 import {
   getNotificationSettings,
   updateNotificationSettings,
@@ -114,11 +115,7 @@ export default function Settings() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 size={32} className="animate-spin text-blue-600" />
-      </div>
-    );
+    return <PageSpinner />;
   }
 
   return (

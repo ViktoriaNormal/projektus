@@ -30,14 +30,10 @@ export interface TaskResponse {
 
 export function searchTasks(params: {
   projectId?: string;
-  ownerId?: string;
-  executorId?: string;
   columnId?: string;
 }) {
   const qs = new URLSearchParams();
   if (params.projectId) qs.set('project_id', params.projectId);
-  if (params.ownerId) qs.set('owner_id', params.ownerId);
-  if (params.executorId) qs.set('executor_id', params.executorId);
   if (params.columnId) qs.set('column_id', params.columnId);
   return apiRequest<TaskResponse[]>(`/tasks?${qs.toString()}`);
 }

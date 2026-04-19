@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
+import { PageSpinner } from '../../components/ui/Spinner';
 import {
   Plus, Trash2, Shield, Loader2, AlertCircle, CheckCircle2,
   Users, ChevronUp, ChevronDown, Eye, EyeOff,
@@ -86,7 +87,6 @@ export default function AdminRoles() {
   // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState<SystemRole | null>(null);
   const [deleting, setDeleting] = useState(false);
-  useBodyScrollLock(deleteTarget !== null);
 
   const systemPerms = permCatalog.filter((p) => p.scope === 'system');
 
@@ -211,11 +211,7 @@ export default function AdminRoles() {
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 size={32} className="animate-spin text-purple-600" />
-      </div>
-    );
+    return <PageSpinner tone="text-purple-600" />;
   }
 
   return (
@@ -393,12 +389,12 @@ export default function AdminRoles() {
                           const perm = role.permissions.find(p => p.code === permDef.code);
                           const currentAccess = perm?.access || (role.isAdmin ? "full" : "none");
                           return (
-                            <div key={permDef.code} className="flex items-center justify-between p-2.5 bg-slate-50 rounded-lg gap-3">
+                            <div key={permDef.code} className="flex flex-col md:flex-row md:items-center md:justify-between p-2.5 bg-slate-50 rounded-lg gap-2 md:gap-3">
                               <div className="min-w-0">
                                 <span className="text-sm font-medium">{permDef.name}</span>
                                 {permDef.description && <p className="text-xs text-slate-500 mt-0.5">{permDef.description}</p>}
                               </div>
-                              <div className="flex gap-1 shrink-0">
+                              <div className="flex flex-wrap gap-1 md:shrink-0">
                                 {ACCESS_LEVELS.map((level) => (
                                   <button
                                     key={level.key}
@@ -437,33 +433,15 @@ export default function AdminRoles() {
       )}
 
       {/* Delete Confirmation */}
-      {deleteTarget && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full">
-            <h2 className="text-xl font-bold mb-2">Удалить роль</h2>
-            <p className="text-slate-600 mb-6">
-              Вы уверены, что хотите удалить роль <strong>"{deleteTarget.name}"</strong>?
-              Это действие нельзя отменить.
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setDeleteTarget(null)}
-                className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium"
-              >
-                Отмена
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={deleting}
-                className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium flex items-center justify-center gap-2 disabled:opacity-60"
-              >
-                {deleting ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />}
-                {deleting ? 'Удаление...' : 'Удалить'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(next) => { if (!next) setDeleteTarget(null); }}
+        title="Удалить роль"
+        description={deleteTarget ? `Вы уверены, что хотите удалить роль «${deleteTarget.name}»? Это действие нельзя отменить.` : ""}
+        variant="danger"
+        confirmLabel="Удалить"
+        onConfirm={handleDelete}
+      />
     </div>
   );
 }

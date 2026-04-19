@@ -6,13 +6,16 @@ import {
   Calendar,
   Clock,
   Users,
-  Loader2,
 } from "lucide-react";
+import { PageSpinner } from "../components/ui/Spinner";
 import { useAuth } from "../contexts/AuthContext";
 import { UserAvatar } from "../components/UserAvatar";
 import { searchTasks, type TaskResponse } from "../api/tasks";
 import { getProjects, getProjectMembers, type ProjectResponse } from "../api/projects";
 import { getMeetings, type MeetingResponse } from "../api/meetings";
+import { priorityColor } from "../lib/status-colors";
+import { formatDate } from "../lib/format";
+import { EmptyState } from "../components/ui/EmptyState";
 
 const meetingTypeLabelMap: Record<string, string> = {
   scrum_planning: "Планирование спринта",
@@ -29,13 +32,6 @@ const meetingTypeLabelMap: Record<string, string> = {
   custom: "Пользовательское событие",
 };
 
-const priorityColors: Record<string, string> = {
-  "Критический": "bg-red-100 text-red-700 border-red-200",
-  "Высокий": "bg-orange-100 text-orange-700 border-orange-200",
-  "Средний": "bg-yellow-100 text-yellow-700 border-yellow-200",
-  "Низкий": "bg-green-100 text-green-700 border-green-200",
-};
-
 export default function Dashboard() {
   const { user } = useAuth();
   const [tasks, setTasks] = useState<TaskResponse[]>([]);
@@ -48,7 +44,7 @@ export default function Dashboard() {
 
     setLoading(true);
 
-    const loadTasks = searchTasks({ executorId: user.id })
+    const loadTasks = searchTasks({})
       .then(t => setTasks(t.filter(task => task.executorUserId === user.id)))
       .catch(() => setTasks([]));
 
@@ -85,18 +81,14 @@ export default function Dashboard() {
   }, [user]);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 size={32} className="animate-spin text-blue-600" />
-      </div>
-    );
+    return <PageSpinner />;
   }
 
   return (
     <div className="space-y-6">
       {/* Welcome */}
-      <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 rounded-2xl p-8 text-white shadow-lg">
-        <h1 className="text-3xl font-bold mb-2">
+      <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 rounded-2xl p-4 md:p-8 text-white shadow-lg">
+        <h1 className="text-2xl md:text-3xl font-bold mb-2 break-words">
           Добро пожаловать, {user?.fullName}!
         </h1>
         <p className="text-blue-100">
@@ -135,7 +127,7 @@ export default function Dashboard() {
                         {task.priority && (
                           <span
                             className={`px-2 py-0.5 text-xs font-semibold rounded border ${
-                              priorityColors[task.priority] || "bg-slate-100 text-slate-600 border-slate-200"
+                              priorityColor(task.priority)
                             }`}
                           >
                             {task.priority}
@@ -145,7 +137,7 @@ export default function Dashboard() {
                       <p className="font-medium text-sm">{task.name}</p>
                       {task.deadline && (
                         <p className="text-xs text-slate-500 mt-1">
-                          Срок: {new Date(task.deadline).toLocaleDateString("ru-RU")}
+                          Срок: {formatDate(task.deadline, "dmy")}
                         </p>
                       )}
                     </div>
@@ -162,10 +154,7 @@ export default function Dashboard() {
               ))}
             </div>
           ) : (
-            <div className="text-center py-8 text-slate-400">
-              <CheckSquare size={48} className="mx-auto mb-3 opacity-50" />
-              <p className="text-sm">Нет назначенных задач</p>
-            </div>
+            <EmptyState icon={<CheckSquare size={48} className="opacity-50" />} title="Нет назначенных задач" compact />
           )}
         </div>
 
@@ -228,10 +217,7 @@ export default function Dashboard() {
               })}
             </div>
           ) : (
-            <div className="text-center py-8 text-slate-400">
-              <Clock size={48} className="mx-auto mb-3 opacity-50" />
-              <p className="text-sm">Нет встреч на сегодня</p>
-            </div>
+            <EmptyState icon={<Clock size={48} className="opacity-50" />} title="Нет встреч на сегодня" compact />
           )}
         </div>
       </div>
@@ -278,10 +264,7 @@ export default function Dashboard() {
             ))}
           </div>
         ) : (
-          <div className="text-center py-8 text-slate-400">
-            <FolderKanban size={48} className="mx-auto mb-3 opacity-50" />
-            <p className="text-sm">Нет активных проектов</p>
-          </div>
+          <EmptyState icon={<FolderKanban size={48} className="opacity-50" />} title="Нет активных проектов" compact />
         )}
       </div>
     </div>

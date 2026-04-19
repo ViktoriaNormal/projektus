@@ -82,9 +82,11 @@ export interface CreateUserPayload {
   username: string;
   email: string;
   fullName: string;
+  // Должность сотрудника — обязательное непустое поле
   position: string;
   password: string;
   isActive: boolean;
+  // Идентификаторы системных ролей — минимум одна обязательна
   roleIds: string[];
 }
 
@@ -92,8 +94,10 @@ export interface UpdateUserPayload {
   username?: string;
   email?: string;
   fullName?: string;
-  position?: string | null;
+  // Если передаётся — должна быть непустой строкой, сбросить в null/"" нельзя
+  position?: string;
   isActive?: boolean;
+  // Если передаётся — массив не может быть пустым
   roleIds?: string[];
 }
 

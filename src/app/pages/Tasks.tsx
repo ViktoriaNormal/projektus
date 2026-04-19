@@ -10,6 +10,10 @@ import { getTaskTags, type TagResponse } from "../api/tags";
 import { getTaskWatchers } from "../api/watchers";
 import { useAuth } from "../contexts/AuthContext";
 import { UserAvatar } from "../components/UserAvatar";
+import { priorityColor } from "../lib/status-colors";
+import { formatDate } from "../lib/format";
+import { Select, SelectOption } from "../components/ui/Select";
+import { EmptyState } from "../components/ui/EmptyState";
 
 function toAvatarUser(u: UserProfileResponse) {
   return { fullName: u.fullName, avatarUrl: u.avatarUrl ?? undefined };
@@ -33,14 +37,6 @@ function getTaskStatus(task: TaskResponse, columnCache: Map<string, ColumnRespon
     default: return "Бэклог";
   }
 }
-
-const PRIORITY_COLORS: Record<string, string> = {
-  "Критический": "bg-red-100 text-red-700 border-red-200",
-  "Критичный": "bg-red-100 text-red-700 border-red-200",
-  "Высокий": "bg-orange-100 text-orange-700 border-orange-200",
-  "Средний": "bg-yellow-100 text-yellow-700 border-yellow-200",
-  "Низкий": "bg-green-100 text-green-700 border-green-200",
-};
 
 export default function Tasks() {
   const { user: currentUser } = useAuth();
@@ -140,16 +136,20 @@ export default function Tasks() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Client-side filters
+  // Client-side filters — "Мои задачи" always scoped to tasks where current user is author, executor or watcher
   const filteredTasks = tasks.filter((task) => {
     const matchesSearch =
       task.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       task.key.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesProject = filterProject === "all" || task.projectId === filterProject;
-    let matchesRole = true;
-    if (filterRole === "owner") matchesRole = task.ownerUserId === currentUser?.id;
-    else if (filterRole === "executor") matchesRole = task.executorUserId === currentUser?.id;
-    else if (filterRole === "watcher") matchesRole = watcherTaskIds.has(task.id);
+    const isAuthor = task.ownerUserId === currentUser?.id;
+    const isExecutor = task.executorUserId === currentUser?.id;
+    const isWatcher = watcherTaskIds.has(task.id);
+    let matchesRole: boolean;
+    if (filterRole === "owner") matchesRole = isAuthor;
+    else if (filterRole === "executor") matchesRole = isExecutor;
+    else if (filterRole === "watcher") matchesRole = isWatcher;
+    else matchesRole = isAuthor || isExecutor || isWatcher;
     return matchesSearch && matchesProject && matchesRole;
   });
 
@@ -185,27 +185,19 @@ export default function Tasks() {
             />
           </div>
 
-          <select
-            value={filterProject}
-            onChange={(e) => setFilterProject(e.target.value)}
-            className="px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          >
-            <option value="all">Все проекты</option>
+          <Select value={filterProject} onValueChange={setFilterProject} ariaLabel="Фильтр по проекту">
+            <SelectOption value="all">Все проекты</SelectOption>
             {projects.filter(p => tasks.some(t => t.projectId === p.id)).map(p => (
-              <option key={p.id} value={p.id}>{p.key} — {p.name}</option>
+              <SelectOption key={p.id} value={p.id}>{p.key} — {p.name}</SelectOption>
             ))}
-          </select>
+          </Select>
 
-          <select
-            value={filterRole}
-            onChange={(e) => setFilterRole(e.target.value)}
-            className="px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          >
-            <option value="all">Все роли</option>
-            <option value="owner">Я автор</option>
-            <option value="executor">Я исполнитель</option>
-            <option value="watcher">Я наблюдатель</option>
-          </select>
+          <Select value={filterRole} onValueChange={setFilterRole} ariaLabel="Фильтр по роли">
+            <SelectOption value="all">Все роли</SelectOption>
+            <SelectOption value="owner">Я автор</SelectOption>
+            <SelectOption value="executor">Я исполнитель</SelectOption>
+            <SelectOption value="watcher">Я наблюдатель</SelectOption>
+          </Select>
         </div>
       </div>
 
@@ -235,7 +227,7 @@ export default function Tasks() {
                     )}
                     {task.priority && (
                       <span className={`px-3 py-1 text-xs font-semibold rounded border ${
-                        PRIORITY_COLORS[task.priority] ?? "bg-slate-100 text-slate-700 border-slate-200"
+                        priorityColor(task.priority)
                       }`}>
                         {task.priority}
                       </span>
@@ -286,7 +278,7 @@ export default function Tasks() {
                 <div className="flex items-center gap-4">
                   {task.deadline && (
                     <span className="text-slate-500">
-                      Срок: {new Date(task.deadline).toLocaleDateString("ru-RU")}
+                      Срок: {formatDate(task.deadline, "dmy")}
                     </span>
                   )}
                   {task.estimation && (
@@ -302,8 +294,12 @@ export default function Tasks() {
       </div>
 
       {filteredTasks.length === 0 && (
-        <div className="text-center py-12 bg-white rounded-xl border border-slate-200">
-          <p className="text-slate-500">Задачи не найдены</p>
+        <div className="bg-white rounded-xl border border-slate-200">
+          <EmptyState
+            icon={<Search size={48} />}
+            title="Задачи не найдены"
+            description="Попробуйте изменить критерии поиска"
+          />
         </div>
       )}
     </div>

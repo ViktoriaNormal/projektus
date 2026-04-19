@@ -1,16 +1,13 @@
 import { useState } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router';
-import { LogIn, Eye, EyeOff, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
+import { useNavigate } from 'react-router';
+import { LogIn, Eye, EyeOff, AlertCircle, Loader2 } from 'lucide-react';
 import { login } from '../api/auth';
 import { useAuth } from '../contexts/AuthContext';
 import { ApiError } from '../api/client';
 
 export default function Login() {
   const navigate = useNavigate();
-  const location = useLocation();
   const { setAuth } = useAuth();
-
-  const registered = (location.state as { registered?: boolean })?.registered;
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -74,13 +71,6 @@ export default function Login() {
         {/* Form */}
         <div className="bg-white rounded-2xl p-8 shadow-xl border border-slate-100">
           <form onSubmit={handleSubmit} className="space-y-5">
-            {registered && !error && (
-              <div className="flex items-start gap-3 p-4 bg-green-50 border border-green-200 rounded-xl text-green-800 text-sm">
-                <CheckCircle2 size={18} className="shrink-0 mt-0.5" />
-                <span>Регистрация прошла успешно! Теперь вы можете войти.</span>
-              </div>
-            )}
-
             {error && (
               <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-xl text-red-800 text-sm">
                 <AlertCircle size={18} className="shrink-0 mt-0.5" />
@@ -137,11 +127,9 @@ export default function Login() {
             </button>
           </form>
 
-          <div className="mt-6 text-center text-sm text-slate-600">
-            Нет аккаунта?{' '}
-            <Link to="/register" className="text-blue-600 hover:text-blue-800 font-medium transition-colors">
-              Зарегистрироваться
-            </Link>
+          <div className="mt-6 text-center text-xs text-slate-500">
+            Учётные записи создаются администратором системы.<br/>
+            Для получения доступа обратитесь к администратору вашей организации.
           </div>
         </div>
       </div>

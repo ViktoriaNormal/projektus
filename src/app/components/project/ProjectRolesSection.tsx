@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Shield, Users, Plus, Trash2, ChevronUp, ChevronDown, Eye, EyeOff, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
+import { toastError } from "../../lib/errors";
 import {
   createProjectRole,
   updateProjectRole,
@@ -107,7 +108,7 @@ export default function ProjectRolesSection({
       await onReload();
       setExpandedRoleId(newRole.id);
     } catch (e: any) {
-      toast.error(e.message || "Не удалось добавить роль");
+      toastError(e, "Не удалось добавить роль");
     }
   }
 
@@ -116,7 +117,7 @@ export default function ProjectRolesSection({
       await updateProjectRole(projectId, roleId, patch);
       await onReload();
     } catch (e: any) {
-      toast.error(e.message || "Не удалось обновить роль");
+      toastError(e, "Не удалось обновить роль");
     }
   }
 
@@ -127,7 +128,7 @@ export default function ProjectRolesSection({
       });
       await onReload();
     } catch (e: any) {
-      toast.error(e.message || "Не удалось обновить права");
+      toastError(e, "Не удалось обновить права");
     }
   }
 
@@ -139,7 +140,7 @@ export default function ProjectRolesSection({
       if (e.code === "ROLE_HAS_MEMBERS") {
         toast.error("Невозможно удалить роль — к ней привязаны участники. Сначала переназначьте их на другую роль.");
       } else {
-        toast.error(e.message || "Не удалось удалить роль");
+        toastError(e, "Не удалось удалить роль");
       }
     }
   }
@@ -257,12 +258,12 @@ export default function ProjectRolesSection({
                           const currentAccess = perm?.access || (isAdmin ? "full" : "none");
                           const allAccessLevels = [...accessLevels, ...(accessLevels.find(l => l.key === "none") ? [] : [{ key: "none", name: "Нет доступа" }])];
                           return (
-                            <div key={areaDef.area} className="flex items-center justify-between p-2.5 bg-slate-50 rounded-lg gap-3">
+                            <div key={areaDef.area} className="flex flex-col md:flex-row md:items-center md:justify-between p-2.5 bg-slate-50 rounded-lg gap-2 md:gap-3">
                               <div className="min-w-0">
                                 <span className="text-sm font-medium">{areaDef.name}</span>
                                 {areaDef.description && <p className="text-xs text-slate-500 mt-0.5">{areaDef.description}</p>}
                               </div>
-                              <div className="flex gap-1 shrink-0">
+                              <div className="flex flex-wrap gap-1 md:shrink-0">
                                 {allAccessLevels.map((level) => (
                                   <button
                                     key={level.key}

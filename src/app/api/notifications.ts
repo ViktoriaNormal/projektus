@@ -1,4 +1,5 @@
 import { apiRequest } from './client';
+import { unwrapList } from '../lib/api-unwrap';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -26,15 +27,9 @@ export interface NotificationSettingResponse {
 // ── API calls ────────────────────────────────────────────────
 
 export function getNotifications() {
-  return apiRequest<NotificationResponse[]>('/notifications').then(result => {
-    if (Array.isArray(result)) return result;
-    if (result && typeof result === 'object') {
-      const obj = result as unknown as Record<string, unknown>;
-      if (Array.isArray(obj.items)) return obj.items as NotificationResponse[];
-      if (Array.isArray(obj.notifications)) return obj.notifications as NotificationResponse[];
-    }
-    return [];
-  });
+  return apiRequest<NotificationResponse[]>('/notifications').then(result =>
+    unwrapList<NotificationResponse>(result, ['notifications'])
+  );
 }
 
 export function markAsRead(notificationId: string) {
@@ -53,15 +48,9 @@ export function deleteAllNotifications() {
 }
 
 export function getNotificationSettings() {
-  return apiRequest<NotificationSettingResponse[]>('/notifications/settings').then(result => {
-    if (Array.isArray(result)) return result;
-    if (result && typeof result === 'object') {
-      const obj = result as unknown as Record<string, unknown>;
-      if (Array.isArray(obj.items)) return obj.items as NotificationSettingResponse[];
-      if (Array.isArray(obj.settings)) return obj.settings as NotificationSettingResponse[];
-    }
-    return [];
-  });
+  return apiRequest<NotificationSettingResponse[]>('/notifications/settings').then(result =>
+    unwrapList<NotificationSettingResponse>(result, ['settings'])
+  );
 }
 
 export function updateNotificationSettings(settings: NotificationSettingResponse[]) {

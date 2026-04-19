@@ -4,7 +4,13 @@ import {
   Copy, Check, ChevronRight, Loader2, Upload, Download,
 } from "lucide-react";
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
+import { Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle } from "../components/ui/Modal";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
+import { Select, SelectOption } from "../components/ui/Select";
+import { formatDate } from "../lib/format";
+import { toastError } from "../lib/errors";
+import { DependenciesSection } from "../components/task-detail/DependenciesSection";
+import { AttachmentsSection } from "../components/task-detail/AttachmentsSection";
 import { useProjectPermissions } from "../hooks/useProjectPermissions";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router";
 import { toast } from "sonner";
@@ -69,7 +75,6 @@ export default function TaskDetail() {
   const [boardAllTags, setBoardAllTags] = useState<TagResponse[]>([]);
 
   const [showAttachmentModal, setShowAttachmentModal] = useState(false);
-  useBodyScrollLock(showDeleteModal || showChecklistModal || showLinkModal || showAttachmentModal);
 
   // Form state
   const [checklistTitle, setChecklistTitle] = useState("");
@@ -319,7 +324,7 @@ export default function TaskDetail() {
       const ret = searchParams.get("returnUrl");
       navigate(`/tasks/${newTask.id}${ret ? `?returnUrl=${encodeURIComponent(ret)}` : ""}`, { replace: true });
     } catch (e: any) {
-      toast.error(e.message || "Ошибка создания задачи");
+      toastError(e, "Ошибка создания задачи");
     } finally {
       setCreateSaving(false);
     }
@@ -335,7 +340,7 @@ export default function TaskDetail() {
     try {
       await updateTask(task.id, { [field]: value });
     } catch (e: any) {
-      toast.error(e.message || "Ошибка обновления");
+      toastError(e, "Ошибка обновления");
       loadTask(); // rollback to server state
     }
   };
@@ -363,7 +368,7 @@ export default function TaskDetail() {
       await deleteTask(task.id);
       toast.success("Задача удалена");
       navigate("/tasks");
-    } catch (e: any) { toast.error(e.message || "Ошибка удаления"); }
+    } catch (e: any) { toastError(e, "Ошибка удаления"); }
   };
 
   const handleCopyKey = () => {
@@ -391,7 +396,7 @@ export default function TaskDetail() {
       setChecklistTitle("");
       setShowChecklistModal(false);
       setChecklists(await getTaskChecklists(task.id));
-    } catch (e: any) { toast.error(e.message || "Ошибка создания чек-листа"); }
+    } catch (e: any) { toastError(e, "Ошибка создания чек-листа"); }
   };
 
   const handleAddItem = async (checklistId: string) => {
@@ -410,7 +415,7 @@ export default function TaskDetail() {
       await addChecklistItem(checklistId, { content });
       setNewItemContent(prev => ({ ...prev, [checklistId]: "" }));
       if (task) setChecklists(await getTaskChecklists(task.id));
-    } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    } catch (e: any) { toastError(e, "Ошибка"); }
   };
 
   const handleToggleItem = async (itemId: string, checked: boolean) => {
@@ -424,7 +429,7 @@ export default function TaskDetail() {
     try {
       await setChecklistItemStatus(itemId, checked);
       if (task) setChecklists(await getTaskChecklists(task.id));
-    } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    } catch (e: any) { toastError(e, "Ошибка"); }
   };
 
   // Checklist editing/deleting
@@ -437,7 +442,7 @@ export default function TaskDetail() {
     try {
       await updateChecklist(checklistId, { name: name.trim() });
       if (task) setChecklists(await getTaskChecklists(task.id));
-    } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    } catch (e: any) { toastError(e, "Ошибка"); }
   };
 
   const handleDeleteChecklist = async (checklistId: string) => {
@@ -448,7 +453,7 @@ export default function TaskDetail() {
     try {
       await deleteChecklist(checklistId);
       if (task) setChecklists(await getTaskChecklists(task.id));
-    } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    } catch (e: any) { toastError(e, "Ошибка"); }
   };
 
   const handleEditItem = async (itemId: string, content: string) => {
@@ -462,7 +467,7 @@ export default function TaskDetail() {
     try {
       await updateChecklistItem(itemId, { content: content.trim() });
       if (task) setChecklists(await getTaskChecklists(task.id));
-    } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    } catch (e: any) { toastError(e, "Ошибка"); }
   };
 
   const handleDeleteItem = async (itemId: string) => {
@@ -473,7 +478,7 @@ export default function TaskDetail() {
     try {
       await deleteChecklistItem(itemId);
       if (task) setChecklists(await getTaskChecklists(task.id));
-    } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    } catch (e: any) { toastError(e, "Ошибка"); }
   };
 
   // Tags — load board tags for suggestions
@@ -511,7 +516,7 @@ export default function TaskDetail() {
       setTags(await getTaskTags(task.id));
       // Refresh board tags for future suggestions
       setBoardAllTags(await getBoardTags(boardId));
-    } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    } catch (e: any) { toastError(e, "Ошибка"); }
   };
 
   const handleRemoveTag = async (tagId: string) => {
@@ -523,7 +528,7 @@ export default function TaskDetail() {
     try {
       await removeTagFromTask(task.id, tagId);
       setTags(await getTaskTags(task.id));
-    } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    } catch (e: any) { toastError(e, "Ошибка"); }
   };
 
   // Dependencies
@@ -544,7 +549,7 @@ export default function TaskDetail() {
       setSelectedTaskId("");
       setShowLinkModal(false);
       setDependencies(await getTaskDependencies(task.id));
-    } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    } catch (e: any) { toastError(e, "Ошибка"); }
   };
 
   // Comments
@@ -559,7 +564,7 @@ export default function TaskDetail() {
       setCommentText("");
       setReplyTo(null);
       setComments(await getTaskComments(task.id));
-    } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    } catch (e: any) { toastError(e, "Ошибка"); }
   };
 
   const handleReply = (comment: CommentResponse) => {
@@ -600,7 +605,7 @@ export default function TaskDetail() {
     try {
       await deleteComment(commentId);
       setComments(await getTaskComments(task.id));
-    } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    } catch (e: any) { toastError(e, "Ошибка"); }
   };
 
   // Attachments
@@ -625,7 +630,7 @@ export default function TaskDetail() {
       await uploadAttachment(task.id, file);
       setAttachments(await getTaskAttachments(task.id));
       setShowAttachmentModal(false);
-    } catch (e: any) { toast.error(e.message || "Ошибка загрузки"); }
+    } catch (e: any) { toastError(e, "Ошибка загрузки"); }
     finally { setUploadingFile(false); }
   };
 
@@ -644,7 +649,7 @@ export default function TaskDetail() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (e: any) {
-      toast.error(e.message || "Ошибка скачивания файла");
+      toastError(e, "Ошибка скачивания файла");
     }
   };
 
@@ -662,7 +667,7 @@ export default function TaskDetail() {
     try {
       await deleteAttachment(attId);
       setAttachments(await getTaskAttachments(task.id));
-    } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    } catch (e: any) { toastError(e, "Ошибка"); }
   };
 
   // Watchers
@@ -679,7 +684,7 @@ export default function TaskDetail() {
       await addWatcher(task.id, memberId);
       setWatchers(await getTaskWatchers(task.id));
 
-    } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    } catch (e: any) { toastError(e, "Ошибка"); }
   };
 
   const handleRemoveWatcher = async (memberId: string) => {
@@ -691,7 +696,7 @@ export default function TaskDetail() {
     try {
       await removeWatcher(task.id, memberId);
       setWatchers(await getTaskWatchers(task.id));
-    } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    } catch (e: any) { toastError(e, "Ошибка"); }
   };
 
   // Field values
@@ -718,7 +723,7 @@ export default function TaskDetail() {
     try {
       await setTaskFieldValue(task.id, fieldId, data);
       setFieldValues(await getTaskFieldValues(task.id));
-    } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    } catch (e: any) { toastError(e, "Ошибка"); }
   };
 
   const getFieldValue = (fieldId: string, field: BoardField): string => {
@@ -813,7 +818,7 @@ export default function TaskDetail() {
         </div>
       </div>
       {onRemove && (
-        <button onClick={onRemove} className="opacity-0 group-hover:opacity-100 p-1 text-red-600 hover:bg-red-50 rounded"><X size={14} /></button>
+        <button onClick={onRemove} className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 p-1 text-red-600 hover:bg-red-50 rounded"><X size={14} /></button>
       )}
     </div>
   );
@@ -964,7 +969,7 @@ export default function TaskDetail() {
           {tags.map(tag => (
             <span key={tag.id} className="px-3 py-1 bg-blue-100 text-blue-700 text-sm rounded inline-flex items-center gap-2 group">
               <Tag size={14} /> {tag.name}
-              {canEditTask && <button onClick={() => handleRemoveTag(tag.id)} className="opacity-0 group-hover:opacity-100 transition-opacity"><X size={14} /></button>}
+              {canEditTask && <button onClick={() => handleRemoveTag(tag.id)} className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity"><X size={14} /></button>}
             </span>
           ))}
           {showTagInput ? (
@@ -1093,13 +1098,16 @@ export default function TaskDetail() {
                     return (
                       <div className="mb-4">
                         <label className="flex items-center gap-2 text-slate-600 text-sm mb-2"><AlertTriangle size={16} /><span>{label}</span></label>
-                        <select value={task.priority || ""} onChange={e => handleUpdateField("priority", e.target.value || null)}
-                          className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                          <option value="">Не указан</option>
+                        <Select
+                          value={task.priority || ""}
+                          onValueChange={(v) => handleUpdateField("priority", v || null)}
+                          placeholder="Не указан"
+                        >
+                          <SelectOption value="">Не указан</SelectOption>
                           {opts.map(opt => (
-                            <option key={opt} value={opt}>{opt}</option>
+                            <SelectOption key={opt} value={opt}>{opt}</SelectOption>
                           ))}
-                        </select>
+                        </Select>
                       </div>
                     );
                   })()}
@@ -1108,12 +1116,14 @@ export default function TaskDetail() {
                   <div className="mb-4">
                     <label className="flex items-center gap-2 text-slate-600 text-sm mb-2"><BarChart3 size={16} /><span>Колонка</span></label>
                     {task.columnId ? (
-                      <select value={task.columnId} onChange={e => handleUpdateField("columnId", e.target.value)}
-                        className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      <Select
+                        value={task.columnId}
+                        onValueChange={(v) => handleUpdateField("columnId", v)}
+                      >
                         {columns.map(col => (
-                          <option key={col.id} value={col.id}>{col.name}</option>
+                          <SelectOption key={col.id} value={col.id}>{col.name}</SelectOption>
                         ))}
-                      </select>
+                      </Select>
                     ) : (
                       <div className="px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
                         Задача в бэклоге — колонка будет назначена при запуске спринта
@@ -1191,8 +1201,7 @@ export default function TaskDetail() {
                   <div className="mb-4">
                     <label className="flex items-center gap-2 text-slate-600 text-sm mb-2"><Calendar size={16} /><span>Дата создания</span></label>
                     <div className="px-4 py-2 bg-slate-50 rounded-lg text-sm text-slate-600">
-                      {new Date(isCreateMode ? Date.now() : ((task as any).createdAt || Date.now()))
-                        .toLocaleDateString("ru-RU", { day: "2-digit", month: "long", year: "numeric" })}
+                      {formatDate(isCreateMode ? Date.now() : ((task as any).createdAt || Date.now()), "long")}
                     </div>
                   </div>
                 </div>
@@ -1222,10 +1231,14 @@ export default function TaskDetail() {
                           );
                         } else if (field.fieldType === "select" && field.options) {
                           control = (
-                            <select value={val} onChange={e => handleSetFieldValue(field.id, field, e.target.value)} className={inputCls}>
-                              {!field.isRequired && <option value="">Не выбрано</option>}
-                              {field.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                            </select>
+                            <Select
+                              value={val}
+                              onValueChange={(v) => handleSetFieldValue(field.id, field, v)}
+                              placeholder="Не выбрано"
+                            >
+                              {!field.isRequired && <SelectOption value="">Не выбрано</SelectOption>}
+                              {field.options.map(opt => <SelectOption key={opt} value={opt}>{opt}</SelectOption>)}
+                            </Select>
                           );
                         } else if (field.fieldType === "multiselect" && field.options) {
                           const selected = val ? val.split(",").map(s => s.trim()) : [];
@@ -1395,7 +1408,7 @@ export default function TaskDetail() {
                                   onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                                   className={`text-sm flex-1 bg-transparent border-none focus:outline-none focus:ring-0 px-0 ${item.isChecked ? "line-through text-slate-400" : ""}`} />
                                 <button onClick={() => handleDeleteItem(item.id)}
-                                  className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-all shrink-0">
+                                  className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-all shrink-0">
                                   <X size={14} />
                                 </button>
                               </div>
@@ -1423,105 +1436,22 @@ export default function TaskDetail() {
                 </div>
 
                 {/* Attachments */}
-                <div>
-                  <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-bold flex items-center gap-2"><Paperclip size={18} /> Вложения ({attachments.length})</h2>
-                    {canEditTask && <button onClick={() => setShowAttachmentModal(true)} className="px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors flex items-center gap-1"><Plus size={16} /> Добавить</button>}
-                  </div>
-                  {attachments.length > 0 ? (
-                    <div className="space-y-2">
-                      {attachments.map(att => (
-                        <div key={att.id} className="p-3 border border-slate-200 rounded-lg hover:bg-slate-50 group">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-1">
-                                <Paperclip size={14} className="text-slate-400" />
-                                <span className="text-sm font-medium">{att.fileName}</span>
-                              </div>
-                              <div className="text-xs text-slate-500 ml-5">{(att.fileSize / 1024 / 1024).toFixed(2)} МБ</div>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              {!isCreateMode && (
-                                <button onClick={(e) => { e.preventDefault(); handleDownloadAttachment(att); }}
-                                  className="opacity-0 group-hover:opacity-100 p-1 text-blue-600 hover:bg-blue-50 rounded"
-                                  title="Скачать">
-                                  <Download size={14} />
-                                </button>
-                              )}
-                              {canEditTask && <button onClick={() => handleDeleteAttachment(att.id)} className="opacity-0 group-hover:opacity-100 p-1 text-red-600 hover:bg-red-50 rounded"><Trash2 size={14} /></button>}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-slate-400 py-3">Нет вложений</p>
-                  )}
-                </div>
+                <AttachmentsSection
+                  attachments={attachments}
+                  canEditTask={canEditTask}
+                  isCreateMode={isCreateMode}
+                  onAdd={() => setShowAttachmentModal(true)}
+                  onDownload={handleDownloadAttachment}
+                  onDelete={handleDeleteAttachment}
+                />
 
                 {/* Dependencies / Links */}
-                <div>
-                  <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-bold flex items-center gap-2"><LinkIcon size={18} /> Связи</h2>
-                    {canEditTask && <button onClick={() => setShowLinkModal(true)}
-                      className="px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors flex items-center gap-1">
-                      <Plus size={16} /> Добавить
-                    </button>}
-                  </div>
-                  <div className="space-y-2">
-                    {blockingDeps.map(dep => {
-                      const t = getDepTask(dep);
-                      if (!t) return null;
-                      return (
-                        <div key={dep.id} className="p-3 border border-slate-200 rounded-lg">
-                          <div className="text-xs text-red-600 font-medium mb-1">Блокирует</div>
-                          <Link to={`/tasks/${t.id}`} className="text-sm text-blue-600 hover:underline">{t.key}: {t.name}</Link>
-                        </div>
-                      );
-                    })}
-                    {blockedByDeps.map(dep => {
-                      const t = getDepTask(dep);
-                      if (!t) return null;
-                      return (
-                        <div key={dep.id} className="p-3 border border-slate-200 rounded-lg">
-                          <div className="text-xs text-orange-600 font-medium mb-1">Блокируется</div>
-                          <Link to={`/tasks/${t.id}`} className="text-sm text-blue-600 hover:underline">{t.key}: {t.name}</Link>
-                        </div>
-                      );
-                    })}
-                    {parentDeps.map(dep => {
-                      const t = getDepTask(dep);
-                      if (!t) return null;
-                      return (
-                        <div key={dep.id} className="p-3 border border-slate-200 rounded-lg">
-                          <div className="text-xs text-purple-600 font-medium mb-1">Родительская</div>
-                          <Link to={`/tasks/${t.id}`} className="text-sm text-blue-600 hover:underline">{t.key}: {t.name}</Link>
-                        </div>
-                      );
-                    })}
-                    {subtaskDeps.map(dep => {
-                      const t = getDepTask(dep);
-                      if (!t) return null;
-                      return (
-                        <div key={dep.id} className="p-3 border border-slate-200 rounded-lg">
-                          <div className="text-xs text-teal-600 font-medium mb-1">Подзадача</div>
-                          <Link to={`/tasks/${t.id}`} className="text-sm text-blue-600 hover:underline">{t.key}: {t.name}</Link>
-                        </div>
-                      );
-                    })}
-                    {relatedDeps.map(dep => {
-                      const t = getDepTask(dep);
-                      if (!t) return null;
-                      return (
-                        <div key={dep.id} className="p-3 border border-slate-200 rounded-lg">
-                          <div className="text-xs text-blue-600 font-medium mb-1">Связана с</div>
-                          <Link to={`/tasks/${t.id}`} className="text-sm text-blue-600 hover:underline">{t.key}: {t.name}</Link>
-                        </div>
-                      );
-                    })}
-                    {dependencies.length === 0 && <p className="text-sm text-slate-400 py-3">Нет связей</p>}
-                  </div>
-                </div>
+                <DependenciesSection
+                  dependencies={dependencies}
+                  getDepTask={getDepTask}
+                  canEditTask={canEditTask}
+                  onAddDependency={() => setShowLinkModal(true)}
+                />
               </div>
             </div>
           )}
@@ -1640,112 +1570,101 @@ export default function TaskDetail() {
       </div>
 
       {/* Delete Task Modal */}
-      {showDeleteModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-sm w-full">
-            <div className="flex items-start gap-3 mb-4">
-              <Trash2 size={24} className="text-red-600 shrink-0 mt-0.5" />
-              <div>
-                <h2 className="text-lg font-bold text-slate-800">Удалить задачу</h2>
-                <p className="text-sm text-slate-600 mt-1">Вы уверены, что хотите удалить задачу «{task.key}: {task.name}»?</p>
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <button onClick={() => setShowDeleteModal(false)} className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium">Отмена</button>
-              <button onClick={handleDeleteTask} className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium">Удалить</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={showDeleteModal}
+        onOpenChange={setShowDeleteModal}
+        title="Удалить задачу"
+        description={`Вы уверены, что хотите удалить задачу «${task.key}: ${task.name}»?`}
+        variant="danger"
+        confirmLabel="Удалить"
+        onConfirm={handleDeleteTask}
+      />
 
       {/* Create Checklist Modal */}
-      {showChecklistModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">Создать чек-лист</h2>
-              <button onClick={() => { setShowChecklistModal(false); setChecklistTitle(""); }} className="p-1 hover:bg-slate-100 rounded-lg"><X size={20} /></button>
-            </div>
-            <div className="mb-4">
-              <label className="block text-sm font-medium mb-2">Название *</label>
-              <input type="text" value={checklistTitle} onChange={e => setChecklistTitle(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter") handleCreateChecklist(); }}
-                className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Например: Чек-лист по тестированию" />
-            </div>
-            <div className="flex gap-3">
-              <button onClick={() => { setShowChecklistModal(false); setChecklistTitle(""); }}
-                className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 font-medium">Отмена</button>
-              <button onClick={handleCreateChecklist} disabled={!checklistTitle.trim()}
-                className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed">Создать</button>
-            </div>
+      <Modal
+        open={showChecklistModal}
+        onOpenChange={(next) => { setShowChecklistModal(next); if (!next) setChecklistTitle(""); }}
+        size="md"
+      >
+        <ModalHeader>
+          <ModalTitle>Создать чек-лист</ModalTitle>
+        </ModalHeader>
+        <ModalBody>
+          <div>
+            <label className="block text-sm font-medium mb-2">Название *</label>
+            <input type="text" value={checklistTitle} onChange={e => setChecklistTitle(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") handleCreateChecklist(); }}
+              className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Например: Чек-лист по тестированию" />
           </div>
-        </div>
-      )}
+        </ModalBody>
+        <ModalFooter>
+          <button onClick={() => { setShowChecklistModal(false); setChecklistTitle(""); }}
+            className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 font-medium">Отмена</button>
+          <button onClick={handleCreateChecklist} disabled={!checklistTitle.trim()}
+            className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed">Создать</button>
+        </ModalFooter>
+      </Modal>
 
       {/* Add Link Modal */}
-      {showLinkModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">Добавить связь</h2>
-              <button onClick={() => { setShowLinkModal(false); setSelectedTaskId(""); }} className="p-1 hover:bg-slate-100 rounded-lg"><X size={20} /></button>
-            </div>
-            <div className="mb-4">
+      <Modal
+        open={showLinkModal}
+        onOpenChange={(next) => { setShowLinkModal(next); if (!next) setSelectedTaskId(""); }}
+        size="md"
+      >
+        <ModalHeader>
+          <ModalTitle>Добавить связь</ModalTitle>
+        </ModalHeader>
+        <ModalBody>
+          <div className="space-y-4">
+            <div>
               <label className="block text-sm font-medium mb-2">Тип связи</label>
-              <select value={linkType} onChange={e => setLinkType(e.target.value as DependencyType)}
-                className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <option value="blocks">Блокирует</option>
-                <option value="is_blocked_by">Блокируется</option>
-                <option value="parent">Родительская</option>
-                <option value="subtask">Подзадача</option>
-                <option value="relates_to">Связана с</option>
-              </select>
+              <Select value={linkType} onValueChange={(v) => setLinkType(v as DependencyType)}>
+                <SelectOption value="blocks">Блокирует</SelectOption>
+                <SelectOption value="is_blocked_by">Блокируется</SelectOption>
+                <SelectOption value="parent">Родительская</SelectOption>
+                <SelectOption value="subtask">Подзадача</SelectOption>
+                <SelectOption value="relates_to">Связана с</SelectOption>
+              </Select>
             </div>
-            <div className="mb-4">
+            <div>
               <label className="block text-sm font-medium mb-2">Задача *</label>
-              <select value={selectedTaskId} onChange={e => setSelectedTaskId(e.target.value)}
-                className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <option value="">Выберите задачу</option>
+              <Select value={selectedTaskId} onValueChange={setSelectedTaskId} placeholder="Выберите задачу">
                 {projectTasks.filter(t => !dependencies.some(d => d.dependsOnTaskId === t.id)).map(t => (
-                  <option key={t.id} value={t.id}>{t.key}: {t.name}</option>
+                  <SelectOption key={t.id} value={t.id}>{t.key}: {t.name}</SelectOption>
                 ))}
-              </select>
-            </div>
-            <div className="flex gap-3">
-              <button onClick={() => { setShowLinkModal(false); setSelectedTaskId(""); }}
-                className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 font-medium">Отмена</button>
-              <button onClick={handleAddDependency} disabled={!selectedTaskId}
-                className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed">Добавить</button>
+              </Select>
             </div>
           </div>
-        </div>
-      )}
-
+        </ModalBody>
+        <ModalFooter>
+          <button onClick={() => { setShowLinkModal(false); setSelectedTaskId(""); }}
+            className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 font-medium">Отмена</button>
+          <button onClick={handleAddDependency} disabled={!selectedTaskId}
+            className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed">Добавить</button>
+        </ModalFooter>
+      </Modal>
 
       {/* Upload Attachment Modal */}
-      {showAttachmentModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">Добавить вложение</h2>
-              <button onClick={() => setShowAttachmentModal(false)} className="p-1 hover:bg-slate-100 rounded-lg"><X size={20} /></button>
-            </div>
-            <div className="mb-4">
-              <div className="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center hover:border-blue-400 transition-colors cursor-pointer"
-                onClick={() => fileInputRef.current?.click()}
-                onDragOver={e => e.preventDefault()}
-                onDrop={e => { e.preventDefault(); const file = e.dataTransfer.files[0]; if (file) handleFileUpload(file); }}>
-                <Upload size={32} className="mx-auto mb-2 text-slate-400" />
-                <p className="text-sm text-slate-600">{uploadingFile ? "Загрузка..." : "Нажмите или перетащите файл сюда"}</p>
-                <p className="text-xs text-slate-400 mt-1">Максимальный размер: 10 МБ</p>
-              </div>
-              <input ref={fileInputRef} type="file" className="hidden" onChange={e => { const file = e.target.files?.[0]; if (file) handleFileUpload(file); }} />
-            </div>
-            <button onClick={() => setShowAttachmentModal(false)} className="w-full px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 font-medium">Закрыть</button>
+      <Modal open={showAttachmentModal} onOpenChange={setShowAttachmentModal} size="md">
+        <ModalHeader>
+          <ModalTitle>Добавить вложение</ModalTitle>
+        </ModalHeader>
+        <ModalBody>
+          <div className="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center hover:border-blue-400 transition-colors cursor-pointer"
+            onClick={() => fileInputRef.current?.click()}
+            onDragOver={e => e.preventDefault()}
+            onDrop={e => { e.preventDefault(); const file = e.dataTransfer.files[0]; if (file) handleFileUpload(file); }}>
+            <Upload size={32} className="mx-auto mb-2 text-slate-400" />
+            <p className="text-sm text-slate-600">{uploadingFile ? "Загрузка..." : "Нажмите или перетащите файл сюда"}</p>
+            <p className="text-xs text-slate-400 mt-1">Максимальный размер: 10 МБ</p>
           </div>
-        </div>
-      )}
+          <input ref={fileInputRef} type="file" className="hidden" onChange={e => { const file = e.target.files?.[0]; if (file) handleFileUpload(file); }} />
+        </ModalBody>
+        <ModalFooter>
+          <button onClick={() => setShowAttachmentModal(false)} className="w-full px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 font-medium">Закрыть</button>
+        </ModalFooter>
+      </Modal>
 
     </div>
   );

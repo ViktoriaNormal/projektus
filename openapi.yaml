@@ -76,7 +76,13 @@ paths:
   /auth/register:
     post:
       tags: [Auth]
-      summary: Register a new user
+      summary: Register a new user (закрытая регистрация)
+      description: |
+        Публичная регистрация по умолчанию отключена. Эндпоинт возвращает
+        `403 REGISTRATION_DISABLED` во всех окружениях, кроме тех, где явно
+        установлено `ALLOW_PUBLIC_REGISTRATION=true` (только для отладочных
+        целей). Учётные записи пользователей создаются администратором через
+        `POST /admin/users`.
       security: []
       requestBody:
         required: true
@@ -86,13 +92,19 @@ paths:
               $ref: '#/components/schemas/RegisterRequest'
       responses:
         '200':
-          description: Registered successfully
+          description: Registered successfully (только при ALLOW_PUBLIC_REGISTRATION=true)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/SuccessResponse_AuthResponse'
         '400':
           $ref: '#/components/responses/ValidationError'
+        '403':
+          description: Самостоятельная регистрация отключена (REGISTRATION_DISABLED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /auth/login:
     post:
@@ -418,6 +430,12 @@ paths:
     get:
       tags: [Notifications]
       summary: Get notification settings
+      description: |
+        Возвращает настройки уведомлений пользователя для всех известных
+        типов событий. При создании учётной записи (через `/admin/users`
+        или при первичной инициализации первого администратора) настройки
+        создаются автоматически со значениями `in_system=true`,
+        `in_email=false` — список всегда непустой.
       responses:
         '200':
           description: Notification settings
@@ -662,7 +680,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [active, archived, paused]
+            enum: [active, archived]
         - name: project_type
           in: query
           schema:
@@ -4414,7 +4432,7 @@ components:
         description: { type: string }
         project_type: { type: string, enum: [scrum, kanban] }
         owner_id: { type: string, format: uuid }
-        status: { type: string, enum: [active, archived, paused] }
+        status: { type: string, enum: [active, archived] }
         sprint_duration_weeks: { type: integer, enum: [1, 2, 3, 4], description: Длительность спринта в неделях (только Scrum) }
         incomplete_tasks_action: { type: string, enum: [backlog, next_sprint], default: backlog, description: "Действие с незавершёнными задачами при завершении спринта" }
         created_at: { type: string, format: date-time }
@@ -4442,7 +4460,7 @@ components:
       properties:
         name: { type: string }
         description: { type: string, nullable: true }
-        status: { type: string, enum: [active, archived, paused] }
+        status: { type: string, enum: [active, archived] }
         owner_id: { type: string, format: uuid }
         sprint_duration_weeks: { type: integer, enum: [1, 2, 3, 4] }
         incomplete_tasks_action: { type: string, enum: [backlog, next_sprint], description: "Действие с незавершёнными задачами при завершении спринта" }
@@ -5314,16 +5332,18 @@ components:
 
     AdminCreateUserRequest:
       type: object
-      required: [username, email, full_name, password]
+      required: [username, email, full_name, position, password, role_ids]
       properties:
         username: { type: string, minLength: 3, maxLength: 50 }
         email: { type: string, format: email }
         full_name: { type: string }
-        position: { type: string, nullable: true }
+        position: { type: string, minLength: 1, description: "Должность сотрудника — обязательное поле" }
         password: { type: string, minLength: 6 }
         is_active: { type: boolean }
         role_ids:
           type: array
+          minItems: 1
+          description: "Идентификаторы системных ролей — минимум одна обязательна"
           items: { type: string, format: uuid }
         on_vacation: { type: boolean }
         is_sick: { type: boolean }
@@ -5332,14 +5352,24 @@ components:
 
     AdminUpdateUserRequest:
       type: object
+      description: |
+        Все поля необязательные (частичное обновление). Однако если клиент
+        явно передаёт `position` или `role_ids`, значения должны быть
+        непустыми — сбросить должность в `null`/`""` или очистить список
+        ролей нельзя (вернётся `400 VALIDATION_ERROR`).
       properties:
         username: { type: string, minLength: 3, maxLength: 50 }
         email: { type: string, format: email }
         full_name: { type: string }
-        position: { type: string, nullable: true }
+        position:
+          type: string
+          minLength: 1
+          description: "Должность сотрудника. Если передаётся — должна быть непустой."
         is_active: { type: boolean }
         role_ids:
           type: array
+          minItems: 1
+          description: "Идентификаторы системных ролей. Если передаются — минимум одна."
           items: { type: string, format: uuid }
         on_vacation: { type: boolean }
         is_sick: { type: boolean }

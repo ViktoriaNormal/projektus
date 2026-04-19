@@ -1,8 +1,11 @@
 import { X, Calendar as CalendarIcon, Clock, MapPin, Users, Save, Search, Plus, UserPlus, Loader2, Crown } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
-import { useBodyScrollLock } from "../../hooks/useBodyScrollLock";
 import { toast } from "sonner";
 import { UserAvatar } from "../UserAvatar";
+import { Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle } from "../ui/Modal";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { Select, SelectOption } from "../ui/Select";
+import { toastError } from "../../lib/errors";
 import { searchUsers, getUser, type UserProfileResponse } from "../../api/users";
 import { useAuth } from "../../contexts/AuthContext";
 import type { MeetingDetailsResponse, CreateMeetingData, UpdateMeetingData } from "../../api/meetings";
@@ -46,7 +49,6 @@ function plusOneHour(dateTimeLocal: string): string {
 }
 
 export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCancel, mode, defaultStartDate }: MeetingModalProps) {
-  useBodyScrollLock(isOpen);
   const { user: authUser } = useAuth();
   const organizerId = meeting?.organizerId || authUser?.id || null;
   const isOrganizer = mode === "create" || meeting?.organizerId === authUser?.id;
@@ -228,7 +230,7 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
       }
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Не удалось сохранить встречу");
+      toastError(err, "Не удалось сохранить встречу");
     } finally {
       setSaving(false);
     }
@@ -243,7 +245,7 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
         setShowDeleteConfirm(false);
         onClose();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Не удалось отменить встречу");
+        toastError(err, "Не удалось отменить встречу");
         setShowDeleteConfirm(false);
       } finally {
         setSaving(false);
@@ -329,21 +331,17 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
   const meetingTypes = getMeetingTypes();
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-2xl font-bold">
-            {mode === "create" ? "Создать встречу" : "Редактировать встречу"}
-          </h2>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-          >
-            <X size={24} />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
+    <Modal
+      open={isOpen}
+      onOpenChange={(next) => { if (!next) onClose(); }}
+      size="3xl"
+    >
+      <form onSubmit={handleSubmit} className="contents">
+        <ModalHeader>
+          <ModalTitle>{mode === "create" ? "Создать встречу" : "Редактировать встречу"}</ModalTitle>
+        </ModalHeader>
+        <ModalBody>
+          <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium mb-2 flex items-center gap-2">
               <CalendarIcon size={16} />
@@ -374,10 +372,10 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
 
           <div>
             <label className="block text-sm font-medium mb-2">Проект</label>
-            <select
+            <Select
               value={selectedProject || ""}
-              onChange={(e) => {
-                const newProjectId = e.target.value || null;
+              onValueChange={(val) => {
+                const newProjectId = val || null;
                 const prevType = selectedProjectData?.projectType ?? null;
                 const newType = (newProjectId ? realProjects.find((p) => String(p.id) === newProjectId)?.projectType : null) ?? null;
                 setSelectedProject(newProjectId);
@@ -386,37 +384,36 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
                 }
               }}
               disabled={readOnly}
-              className={`w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${readOnly ? "bg-slate-50 text-slate-500 cursor-not-allowed" : ""}`}
+              placeholder="Без привязки к проекту"
             >
-              <option value="">Без привязки к проекту</option>
+              <SelectOption value="">Без привязки к проекту</SelectOption>
               {realProjects.filter((p) => p.status === "active").map((project) => (
-                <option key={project.id} value={project.id}>
+                <SelectOption key={project.id} value={project.id}>
                   {project.key} — {project.name} ({project.projectType === "scrum" ? "Scrum" : "Kanban"})
-                </option>
+                </SelectOption>
               ))}
-            </select>
+            </Select>
           </div>
 
           <div>
             <label className="block text-sm font-medium mb-2">Тип встречи <span className="text-red-500">*</span></label>
-            <select
+            <Select
               value={selectedType}
-              onChange={(e) => setSelectedType(e.target.value)}
+              onValueChange={setSelectedType}
               disabled={readOnly}
-              className={`w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${readOnly ? "bg-slate-50 text-slate-500 cursor-not-allowed" : ""}`}
-              required
+              placeholder="Выберите тип встречи"
             >
-              <option value="">Выберите тип встречи</option>
               {meetingTypes.map((group) => (
-                <optgroup key={group.group} label={group.group}>
+                <div key={group.group}>
+                  <div className="px-3 py-1 text-xs font-semibold text-slate-500 uppercase tracking-wider">{group.group}</div>
                   {group.options.map((option) => (
-                    <option key={option.value} value={option.value}>
+                    <SelectOption key={option.value} value={option.value}>
                       {option.label}
-                    </option>
+                    </SelectOption>
                   ))}
-                </optgroup>
+                </div>
               ))}
-            </select>
+            </Select>
             {selectedProject && (
               <p className="text-xs text-slate-500 mt-1">
                 Типы встреч отфильтрованы согласно методологии проекта
@@ -424,7 +421,7 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-2 flex items-center gap-2">
                 <Clock size={16} />
@@ -607,82 +604,65 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
             )}
           </div>
 
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
-            {mode === "edit" && meeting?.id && meeting.status !== "cancelled" && meeting.organizerId === authUser?.id && (
-              <button
-                type="button"
-                onClick={() => setShowDeleteConfirm(true)}
-                disabled={saving}
-                className="mr-auto px-4 h-11 bg-red-100 text-red-700 hover:bg-red-200 rounded-lg transition-colors font-medium flex items-center gap-2 disabled:opacity-60 text-sm"
-              >
-                <X size={16} />
-                Отменить встречу
-              </button>
+            {mode === "create" && (
+              <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-900">
+                Все участники автоматически получат уведомление о новой встрече
+              </div>
             )}
+            {mode === "edit" && (
+              <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-900">
+                При изменении параметров встречи все участники получат уведомление
+              </div>
+            )}
+          </div>
+        </ModalBody>
+        <ModalFooter>
+          {mode === "edit" && meeting?.id && meeting.status !== "cancelled" && meeting.organizerId === authUser?.id && (
             <button
               type="button"
-              onClick={onClose}
-              className="px-8 h-11 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium text-sm"
+              onClick={() => setShowDeleteConfirm(true)}
+              disabled={saving}
+              className="mr-auto px-4 h-11 bg-red-100 text-red-700 hover:bg-red-200 rounded-lg transition-colors font-medium flex items-center gap-2 disabled:opacity-60 text-sm"
             >
-              Отмена
+              <X size={16} />
+              Отменить встречу
             </button>
-            {isOrganizer && (
-              <button
-                type="submit"
-                disabled={saving}
-                className="px-5 h-11 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md font-medium flex items-center gap-2 disabled:opacity-60 whitespace-nowrap"
-              >
-                {saving ? (
-                  <Loader2 size={18} className="animate-spin" />
-                ) : (
-                  <Save size={18} />
-                )}
-                {mode === "create" ? "Создать встречу" : "Сохранить изменения"}
-              </button>
-            )}
-          </div>
-
-          {mode === "create" && (
-            <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-900">
-              Все участники автоматически получат уведомление о новой встрече
-            </div>
           )}
-          {mode === "edit" && (
-            <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-900">
-              При изменении параметров встречи все участники получат уведомление
-            </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-8 h-11 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium text-sm"
+          >
+            Отмена
+          </button>
+          {isOrganizer && (
+            <button
+              type="submit"
+              disabled={saving}
+              className="px-5 h-11 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md font-medium flex items-center gap-2 disabled:opacity-60 whitespace-nowrap"
+            >
+              {saving ? (
+                <Loader2 size={18} className="animate-spin" />
+              ) : (
+                <Save size={18} />
+              )}
+              {mode === "create" ? "Создать встречу" : "Сохранить изменения"}
+            </button>
           )}
-        </form>
-      </div>
+        </ModalFooter>
+      </form>
 
       {/* Cancel Confirmation */}
-      {showDeleteConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full">
-            <h2 className="text-xl font-bold mb-2">Отменить встречу</h2>
-            <p className="text-slate-600 mb-6">
-              Вы уверены, что хотите отменить встречу <strong>"{name}"</strong>? Все участники получат уведомление об отмене.
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowDeleteConfirm(false)}
-                disabled={saving}
-                className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium"
-              >
-                Назад
-              </button>
-              <button
-                onClick={handleCancel}
-                disabled={saving}
-                className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium flex items-center justify-center gap-2 disabled:opacity-60"
-              >
-                {saving ? <Loader2 size={18} className="animate-spin" /> : <X size={18} />}
-                {saving ? "Отмена..." : "Отменить"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        onOpenChange={setShowDeleteConfirm}
+        title="Отменить встречу"
+        description={`Вы уверены, что хотите отменить встречу «${name}»? Все участники получат уведомление об отмене.`}
+        variant="danger"
+        confirmLabel="Отменить"
+        cancelLabel="Назад"
+        onConfirm={handleCancel}
+      />
+    </Modal>
   );
 }

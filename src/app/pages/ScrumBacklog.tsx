@@ -1,7 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
-import { Plus, Play, CheckCircle2, Target, Calendar, Edit, Trash2, X, AlertCircle, ChevronDown, Check } from "lucide-react";
+import { Plus, Play, CheckCircle2, Target, Calendar, AlarmClock, Edit, Trash2, X, AlertCircle, ChevronDown, Check, User } from "lucide-react";
+import { Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle } from "../components/ui/Modal";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
+import { Select, SelectOption } from "../components/ui/Select";
+import { formatDate } from "../lib/format";
+import { toastError } from "../lib/errors";
 import { UserAvatar } from "../components/UserAvatar";
+import { BacklogTaskCard } from "../components/scrum-backlog/BacklogTaskCard";
+import { CompletedSprintRow } from "../components/scrum-backlog/CompletedSprintRow";
 import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 import {
@@ -68,7 +74,6 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
   const [showSprintModal, setShowSprintModal] = useState(false);
   const [showBoardPicker, setShowBoardPicker] = useState(false);
   const [deleteSprintTarget, setDeleteSprintTarget] = useState<string | null>(null);
-  useBodyScrollLock(showSprintModal || showBoardPicker || !!deleteSprintTarget);
   const [selectedSprint, setSelectedSprint] = useState<SprintResponse | null>(null);
   const [draggedTask, setDraggedTask] = useState<TaskResponse | null>(null);
   const [dragSource, setDragSource] = useState<"backlog" | string>("backlog"); // "backlog" or sprintId
@@ -92,7 +97,7 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
     try {
       await updateProject(projectId, { incompleteTasksAction: value });
     } catch (e: any) {
-      toast.error(e.message || "Ошибка сохранения настройки");
+      toastError(e, "Ошибка сохранения настройки");
       setProject(prev => prev ? { ...prev, incompleteTasksAction: incompleteTasksAction } : prev);
     }
   };
@@ -164,7 +169,7 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
     try {
       await updateProject(projectId, { sprintDurationWeeks: weeks });
       setProject(prev => prev ? { ...prev, sprintDurationWeeks: weeks } : prev);
-    } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    } catch (e: any) { toastError(e, "Ошибка"); }
   };
 
   const commitDurationInput = useCallback(() => {
@@ -226,7 +231,7 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
       const sEnd = new Date(s.endDate);
       // Overlap: newStart <= sEnd AND newEnd >= sStart (даты не могут совпадать)
       if (newStart <= sEnd && newEnd >= sStart) {
-        toast.error(`Даты пересекаются со спринтом «${s.name}» (${sStart.toLocaleDateString("ru-RU")} – ${sEnd.toLocaleDateString("ru-RU")})`);
+        toast.error(`Даты пересекаются со спринтом «${s.name}» (${formatDate(sStart, "dmy")} – ${formatDate(sEnd, "dmy")})`);
         return;
       }
     }
@@ -250,7 +255,7 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
       setShowSprintModal(false);
       refreshData();
     } catch (e: any) {
-      toast.error(e.message || "Ошибка сохранения спринта");
+      toastError(e, "Ошибка сохранения спринта");
     }
   };
 
@@ -264,7 +269,7 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
       await deleteSprintApi(deleteSprintTarget);
       refreshData();
     } catch (e: any) {
-      toast.error(e.message || "Ошибка удаления спринта");
+      toastError(e, "Ошибка удаления спринта");
     } finally {
       setDeleteSprintTarget(null);
     }
@@ -315,7 +320,7 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
       await startSprint(sprintId);
       refreshData();
     } catch (e: any) {
-      toast.error(e.message || "Ошибка запуска спринта");
+      toastError(e, "Ошибка запуска спринта");
       refreshData();
     }
   };
@@ -342,7 +347,7 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
       toast.success(`Спринт${sprintName ? ` «${sprintName}»` : ""} завершён. Завершённые задачи спринта можно просмотреть в разделе «Завершённые спринты» внизу страницы.`, { duration: 6000 });
       refreshData();
     } catch (e: any) {
-      toast.error(e.message || "Ошибка завершения спринта");
+      toastError(e, "Ошибка завершения спринта");
       refreshData();
     }
   };
@@ -455,7 +460,7 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
     try {
       await moveTasksToSprint(projectId, { sprintId, taskIds: [task.id] });
     } catch (e: any) {
-      toast.error(e.message || "Ошибка перемещения задачи");
+      toastError(e, "Ошибка перемещения задачи");
       loadData(); // rollback
     }
   };
@@ -483,51 +488,25 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
     try {
       await addTaskToBacklog(projectId, task.id);
     } catch (e: any) {
-      toast.error(e.message || "Ошибка перемещения задачи в бэклог");
+      toastError(e, "Ошибка перемещения задачи в бэклог");
       loadData(); // rollback
     }
   };
 
   // ── Render task card ───────────────────────────────────────
 
-  const renderTask = (task: TaskResponse, source: "backlog" | string, isDraggable: boolean = true) => {
-    isDraggable = isDraggable && canEdit;
-    const executor = task.executorUserId ? userCache.get(task.executorUserId) : null;
-    return (
-      <div
-        key={task.id}
-        draggable={isDraggable}
-        onDragStart={isDraggable ? (e) => handleDragStart(e, task, source) : undefined}
-        onDragEnd={isDraggable ? handleDragEnd : undefined}
-        className={`flex items-center gap-3 p-3 bg-white border border-slate-200 rounded-lg hover:border-blue-300 transition-colors group ${
-          isDraggable ? "cursor-grab" : ""
-        }`}
-      >
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <Link to={`/tasks/${task.id}?returnUrl=${returnUrl}`} className="text-xs font-mono text-slate-500 font-semibold hover:text-blue-600">
-              {task.key}
-            </Link>
-            {task.priority && (
-              <span className="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">{task.priority}</span>
-            )}
-          </div>
-          <Link to={`/tasks/${task.id}?returnUrl=${returnUrl}`} className="block">
-            <p className="font-medium hover:text-blue-600 truncate">{task.name}</p>
-          </Link>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {executor ? (
-            <UserAvatar user={toAvatarUser(executor)} size="sm" />
-          ) : (
-            <div className="w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center">
-              <span className="text-xs text-slate-400">?</span>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
+  const renderTask = (task: TaskResponse, source: "backlog" | string, isDraggable: boolean = true) => (
+    <BacklogTaskCard
+      key={task.id}
+      task={task}
+      source={source}
+      draggable={isDraggable && canEdit}
+      returnUrl={returnUrl}
+      userCache={userCache}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+    />
+  );
 
   // ── Main Render ────────────────────────────────────────────
 
@@ -622,11 +601,16 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-slate-700 whitespace-nowrap">Незавершённые задачи:</span>
         </div>
-        <select value={incompleteTasksAction} onChange={e => handleSetIncompleteTasksAction(e.target.value as "backlog" | "next_sprint")}
-          className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white hover:border-blue-400 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[220px]">
-          <option value="backlog">Вернуть в бэклог продукта</option>
-          <option value="next_sprint">Перенести в следующий спринт</option>
-        </select>
+        <div className="min-w-[220px]">
+          <Select
+            value={incompleteTasksAction}
+            onValueChange={(v) => handleSetIncompleteTasksAction(v as "backlog" | "next_sprint")}
+            ariaLabel="Действие с незавершёнными задачами"
+          >
+            <SelectOption value="backlog">Вернуть в бэклог продукта</SelectOption>
+            <SelectOption value="next_sprint">Перенести в следующий спринт</SelectOption>
+          </Select>
+        </div>
         <span className="text-xs text-slate-500">Куда переносить незавершённые задачи спринта при его завершении</span>
       </div>
 
@@ -668,14 +652,14 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
                           <span className="text-xs font-semibold text-purple-700 uppercase tracking-wide">{board.name}</span>
                           <span className="text-xs text-slate-400">({bTasks.length})</span>
                         </div>
-                        <div className="space-y-2">
+                        <div className="grid grid-cols-2 gap-2 items-start">
                           {bTasks.map(task => renderTask(task, "backlog"))}
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-2 items-start">
                     {backlogTasks.map(task => renderTask(task, "backlog"))}
                   </div>
                 )
@@ -743,8 +727,7 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
                     <div className="flex items-center gap-1">
                       <Calendar size={12} />
                       <span>
-                        {new Date(sprint.startDate).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })} –{" "}
-                        {new Date(sprint.endDate).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })}
+                        {formatDate(sprint.startDate, "monthDay")} – {formatDate(sprint.endDate, "monthDay")}
                       </span>
                     </div>
                     <div className="text-xs text-slate-500">{tasks.length} задач</div>
@@ -779,14 +762,14 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
                               <span className="text-xs font-semibold text-blue-700 uppercase tracking-wide">{board.name}</span>
                               <span className="text-xs text-slate-400">({bTasks.length})</span>
                             </div>
-                            <div className="space-y-2">
+                            <div className="grid grid-cols-2 gap-2 items-start">
                               {bTasks.map(task => renderTask(task, sprint.id))}
                             </div>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <div className="space-y-2">
+                      <div className="grid grid-cols-2 gap-2 items-start">
                         {tasks.map(task => renderTask(task, sprint.id))}
                       </div>
                     )
@@ -808,166 +791,106 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
         <div className="border-t border-slate-200 pt-6">
           <h3 className="text-lg font-bold mb-4">Завершённые спринты</h3>
           <div className="space-y-3">
-            {completedSprints.map(sprint => {
-              const isExpanded = expandedCompletedSprints.has(sprint.id);
-              const tasks = completedSprintTasks.get(sprint.id) ?? [];
-              return (
-                <div key={sprint.id} className="bg-slate-50 border border-slate-200 rounded-lg overflow-hidden">
-                  <button
-                    onClick={() => toggleCompletedSprint(sprint.id)}
-                    className="w-full flex items-center justify-between p-4 hover:bg-slate-100 transition-colors text-left"
-                  >
-                    <div>
-                      <h4 className="font-semibold">{sprint.name}</h4>
-                      <p className="text-sm text-slate-600">
-                        {new Date(sprint.startDate).toLocaleDateString("ru-RU")} – {new Date(sprint.endDate).toLocaleDateString("ru-RU")}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      {sprint.goal && <p className="text-sm text-slate-500 max-w-sm truncate">{sprint.goal}</p>}
-                      <ChevronDown size={18} className={`text-slate-400 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
-                    </div>
-                  </button>
-                  {isExpanded && (
-                    <div className="border-t border-slate-200 p-4">
-                      {tasks.length > 0 ? (
-                        boards.length > 1 ? (
-                          <div className="space-y-4">
-                            {groupTasksByBoard(tasks, boards).map(({ board, tasks: bTasks }) => (
-                              <div key={board.id}>
-                                <div className="flex items-center gap-2 mb-2 px-1">
-                                  <div className="w-2 h-2 rounded-full bg-slate-400" />
-                                  <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{board.name}</span>
-                                  <span className="text-xs text-slate-400">({bTasks.length})</span>
-                                </div>
-                                <div className="space-y-2">
-                                  {bTasks.map(task => renderTask(task, sprint.id, false))}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="space-y-2">
-                            {tasks.map(task => renderTask(task, sprint.id, false))}
-                          </div>
-                        )
-                      ) : (
-                        <p className="text-sm text-slate-400 text-center py-4">Нет задач в этом спринте</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {completedSprints.map(sprint => (
+              <CompletedSprintRow
+                key={sprint.id}
+                sprint={sprint}
+                tasks={completedSprintTasks.get(sprint.id) ?? []}
+                boards={boards}
+                isExpanded={expandedCompletedSprints.has(sprint.id)}
+                onToggle={() => toggleCompletedSprint(sprint.id)}
+                renderTask={renderTask}
+                groupTasksByBoard={groupTasksByBoard}
+              />
+            ))}
           </div>
         </div>
       )}
 
       {/* Sprint Modal */}
-      {showSprintModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">{selectedSprint ? "Редактировать спринт" : "Создать спринт"}</h2>
-              <button onClick={() => { setShowSprintModal(false); setSelectedSprint(null); }} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
-                <X size={20} />
-              </button>
+      <Modal
+        open={showSprintModal}
+        onOpenChange={(next) => { setShowSprintModal(next); if (!next) setSelectedSprint(null); }}
+        size="md"
+      >
+        <ModalHeader>
+          <ModalTitle>{selectedSprint ? "Редактировать спринт" : "Создать спринт"}</ModalTitle>
+        </ModalHeader>
+        <ModalBody>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-2">Название спринта *</label>
+              <input type="text" value={sprintName} onChange={e => setSprintName(e.target.value)}
+                className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Спринт 1" />
             </div>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Название спринта *</label>
-                <input type="text" value={sprintName} onChange={e => setSprintName(e.target.value)}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Спринт 1" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">Цель спринта</label>
-                <textarea value={sprintGoal} onChange={e => setSprintGoal(e.target.value)}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  rows={3} placeholder="Основная цель спринта..." />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">Дата начала *</label>
-                <input type="date" value={sprintStartDate} onChange={e => setSprintStartDate(e.target.value)}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div className="px-4 py-3 bg-slate-50 rounded-lg text-sm text-slate-600">
-                Длительность: <span className="font-semibold">{projectDuration} нед.</span>
-                <span className="text-xs text-slate-400 ml-2">(настройка на уровне проекта)</span>
-              </div>
-              <div className="flex gap-3 pt-4">
-                <button onClick={() => { setShowSprintModal(false); setSelectedSprint(null); }}
-                  className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium">
-                  Отмена
-                </button>
-                <button onClick={handleSaveSprint} disabled={!sprintName || !sprintStartDate}
-                  className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed">
-                  {selectedSprint ? "Сохранить" : "Создать"}
-                </button>
-              </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">Цель спринта</label>
+              <textarea value={sprintGoal} onChange={e => setSprintGoal(e.target.value)}
+                className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                rows={3} placeholder="Основная цель спринта..." />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">Дата начала *</label>
+              <input type="date" value={sprintStartDate} onChange={e => setSprintStartDate(e.target.value)}
+                className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div className="px-4 py-3 bg-slate-50 rounded-lg text-sm text-slate-600">
+              Длительность: <span className="font-semibold">{projectDuration} нед.</span>
+              <span className="text-xs text-slate-400 ml-2">(настройка на уровне проекта)</span>
             </div>
           </div>
-        </div>
-      )}
-
+        </ModalBody>
+        <ModalFooter>
+          <button onClick={() => { setShowSprintModal(false); setSelectedSprint(null); }}
+            className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium">
+            Отмена
+          </button>
+          <button onClick={handleSaveSprint} disabled={!sprintName || !sprintStartDate}
+            className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+            {selectedSprint ? "Сохранить" : "Создать"}
+          </button>
+        </ModalFooter>
+      </Modal>
 
       {/* Board Picker Modal */}
-      {showBoardPicker && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">Выберите доску для задачи</h2>
-              <button onClick={() => setShowBoardPicker(false)} className="p-2 hover:bg-slate-100 rounded-lg transition-colors"><X size={20} /></button>
-            </div>
-            <p className="text-sm text-slate-600 mb-4">Параметры задачи будут определены шаблоном выбранной доски</p>
-            <div className="space-y-2">
-              {boards.map(board => (
-                <button key={board.id} onClick={() => {
-                  if (boardPickerTarget === "backlog") {
-                    handleCreateTaskForBoard(board.id);
-                  } else {
-                    handleCreateTaskForBoardAndSprint(board.id, boardPickerTarget);
-                  }
-                }}
-                  className="w-full text-left p-4 border border-slate-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 transition-colors">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">{board.name}</span>
-                    {board.isDefault && <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">по умолчанию</span>}
-                  </div>
-                  {board.description && <p className="text-sm text-slate-500 mt-1">{board.description}</p>}
-                </button>
-              ))}
-            </div>
+      <Modal open={showBoardPicker} onOpenChange={setShowBoardPicker} size="md">
+        <ModalHeader>
+          <ModalTitle>Выберите доску для задачи</ModalTitle>
+        </ModalHeader>
+        <ModalBody>
+          <p className="text-sm text-slate-600 mb-4">Параметры задачи будут определены шаблоном выбранной доски</p>
+          <div className="space-y-2">
+            {boards.map(board => (
+              <button key={board.id} onClick={() => {
+                if (boardPickerTarget === "backlog") {
+                  handleCreateTaskForBoard(board.id);
+                } else {
+                  handleCreateTaskForBoardAndSprint(board.id, boardPickerTarget);
+                }
+              }}
+                className="w-full text-left p-4 border border-slate-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 transition-colors">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">{board.name}</span>
+                  {board.isDefault && <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">по умолчанию</span>}
+                </div>
+                {board.description && <p className="text-sm text-slate-500 mt-1">{board.description}</p>}
+              </button>
+            ))}
           </div>
-        </div>
-      )}
+        </ModalBody>
+      </Modal>
 
       {/* Delete Sprint Confirmation */}
-      {deleteSprintTarget && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-sm w-full">
-            <div className="flex items-start gap-3 mb-4">
-              <Trash2 size={24} className="text-red-600 shrink-0 mt-0.5" />
-              <div>
-                <h2 className="text-lg font-bold text-slate-800">Удалить спринт</h2>
-                <p className="text-sm text-slate-600 mt-1">
-                  Вы уверены, что хотите удалить спринт «{sprints.find(s => s.id === deleteSprintTarget)?.name}»?
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <button onClick={() => setDeleteSprintTarget(null)}
-                className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium">
-                Отмена
-              </button>
-              <button onClick={confirmDeleteSprint}
-                className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium">
-                Удалить
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={!!deleteSprintTarget}
+        onOpenChange={(next) => { if (!next) setDeleteSprintTarget(null); }}
+        title="Удалить спринт"
+        description={deleteSprintTarget ? `Вы уверены, что хотите удалить спринт «${sprints.find(s => s.id === deleteSprintTarget)?.name ?? ""}»?` : ""}
+        variant="danger"
+        confirmLabel="Удалить"
+        onConfirm={confirmDeleteSprint}
+      />
     </div>
   );
 }

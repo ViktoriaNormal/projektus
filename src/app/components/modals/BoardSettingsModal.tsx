@@ -1,5 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useBodyScrollLock } from "../../hooks/useBodyScrollLock";
+import { Modal } from "../ui/Modal";
+import { ResponsiveTabs, type ResponsiveTab } from "../ui/ResponsiveTabs";
+import { Select, SelectOption } from "../ui/Select";
+import { toastError } from "../../lib/errors";
+import { DebouncedInput, DebouncedTextarea, NoteTextarea, WipLimitInput } from "./board-settings/inputs";
 import {
   X,
   Plus,
@@ -85,150 +89,7 @@ function buildColumnSystemTypeLabels(refs: ProjectReferences): Record<string, st
 
 // ── DebouncedInput ─────────────────────────────────────────────
 
-function DebouncedInput({ value, onSave, className, placeholder, required, requiredMessage }: {
-  value: string; onSave: (val: string) => void; className?: string; placeholder?: string; required?: boolean; requiredMessage?: string;
-}) {
-  const [local, setLocal] = useState(value);
-  const [error, setError] = useState("");
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dirtyRef = useRef(false);
-  const localRef = useRef(local);
-  const onSaveRef = useRef(onSave);
-  localRef.current = local;
-  onSaveRef.current = onSave;
-
-  useEffect(() => { if (!dirtyRef.current) setLocal(value); }, [value]);
-
-  function trySave(v: string) {
-    if (required && !v.trim()) { setError(requiredMessage || "Поле не может быть пустым"); return; }
-    setError(""); onSave(v);
-  }
-
-  function handleChange(v: string) {
-    setLocal(v);
-    if (required && v.trim()) setError("");
-    dirtyRef.current = true;
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => { dirtyRef.current = false; trySave(v); }, 1500);
-  }
-
-  useEffect(() => () => {
-    if (timerRef.current) { clearTimeout(timerRef.current); dirtyRef.current = false; if (!required || localRef.current.trim()) onSaveRef.current(localRef.current); }
-  }, []);
-
-  return (
-    <div>
-      <input type="text" value={local} onChange={e => handleChange(e.target.value)} className={`${className} ${error ? "border-red-400 ring-2 ring-red-200" : ""}`} placeholder={placeholder} />
-      {error && (
-        <div className="flex items-center gap-2 mt-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">
-          <AlertCircle size={16} className="shrink-0" />
-          <span>{error}</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── DebouncedTextarea ──────────────────────────────────────────
-
-function DebouncedTextarea({ value, onSave, className, placeholder, rows }: {
-  value: string; onSave: (val: string) => void; className?: string; placeholder?: string; rows?: number;
-}) {
-  const [local, setLocal] = useState(value);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dirtyRef = useRef(false);
-  const localRef = useRef(local);
-  const onSaveRef = useRef(onSave);
-  localRef.current = local;
-  onSaveRef.current = onSave;
-
-  useEffect(() => { if (!dirtyRef.current) setLocal(value); }, [value]);
-
-  function handleChange(v: string) {
-    setLocal(v); dirtyRef.current = true;
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => { dirtyRef.current = false; onSave(v); }, 1500);
-  }
-
-  useEffect(() => () => {
-    if (timerRef.current) { clearTimeout(timerRef.current); dirtyRef.current = false; onSaveRef.current(localRef.current); }
-  }, []);
-
-  return <textarea value={local} onChange={e => handleChange(e.target.value)} className={className} placeholder={placeholder} rows={rows} />;
-}
-
-// ── NoteTextarea ───────────────────────────────────────────────
-
-function NoteTextarea({ value, onSave }: { value: string | null; onSave: (val: string | null) => void }) {
-  const [localValue, setLocalValue] = useState(value ?? "");
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const textareaRef = useCallback((el: HTMLTextAreaElement | null) => {
-    if (el) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; }
-  }, []);
-
-  useEffect(() => { setLocalValue(value ?? ""); }, [value]);
-
-  function handleChange(newVal: string) {
-    setLocalValue(newVal);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => { onSave(newVal || null); }, 600);
-  }
-
-  function handleClear() { setLocalValue(""); if (timerRef.current) clearTimeout(timerRef.current); onSave(null); }
-
-  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
-
-  return (
-    <div className="relative">
-      <textarea ref={textareaRef} value={localValue}
-        onChange={(e) => { handleChange(e.target.value); e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
-        rows={1} className="w-full px-3 py-1.5 pr-8 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none overflow-hidden"
-        placeholder="Правила работы, пояснения для команды..."
-      />
-      {localValue && (
-        <button onClick={handleClear} className="absolute right-2 top-1.5 p-0.5 text-slate-400 hover:text-red-500 rounded transition-colors" title="Очистить заметку">
-          <X size={14} />
-        </button>
-      )}
-    </div>
-  );
-}
-
-// ── WipLimitInput ──────────────────────────────────────────────
-
-function WipLimitInput({ value, onSave }: { value: number | null | undefined; onSave: (val: number | null) => void }) {
-  const [local, setLocal] = useState(value == null ? "" : String(value));
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const localRef = useRef(local);
-  const onSaveRef = useRef(onSave);
-  localRef.current = local;
-  onSaveRef.current = onSave;
-
-  useEffect(() => { setLocal(value == null ? "" : String(value)); }, [value]);
-
-  function handleChange(raw: string) {
-    const cleaned = raw.replace(/[^0-9]/g, "");
-    setLocal(cleaned);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      onSaveRef.current(cleaned === "" ? null : Number(cleaned));
-    }, 600);
-  }
-
-  useEffect(() => () => {
-    if (timerRef.current) { clearTimeout(timerRef.current); onSaveRef.current(localRef.current === "" ? null : Number(localRef.current)); }
-  }, []);
-
-  return (
-    <div>
-      <label className="block text-xs font-medium mb-1">WIP лимит</label>
-      <input type="text" value={local} onChange={e => handleChange(e.target.value)}
-        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-        placeholder="Без лимита"
-      />
-    </div>
-  );
-}
+// Helpers (DebouncedInput, DebouncedTextarea, NoteTextarea, WipLimitInput) extracted to ./board-settings/inputs.tsx
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -248,7 +109,6 @@ interface BoardSettingsModalProps {
 export default function BoardSettingsModal({
   isOpen, onClose, boardId, boardName, boardDescription, projectType, refs, onBoardUpdated,
 }: BoardSettingsModalProps) {
-  useBodyScrollLock(isOpen);
   const [activeTab, setActiveTab] = useState<"params" | "columns" | "swimlanes" | "template">("params");
 
   // Columns
@@ -326,7 +186,7 @@ export default function BoardSettingsModal({
   // ── Board params handlers ───────────────────────────────────
 
   async function saveBoardParams(patch: Partial<{ name: string; description: string | null }>) {
-    try { await updateBoard(boardId, patch); onBoardUpdated(); } catch (e: any) { toast.error(e.message || "Ошибка сохранения"); }
+    try { await updateBoard(boardId, patch); onBoardUpdated(); } catch (e: any) { toastError(e, "Ошибка сохранения"); }
   }
 
   async function handleSetDefault() {
@@ -334,7 +194,7 @@ export default function BoardSettingsModal({
       await updateBoard(boardId, { isDefault: true });
       setCurrentIsDefault(true);
       onBoardUpdated();
-    } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    } catch (e: any) { toastError(e, "Ошибка"); }
   }
 
   // ── Column handlers ─────────────────────────────────────────
@@ -413,7 +273,7 @@ export default function BoardSettingsModal({
       await loadColumns();
     } catch (e: any) {
       if (e.code === "INVALID_COLUMN_ORDER") setColumnError({ colId: columns[afterIndex]?.id || "", message: e.message });
-      else toast.error(e.message || "Ошибка");
+      else toastError(e, "Ошибка");
     }
   }
 
@@ -424,14 +284,14 @@ export default function BoardSettingsModal({
       if (err) { setColumnError({ colId, message: err }); return; }
       setColumnError(null);
     }
-    try { await updateColumn(boardId, colId, { [field]: value }); await loadColumns(); } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    try { await updateColumn(boardId, colId, { [field]: value }); await loadColumns(); } catch (e: any) { toastError(e, "Ошибка"); }
   }
 
   async function removeCol(colId: string) {
     const remaining = columns.filter(c => c.id !== colId);
     const err = validateColumnOrder(remaining);
     if (err) { setColumnError({ colId, message: err }); return; }
-    try { await deleteColumn(boardId, colId); setColumnError(null); await loadColumns(); } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    try { await deleteColumn(boardId, colId); setColumnError(null); await loadColumns(); } catch (e: any) { toastError(e, "Ошибка"); }
   }
 
   async function moveCol(colId: string, dir: "up" | "down") {
@@ -447,7 +307,7 @@ export default function BoardSettingsModal({
     setColumnError(null);
     const orders = newCols.map((c, i) => ({ columnId: c.id, order: i + 1 }));
     setColumns(newCols.map((c, i) => ({ ...c, order: i + 1 })));
-    try { await reorderColumns(boardId, orders); } catch (e: any) { toast.error(e.message || "Не удалось переместить колонку"); await loadColumns(); }
+    try { await reorderColumns(boardId, orders); } catch (e: any) { toastError(e, "Не удалось переместить колонку"); await loadColumns(); }
   }
 
   // ── Swimlane handlers ───────────────────────────────────────
@@ -494,11 +354,11 @@ export default function BoardSettingsModal({
       }
 
       await loadSwimlanes();
-    } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    } catch (e: any) { toastError(e, "Ошибка"); }
   }
 
   async function updateSwim(swId: string, field: string, value: any) {
-    try { await updateSwimlane(boardId, swId, { [field]: value }); await loadSwimlanes(); } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    try { await updateSwimlane(boardId, swId, { [field]: value }); await loadSwimlanes(); } catch (e: any) { toastError(e, "Ошибка"); }
   }
 
   // Sync swimlanes with field options (add missing, remove extras)
@@ -545,8 +405,13 @@ export default function BoardSettingsModal({
   // ── Render ──────────────────────────────────────────────────
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col">
+    <Modal
+      open={isOpen}
+      onOpenChange={(next) => { if (!next) onClose(); }}
+      size="5xl"
+      hideCloseButton
+      className="overflow-hidden"
+    >
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-slate-200 shrink-0">
           <h2 className="text-xl font-bold">Настройки доски</h2>
@@ -554,19 +419,17 @@ export default function BoardSettingsModal({
         </div>
 
         {/* Tabs */}
-        <div className="border-b border-slate-200 shrink-0">
-          <div className="flex gap-1 p-2">
-            {tabs.map((tab) => (
-              <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-                className={`flex-1 px-4 py-3 rounded-lg font-medium transition-all flex items-center justify-center gap-2 text-sm ${
-                  activeTab === tab.key ? "bg-purple-100 text-purple-700" : "text-slate-600 hover:bg-slate-50"
-                }`}
-              >
-                <tab.icon size={18} />
-                {tab.label}
-              </button>
-            ))}
-          </div>
+        <div className="border-b border-slate-200 shrink-0 p-2">
+          <ResponsiveTabs
+            activeId={activeTab}
+            onChange={(id) => setActiveTab(id as typeof activeTab)}
+            variant="scroll"
+            tabs={tabs.map((t) => ({
+              id: t.key,
+              label: (<><t.icon size={18} /> {t.label}</>),
+              textLabel: t.label,
+            })) satisfies ResponsiveTab[]}
+          />
         </div>
 
         {/* Content */}
@@ -631,8 +494,7 @@ export default function BoardSettingsModal({
             />
           )}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -784,15 +646,15 @@ function BoardColumnsTab({
                   </div>
                   <div>
                     <label className="block text-xs font-medium mb-1">Системный тип *</label>
-                    <select value={col.systemType || ""}
-                      onChange={(e) => onUpdate(col.id, "systemType", e.target.value)}
+                    <Select
+                      value={col.systemType || ""}
+                      onValueChange={(v) => onUpdate(col.id, "systemType", v)}
                       disabled={locked}
-                      className={`w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 ${locked ? "bg-slate-100 text-slate-500" : ""}`}
                     >
                       {Object.entries(columnSystemTypeLabels).map(([val, label]) => (
-                        <option key={val} value={val}>{label}</option>
+                        <SelectOption key={val} value={val}>{String(label)}</SelectOption>
                       ))}
-                    </select>
+                    </Select>
                   </div>
                   {!isScrum && col.systemType !== "completed" && (
                     <WipLimitInput value={col.wipLimit} onSave={(val) => onUpdate(col.id, "wipLimit", val)} />
@@ -889,19 +751,21 @@ function BoardSwimlanesTab({
         </p>
         <div>
           <label className="block text-sm font-medium mb-2">Группировать задачи по:</label>
-          <select value={swimlaneGroupBy} onChange={(e) => onSetGroupBy(e.target.value)}
-            className="w-full px-4 py-3 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
+          <Select
+            value={swimlaneGroupBy}
+            onValueChange={onSetGroupBy}
+            ariaLabel="Группировка задач"
           >
-            <option value="">Без дорожек</option>
+            <SelectOption value="">Без дорожек</SelectOption>
             {boardFields
               .filter(f => ["priority", "select", "checkbox", "multiselect", "user", "user_list", "tags"].includes(f.fieldType) && f.fieldType !== "column" && !f.name.toLowerCase().includes("статус"))
               .map(f => (
-                <option key={f.id} value={f.id}>{getFieldDisplayName(f)}</option>
+                <SelectOption key={f.id} value={f.id}>{getFieldDisplayName(f)}</SelectOption>
               ))}
             {!boardFields.some(f => f.fieldType === "tags") && (
-              <option value="__tags__">Теги</option>
+              <SelectOption value="__tags__">Теги</SelectOption>
             )}
-          </select>
+          </Select>
         </div>
 
         {swimlaneGroupBy && (
@@ -1057,7 +921,7 @@ function BoardTaskTemplateTab({
       setCurrentPriorityOptions(newOpts);
       setValueInput(""); await onReload();
       if (priorityField && currentSwimlaneGroupBy === priorityField.id) await onSyncSwimlanes(newOpts);
-    } catch (e: any) { toast.error(e.message || "Не удалось добавить значение"); }
+    } catch (e: any) { toastError(e, "Не удалось добавить значение"); }
   }
 
   async function removeValue(val: string) {
@@ -1069,7 +933,7 @@ function BoardTaskTemplateTab({
       setCurrentPriorityOptions(updated);
       await onReload();
       if (priorityField && currentSwimlaneGroupBy === priorityField.id) await onSyncSwimlanes(updated);
-    } catch (e: any) { toast.error(e.message || "Не удалось удалить значение"); }
+    } catch (e: any) { toastError(e, "Не удалось удалить значение"); }
   }
 
   async function handlePriorityTypeChange(type: string) {
@@ -1078,7 +942,7 @@ function BoardTaskTemplateTab({
       await updateBoard(boardId, { priorityType: type, priorityOptions: defaults });
       setCurrentPriorityType(type);
       setCurrentPriorityOptions(defaults);
-    } catch (e: any) { toast.error(e.message || "Ошибка"); return; }
+    } catch (e: any) { toastError(e, "Ошибка"); return; }
     // Reset swimlanes if they were grouped by the priority field
     if (priorityField && currentSwimlaneGroupBy === priorityField.id) {
       onClearSwimlaneGroupBy();
@@ -1093,7 +957,7 @@ function BoardTaskTemplateTab({
       await updateBoard(boardId, { estimationUnit: unit });
       setCurrentEstimationUnit(unit);
       onBoardUpdated(); await onReload();
-    } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    } catch (e: any) { toastError(e, "Ошибка"); }
   }
 
   async function handleAddCustomField() {
@@ -1109,7 +973,7 @@ function BoardTaskTemplateTab({
       });
       setNewName(""); setNewType("text"); setNewRequired(false); setNewOptions([]); setShowAddForm(false);
       await onReload();
-    } catch (e: any) { toast.error(e.message || "Не удалось добавить параметр"); }
+    } catch (e: any) { toastError(e, "Не удалось добавить параметр"); }
   }
 
   async function removeCustomField(fieldId: string) {
@@ -1121,7 +985,7 @@ function BoardTaskTemplateTab({
       } else {
         await onReload();
       }
-    } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    } catch (e: any) { toastError(e, "Ошибка"); }
   }
 
   async function handleUpdateCustomField(fieldId: string, updates: Partial<{ name: string; isRequired: boolean; options: string[] }>) {
@@ -1136,7 +1000,7 @@ function BoardTaskTemplateTab({
       await updateBoardField(boardId, fieldId, updates);
       await onReload();
       if (updates.options && currentSwimlaneGroupBy === fieldId) await onSyncSwimlanes(updates.options);
-    } catch (e: any) { toast.error(e.message || "Ошибка"); }
+    } catch (e: any) { toastError(e, "Ошибка"); }
   }
 
   const LockedField = ({ name, description, isRequired }: { name: string; description?: string; isRequired?: boolean }) => (
@@ -1295,13 +1159,11 @@ function BoardTaskTemplateTab({
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">Тип параметра *</label>
-                  <select value={newType} onChange={(e) => setNewType(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  >
+                  <Select value={newType} onValueChange={setNewType}>
                     {Object.entries(FIELD_TYPE_LABELS).map(([val, label]) => (
-                      <option key={val} value={val}>{label}</option>
+                      <SelectOption key={val} value={val}>{String(label)}</SelectOption>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               </div>
               {["select", "multiselect"].includes(newType) && (

@@ -23,6 +23,7 @@ import { getMeetings, type MeetingResponse } from "../api/meetings";
 import { apiRequest } from "../api/client";
 import type { ProjectMemberResponse } from "../api/projects";
 import type { UserProfileResponse } from "../api/users";
+import { formatDate } from "../lib/format";
 
 const meetingTypeLabels: Record<string, string> = {
   scrum_planning: "Планирование спринта",
@@ -207,8 +208,7 @@ export default function ProjectOverview({
               <div className="flex items-center gap-1">
                 <Calendar size={14} />
                 <span>
-                  {new Date(activeSprint.startDate).toLocaleDateString("ru-RU")} –{" "}
-                  {new Date(activeSprint.endDate).toLocaleDateString("ru-RU")}
+                  {formatDate(activeSprint.startDate, "dmy")} – {formatDate(activeSprint.endDate, "dmy")}
                 </span>
               </div>
               <div className="flex items-center gap-1">
@@ -295,8 +295,8 @@ export default function ProjectOverview({
       </div>
 
       {/* Заблокированные задачи */}
-      <div className="bg-white rounded-xl p-6 shadow-md border border-slate-100">
-        <div className="flex items-center gap-2 mb-4">
+      <div className="bg-white rounded-xl p-4 md:p-6 shadow-md border border-slate-100">
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
           <Ban size={20} className="text-red-500" />
           <h3 className="text-lg font-bold">Заблокированные задачи</h3>
           {blockedTasks.length > 0 && (
@@ -315,22 +315,22 @@ export default function ProjectOverview({
               return (
                 <div
                   key={task.id}
-                  className="flex items-center gap-3 p-3 bg-red-50 rounded-lg border border-red-200"
+                  className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 p-3 bg-red-50 rounded-lg border border-red-200"
                 >
-                  <Ban size={16} className="text-red-400 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <Ban size={16} className="text-red-400 shrink-0" />
+                    <p className="text-sm font-medium truncate min-w-0">
                       <span className="text-red-600 font-mono mr-1 hover:underline cursor-pointer" onClick={() => navigate(`/tasks/${task.id}?returnUrl=${encodeURIComponent(`/projects/${projectId}?tab=overview`)}`)}>{task.key}</span>
                       {task.name}
                     </p>
                   </div>
                   {executor && (
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-2 min-w-0 sm:shrink-0 sm:max-w-[45%]">
                       <UserAvatar user={toAvatarUser(executor)} size="sm" />
                       <div className="min-w-0">
-                        <p className="text-xs font-medium">{executor.fullName}</p>
+                        <p className="text-xs font-medium truncate">{executor.fullName}</p>
                         {executor.email && (
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1 min-w-0">
                             <span className="text-xs text-slate-500 truncate">{executor.email}</span>
                             <button onClick={() => { navigator.clipboard.writeText(executor.email); toast.success("Email скопирован"); }}
                               className="p-0.5 text-slate-400 hover:text-blue-600 transition-colors shrink-0"><Copy size={10} /></button>
@@ -387,7 +387,7 @@ export default function ProjectOverview({
                       <UserAvatar user={toAvatarUser(executor)} size="sm" />
                     )}
                     <span className="text-xs text-red-600 font-semibold whitespace-nowrap">
-                      {new Date(task.deadline!).toLocaleDateString("ru-RU")}
+                      {formatDate(task.deadline, "dmy")}
                     </span>
                   </div>
                 );

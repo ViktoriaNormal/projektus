@@ -71,6 +71,12 @@ import {
   type TemplateRolePermission,
 } from "@/app/api/admin";
 import { useAuth } from "@/app/contexts/AuthContext";
+import { ScrollableTabs } from "@/app/components/ui/ScrollableTabs";
+import { ResponsiveTabs, type ResponsiveTab } from "@/app/components/ui/ResponsiveTabs";
+import { Select, SelectOption } from "@/app/components/ui/Select";
+import { toastError } from "@/app/lib/errors";
+import { PageSpinner } from "@/app/components/ui/Spinner";
+import { EmptyState } from "@/app/components/ui/EmptyState";
 
 // ── Types (internal, for UI state) ──────────────────────────
 
@@ -100,7 +106,7 @@ export default function ProjectTemplates() {
       const data = await getProjectTemplates();
       setTemplates(data);
     } catch (e: any) {
-      toast.error(e.message || "Не удалось загрузить шаблоны");
+      toastError(e, "Не удалось загрузить шаблоны");
     }
   }, []);
 
@@ -115,7 +121,7 @@ export default function ProjectTemplates() {
         setTemplates(tpls);
         setRefs(references);
       } catch (e: any) {
-        toast.error(e.message || "Не удалось загрузить данные");
+        toastError(e, "Не удалось загрузить данные");
       } finally {
         setLoading(false);
       }
@@ -124,11 +130,7 @@ export default function ProjectTemplates() {
   }, []);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 size={32} className="animate-spin text-purple-600" />
-      </div>
-    );
+    return <PageSpinner tone="text-purple-600" />;
   }
 
   if (editingTemplateId && refs) {
@@ -666,7 +668,7 @@ function TemplateEditor({
         const detail = await getProjectTemplate(templateId);
         setData(detail);
       } catch (e: any) {
-        toast.error(e.message || "Не удалось загрузить шаблон");
+        toastError(e, "Не удалось загрузить шаблон");
       } finally {
         setLoading(false);
       }
@@ -680,7 +682,7 @@ function TemplateEditor({
       const detail = await getProjectTemplate(templateId);
       setData(detail);
     } catch (e: any) {
-      toast.error(e.message || "Не удалось обновить данные");
+      toastError(e, "Не удалось обновить данные");
     }
   }
 
@@ -716,7 +718,7 @@ function TemplateEditor({
       setActiveBoardIndex(idx >= 0 ? idx : detail.boards.length - 1);
       setActiveTab("params");
     } catch (e: any) {
-      toast.error(e.message || "Не удалось добавить доску");
+      toastError(e, "Не удалось добавить доску");
     }
   }
 
@@ -730,7 +732,7 @@ function TemplateEditor({
         setActiveBoardIndex(Math.max(0, activeBoardIndex - 1));
       }
     } catch (e: any) {
-      toast.error(e.message || "Не удалось удалить доску");
+      toastError(e, "Не удалось удалить доску");
     }
   }
 
@@ -740,7 +742,7 @@ function TemplateEditor({
       await updateTemplateBoard(templateId, targetBoard.id, { isDefault: true });
       await reloadTemplate();
     } catch (e: any) {
-      toast.error(e.message || "Не удалось установить доску по умолчанию");
+      toastError(e, "Не удалось установить доску по умолчанию");
     }
   }
 
@@ -755,7 +757,7 @@ function TemplateEditor({
     try {
       await reorderTemplateBoards(templateId, orders);
     } catch (e: any) {
-      toast.error(e.message || "Не удалось изменить порядок досок");
+      toastError(e, "Не удалось изменить порядок досок");
       await reloadTemplate();
     }
   }
@@ -779,7 +781,7 @@ function TemplateEditor({
         await reloadTemplate();
       }
     } catch (e: any) {
-      toast.error(e.message || "Не удалось обновить доску");
+      toastError(e, "Не удалось обновить доску");
     }
   }
 
@@ -846,7 +848,7 @@ function TemplateEditor({
       if (e.code === "INVALID_COLUMN_ORDER") {
         setColumnError({ colId: board.columns[afterIndex]?.id || "", message: e.message });
       } else {
-        toast.error(e.message || "Не удалось добавить колонку");
+        toastError(e, "Не удалось добавить колонку");
       }
     }
   }
@@ -878,7 +880,7 @@ function TemplateEditor({
       if (e.code === "INVALID_COLUMN_ORDER" || e.code === "COLUMN_LOCKED") {
         setColumnError({ colId, message: e.message });
       } else {
-        toast.error(e.message || "Не удалось обновить колонку");
+        toastError(e, "Не удалось обновить колонку");
       }
     }
   }
@@ -898,7 +900,7 @@ function TemplateEditor({
       if (e.code === "INVALID_COLUMN_ORDER" || e.code === "COLUMN_LOCKED") {
         setColumnError({ colId, message: e.message });
       } else {
-        toast.error(e.message || "Не удалось удалить колонку");
+        toastError(e, "Не удалось удалить колонку");
       }
     }
   }
@@ -926,7 +928,7 @@ function TemplateEditor({
     try {
       await reorderTemplateBoardColumns(templateId, board.id, orders);
     } catch (e: any) {
-      toast.error(e.message || "Не удалось переместить колонку");
+      toastError(e, "Не удалось переместить колонку");
       await reloadTemplate();
     }
   }
@@ -983,7 +985,7 @@ function TemplateEditor({
 
       setData(freshData);
     } catch (e: any) {
-      toast.error(e.message || "Не удалось изменить группировку");
+      toastError(e, "Не удалось изменить группировку");
     }
   }
 
@@ -993,7 +995,7 @@ function TemplateEditor({
       await updateTemplateBoardSwimlane(templateId, board.id, swId, { [field]: value });
       await reloadTemplate();
     } catch (e: any) {
-      toast.error(e.message || "Не удалось обновить дорожку");
+      toastError(e, "Не удалось обновить дорожку");
     }
   }
 
@@ -1033,7 +1035,7 @@ function TemplateEditor({
     try {
       await reorderTemplateBoardSwimlanes(templateId, board.id, orders);
     } catch (e: any) {
-      toast.error(e.message || "Не удалось переместить дорожку");
+      toastError(e, "Не удалось переместить дорожку");
       await reloadTemplate();
     }
   }
@@ -1046,7 +1048,7 @@ function TemplateEditor({
       // Update state without full reload to avoid overwriting user input
       setData(prev => prev ? { ...prev, ...patch } : prev);
     } catch (e: any) {
-      toast.error(e.message || "Не удалось сохранить изменения");
+      toastError(e, "Не удалось сохранить изменения");
     }
   }
 
@@ -1125,8 +1127,18 @@ function TemplateEditor({
           </p>
         </div>
         {/* Board tabs */}
-        <div className="border-b border-slate-200 bg-slate-50 px-6">
-          <div className="flex items-center gap-2 overflow-x-auto pb-0 pt-3">
+        <div className="border-b border-slate-200 bg-slate-50 px-6 pt-3 pb-2">
+          <ScrollableTabs
+            trailing={(
+              <button
+                onClick={addBoard}
+                className="px-4 py-2 border border-dashed border-slate-300 rounded-t-lg hover:border-purple-400 hover:text-purple-600 hover:bg-white transition-all flex items-center gap-2 text-slate-600 whitespace-nowrap text-sm shrink-0"
+              >
+                <Plus size={16} />
+                <span className="hidden sm:inline">Добавить доску</span>
+              </button>
+            )}
+          >
             {data.boards.map((b, i) => (
               <DraggableBoardTab
                 key={b.id}
@@ -1139,59 +1151,42 @@ function TemplateEditor({
                 moveBoard={moveBoard}
               />
             ))}
-            <button
-              onClick={addBoard}
-              className="px-4 py-2 border border-dashed border-slate-300 rounded-t-lg hover:border-purple-400 hover:text-purple-600 hover:bg-white transition-all flex items-center gap-2 text-slate-600 whitespace-nowrap text-sm shrink-0"
-            >
-              <Plus size={16} />
-              Добавить доску
-            </button>
-          </div>
+          </ScrollableTabs>
         </div>
 
         {/* Empty state when no boards */}
         {data.boards.length === 0 && (
-          <div className="p-12 text-center">
-            <Columns size={48} className="mx-auto text-slate-400 mb-4" />
-            <p className="text-slate-600 mb-2">Нет досок в шаблоне</p>
-            <p className="text-sm text-slate-500 mb-4">
-              Добавьте первую доску, чтобы настроить колонки, дорожки и параметры задач
-            </p>
-            <button
-              onClick={addBoard}
-              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors inline-flex items-center gap-2"
-            >
-              <Plus size={18} />
-              Добавить первую доску
-            </button>
-          </div>
+          <EmptyState
+            icon={<Columns size={48} />}
+            title="Нет досок в шаблоне"
+            description="Добавьте первую доску, чтобы настроить колонки, дорожки и параметры задач"
+            action={(
+              <button
+                onClick={addBoard}
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors inline-flex items-center gap-2"
+              >
+                <Plus size={18} />
+                Добавить первую доску
+              </button>
+            )}
+          />
         )}
 
         {/* Board settings tabs */}
         {board && (
           <>
-            <div className="border-b border-slate-200">
-              <div className="flex gap-1 p-2">
-                {([
-                  { key: "params" as const, icon: Sliders, label: "Параметры доски" },
-                  { key: "columns" as const, icon: Columns, label: `Колонки (${board.columns.length})` },
-                  { key: "swimlanes" as const, icon: Layers, label: `Дорожки (${board.swimlanes.length})` },
-                  { key: "template" as const, icon: FileText, label: "Шаблон задачи" },
-                ]).map((tab) => (
-                  <button
-                    key={tab.key}
-                    onClick={() => setActiveTab(tab.key)}
-                    className={`flex-1 px-4 py-3 rounded-lg font-medium transition-all flex items-center justify-center gap-2 text-sm ${
-                      activeTab === tab.key
-                        ? "bg-purple-100 text-purple-700"
-                        : "text-slate-600 hover:bg-slate-50"
-                    }`}
-                  >
-                    <tab.icon size={18} />
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
+            <div className="border-b border-slate-200 p-2">
+              <ResponsiveTabs
+                activeId={activeTab}
+                onChange={(id) => setActiveTab(id as typeof activeTab)}
+                variant="scroll"
+                tabs={[
+                  { id: "params", label: (<><Sliders size={18} /> Параметры доски</>), textLabel: "Параметры доски" },
+                  { id: "columns", label: (<><Columns size={18} /> Колонки ({board.columns.length})</>), textLabel: `Колонки (${board.columns.length})` },
+                  { id: "swimlanes", label: (<><Layers size={18} /> Дорожки ({board.swimlanes.length})</>), textLabel: `Дорожки (${board.swimlanes.length})` },
+                  { id: "template", label: (<><FileText size={18} /> Шаблон задачи</>), textLabel: "Шаблон задачи" },
+                ] satisfies ResponsiveTab[]}
+              />
             </div>
 
             <div className="p-6">
@@ -1506,16 +1501,15 @@ function BoardColumnsTab({
                   </div>
                   <div>
                     <label className="block text-xs font-medium mb-1">Системный тип *</label>
-                    <select
+                    <Select
                       value={column.systemType}
-                      onChange={(e) => onUpdate(column.id, "systemType", e.target.value)}
+                      onValueChange={(v) => onUpdate(column.id, "systemType", v)}
                       disabled={locked}
-                      className={`w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 ${locked ? "bg-slate-100 text-slate-500" : ""}`}
                     >
                       {Object.entries(columnSystemTypeLabels).map(([val, label]) => (
-                        <option key={val} value={val}>{label}</option>
+                        <SelectOption key={val} value={val}>{String(label)}</SelectOption>
                       ))}
-                    </select>
+                    </Select>
                   </div>
                   {!isScrum && column.systemType !== "completed" && (
                     <WipLimitInput
@@ -1647,21 +1641,21 @@ function BoardSwimlanesTab({
         </p>
         <div>
           <label className="block text-sm font-medium mb-2">Группировать задачи по:</label>
-          <select
+          <Select
             value={swimlaneGroupBy}
-            onChange={(e) => onSetGroupBy(e.target.value)}
-            className="w-full px-4 py-3 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
+            onValueChange={onSetGroupBy}
+            ariaLabel="Группировка задач"
           >
-            <option value="">Без дорожек</option>
+            <SelectOption value="">Без дорожек</SelectOption>
             {boardFields
               .filter(f => ["priority", "select", "checkbox", "multiselect", "user", "user_list", "tags"].includes(f.fieldType) && f.fieldType !== "column" && !f.name.toLowerCase().includes("статус"))
               .map(f => (
-                <option key={f.id} value={f.id}>{getFieldDisplayName(f)}</option>
+                <SelectOption key={f.id} value={f.id}>{getFieldDisplayName(f)}</SelectOption>
               ))}
             {!boardFields.some(f => f.fieldType === "tags") && (
-              <option value="__tags__">Теги</option>
+              <SelectOption value="__tags__">Теги</SelectOption>
             )}
-          </select>
+          </Select>
         </div>
 
         {swimlaneGroupBy && (
@@ -1831,7 +1825,7 @@ function BoardTaskTemplateTab({
       setShowAddForm(false);
       await onReload();
     } catch (e: any) {
-      toast.error(e.message || "Не удалось добавить параметр");
+      toastError(e, "Не удалось добавить параметр");
     }
   }
 
@@ -1845,7 +1839,7 @@ function BoardTaskTemplateTab({
         await onReload();
       }
     } catch (e: any) {
-      toast.error(e.message || "Не удалось удалить параметр");
+      toastError(e, "Не удалось удалить параметр");
     }
   }
 
@@ -1863,7 +1857,7 @@ function BoardTaskTemplateTab({
       await onReload();
       if (updates.options && board.swimlaneGroupBy === fieldId) await onSyncSwimlanes(updates.options);
     } catch (e: any) {
-      toast.error(e.message || "Не удалось обновить параметр");
+      toastError(e, "Не удалось обновить параметр");
     }
   }
 
@@ -1894,7 +1888,7 @@ function BoardTaskTemplateTab({
       await onReload();
       if (priorityField && board.swimlaneGroupBy === priorityField.id) await onSyncSwimlanes(newOpts);
     } catch (e: any) {
-      toast.error(e.message || "Не удалось добавить значение");
+      toastError(e, "Не удалось добавить значение");
     }
   }
 
@@ -1907,7 +1901,7 @@ function BoardTaskTemplateTab({
       await onReload();
       if (priorityField && board.swimlaneGroupBy === priorityField.id) await onSyncSwimlanes(updated);
     } catch (e: any) {
-      toast.error(e.message || "Не удалось удалить значение");
+      toastError(e, "Не удалось удалить значение");
     }
   }
 
@@ -1916,7 +1910,7 @@ function BoardTaskTemplateTab({
     try {
       await updateTemplateBoard(templateId, board.id, { priorityType: type, priorityOptions: defaults });
     } catch (e: any) {
-      toast.error(e.message || "Не удалось изменить тип приоритизации");
+      toastError(e, "Не удалось изменить тип приоритизации");
       return;
     }
     // If swimlanes were grouped by the priority field, clear them
@@ -1932,7 +1926,7 @@ function BoardTaskTemplateTab({
       await updateTemplateBoard(templateId, board.id, { estimationUnit: unit });
       await onReload();
     } catch (e: any) {
-      toast.error(e.message || "Не удалось изменить единицу оценки");
+      toastError(e, "Не удалось изменить единицу оценки");
     }
   }
 
@@ -2170,15 +2164,14 @@ function BoardTaskTemplateTab({
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">Тип параметра *</label>
-                  <select
+                  <Select
                     value={newType}
-                    onChange={(e) => setNewType(e.target.value as TaskField["type"])}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    onValueChange={(v) => setNewType(v as TaskField["type"])}
                   >
                     {Object.entries(FIELD_TYPE_LABELS).map(([val, label]) => (
-                      <option key={val} value={val}>{label}</option>
+                      <SelectOption key={val} value={val}>{String(label)}</SelectOption>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               </div>
 
@@ -2420,7 +2413,7 @@ function ProjectParamsSection({ templateId, isScrum, refs, params, onReload }: {
       await updateTemplateProjectParam(templateId, paramId, updates);
       await onReload();
     } catch (e: any) {
-      toast.error(e.message || "Не удалось обновить параметр");
+      toastError(e, "Не удалось обновить параметр");
     }
   }
 
@@ -2445,7 +2438,7 @@ function ProjectParamsSection({ templateId, isScrum, refs, params, onReload }: {
       setShowAddForm(false);
       await onReload();
     } catch (e: any) {
-      toast.error(e.message || "Не удалось добавить параметр");
+      toastError(e, "Не удалось добавить параметр");
     }
   }
 
@@ -2454,7 +2447,7 @@ function ProjectParamsSection({ templateId, isScrum, refs, params, onReload }: {
       await deleteTemplateProjectParam(templateId, paramId);
       await onReload();
     } catch (e: any) {
-      toast.error(e.message || "Не удалось удалить параметр");
+      toastError(e, "Не удалось удалить параметр");
     }
   }
 
@@ -2547,15 +2540,11 @@ function ProjectParamsSection({ templateId, isScrum, refs, params, onReload }: {
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1">Тип параметра *</label>
-                    <select
-                      value={newType}
-                      onChange={(e) => setNewType(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    >
+                    <Select value={newType} onValueChange={setNewType}>
                       {Object.entries(FIELD_TYPE_LABELS_LOCAL).map(([val, label]) => (
-                        <option key={val} value={val}>{label}</option>
+                        <SelectOption key={val} value={val}>{String(label)}</SelectOption>
                       ))}
-                    </select>
+                    </Select>
                   </div>
                 </div>
 
@@ -2807,7 +2796,7 @@ function ProjectRolesSection({
       await onReload();
       setExpandedRoleId(newRole.id);
     } catch (e: any) {
-      toast.error(e.message || "Не удалось добавить роль");
+      toastError(e, "Не удалось добавить роль");
     }
   }
 
@@ -2816,7 +2805,7 @@ function ProjectRolesSection({
       await updateTemplateRole(templateId, roleId, patch);
       await onReload();
     } catch (e: any) {
-      toast.error(e.message || "Не удалось обновить роль");
+      toastError(e, "Не удалось обновить роль");
     }
   }
 
@@ -2827,7 +2816,7 @@ function ProjectRolesSection({
       });
       await onReload();
     } catch (e: any) {
-      toast.error(e.message || "Не удалось обновить права");
+      toastError(e, "Не удалось обновить права");
     }
   }
 
@@ -2836,7 +2825,7 @@ function ProjectRolesSection({
       await deleteTemplateRole(templateId, roleId);
       await onReload();
     } catch (e: any) {
-      toast.error(e.message || "Не удалось удалить роль");
+      toastError(e, "Не удалось удалить роль");
     }
   }
 
@@ -2975,12 +2964,12 @@ function ProjectRolesSection({
                           const currentAccess = perm?.access || (role.isAdmin ? "full" : "none");
                           const allAccessLevels = [...accessLevels, ...(accessLevels.find(l => l.key === "none") ? [] : [{ key: "none", name: "Нет доступа", description: "" }])];
                           return (
-                            <div key={areaDef.area} className="flex items-center justify-between p-2.5 bg-slate-50 rounded-lg gap-3">
+                            <div key={areaDef.area} className="flex flex-col md:flex-row md:items-center md:justify-between p-2.5 bg-slate-50 rounded-lg gap-2 md:gap-3">
                               <div className="min-w-0">
                                 <span className="text-sm font-medium">{areaDef.name}</span>
                                 {areaDef.description && <p className="text-xs text-slate-500 mt-0.5">{areaDef.description}</p>}
                               </div>
-                              <div className="flex gap-1 shrink-0">
+                              <div className="flex flex-wrap gap-1 md:shrink-0">
                                 {allAccessLevels.map((level) => (
                                   <button
                                     key={level.key}

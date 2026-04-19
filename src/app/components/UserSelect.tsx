@@ -212,7 +212,7 @@ export function UserMultiSelect({ options, value, onChange, placeholder = "Вы�
                   )}
                 </div>
               </div>
-              <button onClick={() => toggle(u.id)} className="opacity-0 group-hover:opacity-100 p-1 text-red-600 hover:bg-red-50 rounded"><X size={14} /></button>
+              <button onClick={() => toggle(u.id)} className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 p-1 text-red-600 hover:bg-red-50 rounded"><X size={14} /></button>
             </div>
           ))}
         </div>

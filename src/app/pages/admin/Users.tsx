@@ -1,13 +1,17 @@
 import { useState, useEffect } from 'react';
-import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import {
   Plus, Search, Edit, Trash2, UserCheck, UserX, Shield, X, Loader2,
   AlertCircle, CheckCircle2, Save, Eye, EyeOff, Info, ShieldCheck, Check,
 } from 'lucide-react';
+import { Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle } from '../../components/ui/Modal';
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
+import { Select, SelectOption } from '../../components/ui/Select';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { PageSpinner } from '../../components/ui/Spinner';
 import {
   getAdminUsers, createAdminUser, updateAdminUser, deleteAdminUser,
   getSystemRoles,
-  type AdminUser, type SystemRole,
+  type AdminUser, type SystemRole, type UpdateUserPayload,
 } from '../../api/admin';
 import { getPasswordPolicy, type PasswordPolicy } from '../../api/auth';
 import { ApiError } from '../../api/client';
@@ -61,7 +65,6 @@ export default function AdminUsers() {
   // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
   const [deleting, setDeleting] = useState(false);
-  useBodyScrollLock(modalOpen || deleteTarget !== null);
 
   useEffect(() => {
     loadData();
@@ -188,6 +191,14 @@ export default function AdminUsers() {
       setModalError('Введите полное имя');
       return;
     }
+    if (!form.position.trim()) {
+      setModalError('Должность обязательна');
+      return;
+    }
+    if (form.roleIds.length === 0) {
+      setModalError('Нужно выбрать хотя бы одну системную роль');
+      return;
+    }
     if (!editingUser && !form.password) {
       setModalError('Введите пароль');
       return;
@@ -196,21 +207,28 @@ export default function AdminUsers() {
     setSaving(true);
     try {
       if (editingUser) {
-        await updateAdminUser(editingUser.id, {
-          username: form.username.trim(),
-          email: form.email.trim(),
-          fullName: form.fullName.trim(),
-          position: form.position.trim() || null,
-          isActive: form.isActive,
-          roleIds: form.roleIds,
-        });
+        // Частичное обновление: отправляем только изменившиеся поля
+        const payload: UpdateUserPayload = {};
+        if (form.username.trim() !== editingUser.username) payload.username = form.username.trim();
+        if (form.email.trim() !== editingUser.email) payload.email = form.email.trim();
+        if (form.fullName.trim() !== editingUser.fullName) payload.fullName = form.fullName.trim();
+        if (form.position.trim() !== (editingUser.position || '')) payload.position = form.position.trim();
+        if (form.isActive !== editingUser.isActive) payload.isActive = form.isActive;
+        const oldRoleIds = editingUser.roles.map((r) => r.id).slice().sort();
+        const newRoleIds = form.roleIds.slice().sort();
+        const rolesChanged =
+          oldRoleIds.length !== newRoleIds.length ||
+          oldRoleIds.some((id, i) => id !== newRoleIds[i]);
+        if (rolesChanged) payload.roleIds = form.roleIds;
+
+        await updateAdminUser(editingUser.id, payload);
         setMsg({ type: 'success', text: `Пользователь "${form.fullName.trim()}" обновлён` });
       } else {
         await createAdminUser({
           username: form.username.trim(),
           email: form.email.trim(),
           fullName: form.fullName.trim(),
-          position: form.position.trim() || null,
+          position: form.position.trim(),
           password: form.password,
           isActive: form.isActive,
           roleIds: form.roleIds,
@@ -251,11 +269,7 @@ export default function AdminUsers() {
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 size={32} className="animate-spin text-purple-600" />
-      </div>
-    );
+    return <PageSpinner tone="text-purple-600" />;
   }
 
   return (
@@ -313,28 +327,18 @@ export default function AdminUsers() {
             />
           </div>
 
-          <select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-            className="px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-          >
-            <option value="all">Все пользователи</option>
-            <option value="active">Активные</option>
-            <option value="inactive">Заблокированные</option>
-          </select>
+          <Select value={filterStatus} onValueChange={setFilterStatus} ariaLabel="Фильтр по статусу">
+            <SelectOption value="all">Все пользователи</SelectOption>
+            <SelectOption value="active">Активные</SelectOption>
+            <SelectOption value="inactive">Заблокированные</SelectOption>
+          </Select>
 
-          <select
-            value={filterRole}
-            onChange={(e) => setFilterRole(e.target.value)}
-            className="px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-          >
-            <option value="all">Все роли</option>
+          <Select value={filterRole} onValueChange={setFilterRole} ariaLabel="Фильтр по роли">
+            <SelectOption value="all">Все роли</SelectOption>
             {roles.map((role) => (
-              <option key={role.id} value={role.id}>
-                {role.name}
-              </option>
+              <SelectOption key={role.id} value={role.id}>{role.name}</SelectOption>
             ))}
-          </select>
+          </Select>
         </div>
       </div>
 
@@ -377,8 +381,8 @@ export default function AdminUsers() {
         </div>
       </div>
 
-      {/* Users Table */}
-      <div className="bg-white rounded-xl shadow-md border border-slate-100 overflow-hidden">
+      {/* Users Table — desktop */}
+      <div className="hidden md:block bg-white rounded-xl shadow-md border border-slate-100 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-slate-50 border-b border-slate-200">
@@ -483,31 +487,96 @@ export default function AdminUsers() {
         </div>
       </div>
 
+      {/* Users Cards — mobile */}
+      <ul className="md:hidden space-y-3">
+        {filteredUsers.map((user) => (
+          <li
+            key={user.id}
+            className="bg-white rounded-xl shadow-sm border border-slate-100 p-4"
+          >
+            <div className="flex items-start gap-3 mb-3">
+              <UserAvatar
+                user={{
+                  id: user.id,
+                  fullName: user.fullName,
+                  avatarUrl: user.avatarUrl || '',
+                  username: user.username,
+                  email: user.email,
+                  isActive: user.isActive,
+                  role: user.roles[0]?.name || '',
+                }}
+                size="md"
+              />
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold truncate">{user.fullName}</p>
+                <p className="text-sm text-slate-500 truncate">@{user.username}</p>
+                <p className="text-xs text-slate-500 mt-0.5 truncate">{user.email}</p>
+              </div>
+              {canEdit && (
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={() => openEdit(user)}
+                    className="p-2 hover:bg-blue-100 text-blue-600 rounded-lg transition-colors min-h-[44px] min-w-[44px] inline-flex items-center justify-center"
+                    title="Редактировать"
+                  >
+                    <Edit size={18} />
+                  </button>
+                  <button
+                    onClick={() => setDeleteTarget(user)}
+                    className="p-2 hover:bg-red-100 text-red-600 rounded-lg transition-colors min-h-[44px] min-w-[44px] inline-flex items-center justify-center"
+                    title="Удалить"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`px-2.5 py-1 text-xs font-semibold rounded-full ${
+                  user.isActive
+                    ? 'bg-green-100 text-green-700'
+                    : 'bg-red-100 text-red-700'
+                }`}
+              >
+                {user.isActive ? 'Активен' : 'Заблокирован'}
+              </span>
+              {user.roles.map((role) => (
+                <span
+                  key={role.id}
+                  className="px-2.5 py-1 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full inline-flex items-center gap-1"
+                >
+                  <Shield size={12} />
+                  {role.name}
+                </span>
+              ))}
+              {user.roles.length === 0 && (
+                <span className="text-xs text-slate-400 italic">Нет роли</span>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+
       {filteredUsers.length === 0 && (
-        <div className="text-center py-12 bg-white rounded-xl border border-slate-200">
-          <p className="text-slate-500">Пользователи не найдены</p>
+        <div className="bg-white rounded-xl border border-slate-200">
+          <EmptyState
+            icon={<Search size={48} />}
+            title="Пользователи не найдены"
+            description="Попробуйте изменить критерии поиска"
+          />
         </div>
       )}
 
       {/* Create/Edit User Modal */}
-      {modalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-2xl font-bold">
-                {editingUser ? 'Редактировать пользователя' : 'Создать нового пользователя'}
-              </h2>
-              <button
-                onClick={() => setModalOpen(false)}
-                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            <form autoComplete="off" className="space-y-4" onSubmit={(e) => e.preventDefault()}>
-              <input type="text" name="prevent_autofill" className="hidden" autoComplete="off" />
-              <input type="password" name="prevent_autofill_pass" className="hidden" autoComplete="off" />
+      <Modal open={modalOpen} onOpenChange={setModalOpen} size="2xl">
+        <ModalHeader>
+          <ModalTitle>{editingUser ? 'Редактировать пользователя' : 'Создать нового пользователя'}</ModalTitle>
+        </ModalHeader>
+        <ModalBody>
+          <form autoComplete="off" className="space-y-4" onSubmit={(e) => e.preventDefault()}>
+            <input type="text" name="prevent_autofill" className="hidden" autoComplete="off" />
+            <input type="password" name="prevent_autofill_pass" className="hidden" autoComplete="off" />
               {modalError && (
                 <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-xl text-red-800 text-sm">
                   <AlertCircle size={18} className="shrink-0 mt-0.5" />
@@ -560,7 +629,9 @@ export default function AdminUsers() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">Должность</label>
+                <label className="block text-sm font-medium mb-2">
+                  Должность <span className="text-red-500">*</span>
+                </label>
                 <input
                   type="text"
                   value={form.position}
@@ -571,7 +642,9 @@ export default function AdminUsers() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">Роль</label>
+                <label className="block text-sm font-medium mb-2">
+                  Системная роль <span className="text-red-500">*</span>
+                </label>
                 <div className="border border-slate-200 rounded-lg p-3 space-y-1 max-h-48 overflow-y-auto">
                   {roles.map((role) => (
                     <label
@@ -667,74 +740,54 @@ export default function AdminUsers() {
                 </>
               )}
 
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="active"
-                  checked={form.isActive}
-                  onChange={(e) => setForm({ ...form, isActive: e.target.checked })}
-                  className="w-4 h-4 text-purple-600 rounded focus:ring-2 focus:ring-purple-500"
-                />
-                <label htmlFor="active" className="text-sm font-medium">
-                  Активная учётная запись
-                </label>
-              </div>
-
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setModalOpen(false)}
-                  className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium"
-                >
-                  Отмена
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="flex-1 px-4 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all shadow-md font-medium flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  {saving ? (
-                    <Loader2 size={18} className="animate-spin" />
-                  ) : (
-                    <Save size={18} />
-                  )}
-                  {saving ? 'Сохранение...' : editingUser ? 'Сохранить' : 'Создать пользователя'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="active"
+                checked={form.isActive}
+                onChange={(e) => setForm({ ...form, isActive: e.target.checked })}
+                className="w-4 h-4 text-purple-600 rounded focus:ring-2 focus:ring-purple-500"
+              />
+              <label htmlFor="active" className="text-sm font-medium">
+                Активная учётная запись
+              </label>
+            </div>
+          </form>
+        </ModalBody>
+        <ModalFooter>
+          <button
+            type="button"
+            onClick={() => setModalOpen(false)}
+            className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium"
+          >
+            Отмена
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving}
+            className="flex-1 px-4 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all shadow-md font-medium flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {saving ? (
+              <Loader2 size={18} className="animate-spin" />
+            ) : (
+              <Save size={18} />
+            )}
+            {saving ? 'Сохранение...' : editingUser ? 'Сохранить' : 'Создать пользователя'}
+          </button>
+        </ModalFooter>
+      </Modal>
 
       {/* Delete Confirmation */}
-      {deleteTarget && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full">
-            <h2 className="text-xl font-bold mb-2">Удалить пользователя</h2>
-            <p className="text-slate-600 mb-6">
-              Вы уверены, что хотите удалить пользователя <strong>"{deleteTarget.fullName}"</strong>?
-              Это действие нельзя отменить.
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setDeleteTarget(null)}
-                className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors font-medium"
-              >
-                Отмена
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={deleting}
-                className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium flex items-center justify-center gap-2 disabled:opacity-60"
-              >
-                {deleting ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />}
-                {deleting ? 'Удаление...' : 'Удалить'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(next) => { if (!next) setDeleteTarget(null); }}
+        title="Удалить пользователя"
+        description={deleteTarget ? `Вы уверены, что хотите удалить пользователя «${deleteTarget.fullName}»? Это действие нельзя отменить.` : ""}
+        variant="danger"
+        confirmLabel="Удалить"
+        onConfirm={handleDelete}
+      />
     </div>
   );
 }

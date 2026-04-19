@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { useBodyScrollLock } from "../../hooks/useBodyScrollLock";
+import { Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle } from "../ui/Modal";
+import { Select, SelectOption } from "../ui/Select";
+import { toastError } from "../../lib/errors";
 import { Settings, Lock, Plus, Trash2, X, Info, AlertCircle, Copy, Check, Edit, Search, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -22,7 +24,6 @@ const SYSTEM_FIELD_TYPE_LABELS: Record<string, string> = {
 
 const STATUS_OPTIONS = [
   { value: "active", label: "Активный" },
-  { value: "paused", label: "Приостановлен" },
   { value: "archived", label: "Архивирован" },
 ];
 
@@ -443,7 +444,7 @@ function UserPicker({ value, onSave, multiple }: {
                   )}
                 </div>
               </div>
-              <button onClick={() => toggle(u.id)} className="opacity-0 group-hover:opacity-100 p-1 text-red-600 hover:bg-red-50 rounded"><X size={14} /></button>
+              <button onClick={() => toggle(u.id)} className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 p-1 text-red-600 hover:bg-red-50 rounded"><X size={14} /></button>
             </div>
           ))}
         </div>
@@ -503,7 +504,6 @@ export default function ProjectParamsSection({
 
   // Edit modal for custom params
   const [editingParamId, setEditingParamId] = useState<string | null>(null);
-  useBodyScrollLock(!!editingParamId);
   const editingParam = editingParamId ? customParams.find(p => p.id === editingParamId) || null : null;
   const [editParamOptionInput, setEditParamOptionInput] = useState("");
 
@@ -573,7 +573,7 @@ export default function ProjectParamsSection({
       await updateProjectParam(projectId, paramId, { value });
       await onReload();
     } catch (e: any) {
-      toast.error(e.message || "Не удалось сохранить значение");
+      toastError(e, "Не удалось сохранить значение");
     }
   }
 
@@ -588,7 +588,7 @@ export default function ProjectParamsSection({
     try {
       await updateProjectParam(projectId, paramId, updates);
       await onReload();
-    } catch (e: any) { toast.error(e.message || "Не удалось обновить параметр"); }
+    } catch (e: any) { toastError(e, "Не удалось обновить параметр"); }
   }
 
   async function addCustomParam() {
@@ -604,12 +604,12 @@ export default function ProjectParamsSection({
       setNewName(""); setNewType("text"); setNewRequired(false); setNewOptions([]);
       setShowAddForm(false);
       await onReload();
-    } catch (e: any) { toast.error(e.message || "Не удалось добавить параметр"); }
+    } catch (e: any) { toastError(e, "Не удалось добавить параметр"); }
   }
 
   async function removeCustomParam(paramId: string) {
     try { await deleteProjectParam(projectId, paramId); await onReload(); }
-    catch (e: any) { toast.error(e.message || "Не удалось удалить параметр"); }
+    catch (e: any) { toastError(e, "Не удалось удалить параметр"); }
   }
 
   function addOption() {
@@ -639,10 +639,9 @@ export default function ProjectParamsSection({
     }
     if (param.id === statusParam?.id) {
       return (
-        <select value={projectStatus} onChange={(e) => onProjectUpdate({ status: e.target.value })}
-          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
-          {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
+        <Select value={projectStatus} onValueChange={(v) => onProjectUpdate({ status: v })}>
+          {STATUS_OPTIONS.map(o => <SelectOption key={o.value} value={o.value}>{o.label}</SelectOption>)}
+        </Select>
       );
     }
     if (param.id === ownerParam?.id) {
@@ -670,11 +669,14 @@ export default function ProjectParamsSection({
 
     if (param.fieldType === "select" && param.options && param.options.length > 0) {
       return (
-        <select value={param.value ?? ""} onChange={(e) => handleSaveParamValue(param.id, e.target.value === "" ? null : e.target.value)}
-          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
-          {!param.isRequired && <option value="">Не выбрано</option>}
-          {param.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-        </select>
+        <Select
+          value={param.value ?? ""}
+          onValueChange={(v) => handleSaveParamValue(param.id, v === "" ? null : v)}
+          placeholder="Не выбрано"
+        >
+          {!param.isRequired && <SelectOption value="">Не выбрано</SelectOption>}
+          {param.options.map(opt => <SelectOption key={opt} value={opt}>{opt}</SelectOption>)}
+        </Select>
       );
     }
     if (param.fieldType === "multiselect" && param.options && param.options.length > 0) {
@@ -807,14 +809,14 @@ export default function ProjectParamsSection({
 
         {/* Custom params */}
         <div className="mt-6">
-          <div className="flex items-center justify-between mb-3">
-            <div>
+          <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
+            <div className="min-w-0">
               <h3 className="text-base font-bold">Кастомные параметры проекта</h3>
               <p className="text-sm text-slate-500 mt-0.5">Дополнительные параметры, специфичные для этого проекта.</p>
             </div>
             {!showAddForm && (
               <button onClick={() => setShowAddForm(true)}
-                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2 text-sm">
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2 text-sm shrink-0">
                 <Plus size={16} /> Добавить параметр
               </button>
             )}
@@ -823,7 +825,7 @@ export default function ProjectParamsSection({
           {showAddForm && (
             <div className="p-4 border-2 border-purple-300 rounded-lg bg-purple-50 mb-4">
               <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-sm font-medium mb-1">Название параметра *</label>
                     <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)}
@@ -832,12 +834,11 @@ export default function ProjectParamsSection({
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1">Тип параметра *</label>
-                    <select value={newType} onChange={(e) => setNewType(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
+                    <Select value={newType} onValueChange={setNewType}>
                       {Object.entries(FIELD_TYPE_LABELS).map(([val, label]) => (
-                        <option key={val} value={val}>{label}</option>
+                        <SelectOption key={val} value={val}>{label}</SelectOption>
                       ))}
-                    </select>
+                    </Select>
                   </div>
                 </div>
                 {["select", "multiselect"].includes(newType) && (
@@ -923,89 +924,94 @@ export default function ProjectParamsSection({
       </div>
 
       {/* Edit Param Modal */}
-      {editingParam && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold">Настройки параметра</h2>
-              <button onClick={() => setEditingParamId(null)} className="p-2 hover:bg-slate-100 rounded-lg transition-colors"><X size={20} /></button>
-            </div>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">Название *</label>
-                <DebouncedInput
-                  value={editingParam.name}
-                  onSave={(val) => { handleUpdateCustomParam(editingParam.id, { name: val }); }}
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  placeholder="Название параметра..." required requiredMessage="Название не может быть пустым"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Тип параметра</label>
-                <input type="text" value={FIELD_TYPE_LABELS[editingParam.fieldType] || editingParam.fieldType} disabled
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-slate-100 text-slate-500 cursor-not-allowed" />
-              </div>
-              <div>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={editingParam.isRequired}
-                    onChange={(e) => { handleUpdateCustomParam(editingParam.id, { isRequired: e.target.checked }); }}
-                    className="w-4 h-4 text-purple-600 rounded" />
-                  <span className="text-sm">Обязательное поле</span>
-                </label>
-              </div>
-              {["select", "multiselect"].includes(editingParam.fieldType) && (
+      <Modal
+        open={!!editingParam}
+        onOpenChange={(next) => { if (!next) setEditingParamId(null); }}
+        size="lg"
+      >
+        {editingParam && (
+          <>
+            <ModalHeader>
+              <ModalTitle>Настройки параметра</ModalTitle>
+            </ModalHeader>
+            <ModalBody>
+              <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium mb-1">Варианты для выбора</label>
-                  <div className="flex gap-2 mb-2">
-                    <input type="text" value={editParamOptionInput}
-                      onChange={(e) => setEditParamOptionInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          const trimmed = editParamOptionInput.trim();
-                          if (trimmed && !(editingParam.options || []).includes(trimmed)) {
-                            const newOpts = [...(editingParam.options || []), trimmed];
-                            handleUpdateCustomParam(editingParam.id, { options: newOpts });
-                            setEditParamOptionInput("");
-                          }
-                        }
-                      }}
-                      className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                      placeholder="Введите вариант..." />
-                    <button onClick={() => {
-                      const trimmed = editParamOptionInput.trim();
-                      if (trimmed && !(editingParam.options || []).includes(trimmed)) {
-                        const newOpts = [...(editingParam.options || []), trimmed];
-                        handleUpdateCustomParam(editingParam.id, { options: newOpts });
-                        setEditParamOptionInput("");
-                      }
-                    }} className="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm"><Plus size={16} /></button>
-                  </div>
-                  {editingParam.options && editingParam.options.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {editingParam.options.map(opt => (
-                        <span key={opt} className="inline-flex items-center gap-1 px-2 py-1 bg-slate-100 text-slate-700 rounded text-xs">
-                          {opt}
-                          <button onClick={() => {
-                            const newOpts = editingParam.options!.filter(o => o !== opt);
-                            handleUpdateCustomParam(editingParam.id, { options: newOpts });
-                          }} className="hover:text-red-600"><X size={12} /></button>
-                        </span>
-                      ))}
-                    </div>
-                  )}
+                  <label className="block text-sm font-medium mb-1">Название *</label>
+                  <DebouncedInput
+                    value={editingParam.name}
+                    onSave={(val) => { handleUpdateCustomParam(editingParam.id, { name: val }); }}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="Название параметра..." required requiredMessage="Название не может быть пустым"
+                  />
                 </div>
-              )}
-            </div>
-            <div className="mt-6">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Тип параметра</label>
+                  <input type="text" value={FIELD_TYPE_LABELS[editingParam.fieldType] || editingParam.fieldType} disabled
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-slate-100 text-slate-500 cursor-not-allowed" />
+                </div>
+                <div>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={editingParam.isRequired}
+                      onChange={(e) => { handleUpdateCustomParam(editingParam.id, { isRequired: e.target.checked }); }}
+                      className="w-4 h-4 text-purple-600 rounded" />
+                    <span className="text-sm">Обязательное поле</span>
+                  </label>
+                </div>
+                {["select", "multiselect"].includes(editingParam.fieldType) && (
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Варианты для выбора</label>
+                    <div className="flex gap-2 mb-2">
+                      <input type="text" value={editParamOptionInput}
+                        onChange={(e) => setEditParamOptionInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            const trimmed = editParamOptionInput.trim();
+                            if (trimmed && !(editingParam.options || []).includes(trimmed)) {
+                              const newOpts = [...(editingParam.options || []), trimmed];
+                              handleUpdateCustomParam(editingParam.id, { options: newOpts });
+                              setEditParamOptionInput("");
+                            }
+                          }
+                        }}
+                        className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        placeholder="Введите вариант..." />
+                      <button onClick={() => {
+                        const trimmed = editParamOptionInput.trim();
+                        if (trimmed && !(editingParam.options || []).includes(trimmed)) {
+                          const newOpts = [...(editingParam.options || []), trimmed];
+                          handleUpdateCustomParam(editingParam.id, { options: newOpts });
+                          setEditParamOptionInput("");
+                        }
+                      }} className="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm"><Plus size={16} /></button>
+                    </div>
+                    {editingParam.options && editingParam.options.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {editingParam.options.map(opt => (
+                          <span key={opt} className="inline-flex items-center gap-1 px-2 py-1 bg-slate-100 text-slate-700 rounded text-xs">
+                            {opt}
+                            <button onClick={() => {
+                              const newOpts = editingParam.options!.filter(o => o !== opt);
+                              handleUpdateCustomParam(editingParam.id, { options: newOpts });
+                            }} className="hover:text-red-600"><X size={12} /></button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </ModalBody>
+            <ModalFooter>
               <button onClick={() => setEditingParamId(null)}
                 className="w-full px-4 py-2.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium">
                 Готово
               </button>
-            </div>
-          </div>
-        </div>
-      )}
+            </ModalFooter>
+          </>
+        )}
+      </Modal>
     </div>
   );
 }

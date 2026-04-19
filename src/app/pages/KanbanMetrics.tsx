@@ -1,6 +1,9 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { BarChart3, Loader2, AlertCircle, Info, X, Filter } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from "recharts";
+import { ChartContainer, CHART_TOOLTIP_STYLE } from "../components/ui/ChartContainer";
+import { xAxisDefaults, yAxisDefaults } from "../components/ui/chart-axis";
+import { Select, SelectOption } from "../components/ui/Select";
 import {
   getMonteCarloForecast,
   type MonteCarloResponse, type MonteCarloPercentile, type AnalyticsFilters,
@@ -272,16 +275,14 @@ export default function KanbanMetrics({ projectId }: KanbanMetricsProps) {
             <Filter size={16} className="text-slate-500" />
             <label className="text-sm font-semibold text-slate-600 uppercase tracking-wide">Доска</label>
           </div>
-          <select
-            value={selectedBoardId}
-            onChange={(e) => setSelectedBoardId(e.target.value)}
-            className="px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-          >
-            <option value="">Все доски</option>
-            {boards.map(b => (
-              <option key={b.id} value={b.id}>{b.name}</option>
-            ))}
-          </select>
+          <div className="min-w-[200px] flex-1 max-w-sm">
+            <Select value={selectedBoardId} onValueChange={setSelectedBoardId} ariaLabel="Фильтр по доске">
+              <SelectOption value="">Все доски</SelectOption>
+              {boards.map(b => (
+                <SelectOption key={b.id} value={b.id}>{b.name}</SelectOption>
+              ))}
+            </Select>
+          </div>
         </div>
 
         {selectedBoardId && filterFields.length > 0 && (
@@ -355,15 +356,15 @@ export default function KanbanMetrics({ projectId }: KanbanMetricsProps) {
           </div>
           <div>
             <label className="block text-sm font-medium mb-2">Глубина выборки истории</label>
-            <select
-              value={weeks}
-              onChange={(e) => setWeeks(Number(e.target.value))}
-              className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            <Select
+              value={String(weeks)}
+              onValueChange={(v) => setWeeks(Number(v))}
+              ariaLabel="Глубина выборки"
             >
               {WEEKS_OPTIONS.map(o => (
-                <option key={o.value} value={o.value}>{o.label}</option>
+                <SelectOption key={o.value} value={String(o.value)}>{o.label}</SelectOption>
               ))}
-            </select>
+            </Select>
             <p className="text-xs text-slate-400 mt-1">За сколько последних недель учитывать производительность</p>
           </div>
           <div>
@@ -444,26 +445,28 @@ export default function KanbanMetrics({ projectId }: KanbanMetricsProps) {
             )}
 
             {/* Chart */}
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={data.chart}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis label={{ value: "Вероятность (%)", angle: -90, position: "insideLeft" }} />
-                  <Tooltip
-                    formatter={(value: number) => [`${value}%`, "Вероятность"]}
-                    contentStyle={{ backgroundColor: "white", border: "1px solid #e2e8f0", borderRadius: "8px" }}
-                  />
-                  <Legend />
-                  <Bar
-                    dataKey="probability"
-                    fill="#3b82f6"
-                    name="Вероятность завершения"
-                    radius={[4, 4, 0, 0]}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+            <ChartContainer
+              height={320}
+              scrollableOnMobile
+              minWidthOnMobile={Math.max(560, data.chart.length * 45)}
+            >
+              <BarChart data={data.chart}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" {...xAxisDefaults({ count: data.chart.length })} />
+                <YAxis {...yAxisDefaults({ width: 56 })} label={{ value: "Вероятность (%)", angle: -90, position: "insideLeft" }} />
+                <Tooltip
+                  formatter={(value: number) => [`${value}%`, "Вероятность"]}
+                  contentStyle={CHART_TOOLTIP_STYLE}
+                />
+                <Legend />
+                <Bar
+                  dataKey="probability"
+                  fill="#3b82f6"
+                  name="Вероятность завершения"
+                  radius={[4, 4, 0, 0]}
+                />
+              </BarChart>
+            </ChartContainer>
 
             {/* Interpretation */}
             {interpretation.length > 0 && (

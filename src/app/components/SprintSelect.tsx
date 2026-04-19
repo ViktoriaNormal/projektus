@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { ChevronDown, Search, Check, X, Calendar } from "lucide-react";
+import { formatDate } from "../lib/format";
 
 const DROPDOWN_HEIGHT = 310;
 
@@ -47,7 +48,7 @@ const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
 
 function SprintInfo({ sprint, compact }: { sprint: SprintOption; compact?: boolean }) {
   const st = STATUS_LABELS[sprint.status];
-  const dates = `${new Date(sprint.startDate).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })} – ${new Date(sprint.endDate).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })}`;
+  const dates = `${formatDate(sprint.startDate, "monthDay")} – ${formatDate(sprint.endDate, "monthDay")}`;
   return (
     <div className="min-w-0">
       <div className="flex items-center gap-2">
@@ -190,7 +191,7 @@ export function SprintMultiSelect({ options, value, onChange, placeholder = "В�
           {selectedSprints.map(s => (
             <div key={s.id} className="flex items-center justify-between p-3 border border-slate-200 rounded-lg group">
               <SprintInfo sprint={s} />
-              <button onClick={() => toggle(s.id)} className="opacity-0 group-hover:opacity-100 p-1 text-red-600 hover:bg-red-50 rounded"><X size={14} /></button>
+              <button onClick={() => toggle(s.id)} className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 p-1 text-red-600 hover:bg-red-50 rounded"><X size={14} /></button>
             </div>
           ))}
         </div>

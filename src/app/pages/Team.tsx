@@ -3,13 +3,14 @@ import {
   Search,
   Mail,
   Briefcase,
-  Loader2,
   Palmtree,
   Thermometer,
   MessageCircle,
   Copy,
   Check,
 } from 'lucide-react';
+import { PageSpinner } from '../components/ui/Spinner';
+import { EmptyState } from '../components/ui/EmptyState';
 import { UserAvatar } from '../components/UserAvatar';
 import { searchUsers, type UserProfileResponse } from '../api/users';
 import { useAuth } from '../contexts/AuthContext';
@@ -123,11 +124,7 @@ export default function Team() {
       </div>
 
       {/* Loading */}
-      {loading && (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 size={32} className="animate-spin text-blue-600" />
-        </div>
-      )}
+      {loading && <PageSpinner />}
 
       {/* Team Grid */}
       {!loading && (
@@ -217,12 +214,12 @@ export default function Team() {
       )}
 
       {!loading && users.length === 0 && (
-        <div className="text-center py-12 bg-white rounded-xl border border-slate-200">
-          <Search size={48} className="mx-auto text-slate-300 mb-4" />
-          <p className="text-slate-500 text-lg">Коллеги не найдены</p>
-          <p className="text-slate-400 text-sm mt-1">
-            Попробуйте изменить критерии поиска
-          </p>
+        <div className="bg-white rounded-xl border border-slate-200">
+          <EmptyState
+            icon={<Search size={48} />}
+            title="Коллеги не найдены"
+            description="Попробуйте изменить критерии поиска"
+          />
         </div>
       )}
     </div>

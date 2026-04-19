@@ -13,6 +13,12 @@ import {
   Check,
   AlertCircle,
   StickyNote,
+  ChevronDown,
+  ChevronUp,
+  ChevronLeft,
+  ChevronRight,
+  Calendar,
+  AlarmClock,
 } from "lucide-react";
 import { FilterDropdown } from "../components/FilterDropdown";
 import { toast } from "sonner";
@@ -26,6 +32,8 @@ import { searchTasks, updateTask, type TaskResponse } from "../api/tasks";
 import { getTaskFieldValues, setTaskFieldValue, type TaskFieldValue } from "../api/field-values";
 import { getProjectSprints, getSprintTasks, type SprintResponse } from "../api/sprints";
 import { getUser, type UserProfileResponse } from "../api/users";
+import { formatDate } from "../lib/format";
+import { toastError } from "../lib/errors";
 import { getTaskWatchers } from "../api/watchers";
 import { getProjectMembers, type ProjectMemberResponse } from "../api/projects";
 
@@ -263,28 +271,52 @@ function TaskCard({ task, userCache, moveTask, returnUrl, canDrag = true }: {
     <Link
       to={`/tasks/${task.id}${returnUrl ? `?returnUrl=${returnUrl}` : ""}`}
       ref={drag}
-      className={`bg-white p-3 rounded-lg shadow-md border border-slate-200 hover:shadow-xl hover:border-blue-400 transition-all ${canDrag ? "cursor-move" : "cursor-pointer"} flex items-center gap-3 ${
+      className={`bg-white p-3 rounded-lg shadow-md border border-slate-200 hover:shadow-xl hover:border-blue-400 transition-all ${canDrag ? "cursor-move" : "cursor-pointer"} block ${
         isDragging ? "opacity-50 scale-95" : ""
       }`}
     >
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-1">
+      <div className="flex items-start gap-2 mb-2">
+        <div className="flex flex-col items-start gap-1 min-w-0">
           <span className="text-xs font-mono text-slate-500 font-semibold">{task.key}</span>
           {task.priority && (
             <span className="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">{task.priority}</span>
           )}
         </div>
-        <p className="text-sm font-medium hover:text-blue-600 truncate">{task.name}</p>
+        <div className="ml-auto shrink-0">
+          {executor ? (
+            <UserAvatar user={toAvatarUser(executor)} size="sm" />
+          ) : (
+            <div className="w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center">
+              <User size={14} className="text-slate-400" />
+            </div>
+          )}
+        </div>
       </div>
-      <div className="shrink-0">
-        {executor ? (
-          <UserAvatar user={toAvatarUser(executor)} size="sm" />
-        ) : (
-          <div className="w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center">
-            <User size={14} className="text-slate-400" />
-          </div>
-        )}
-      </div>
+      <p className="text-sm font-medium hover:text-blue-600 break-words">{task.name}</p>
+      {(task.createdAt || task.deadline) && (
+        <div className="flex items-center gap-2 flex-wrap mt-2 pt-2 border-t border-slate-100 text-xs">
+          {task.createdAt && (
+            <div className="flex items-center gap-1 text-slate-400" title="Дата создания">
+              <Calendar size={12} />
+              <span>{formatDate(task.createdAt, "short")}</span>
+            </div>
+          )}
+          {task.deadline && (() => {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const dl = new Date(task.deadline);
+            dl.setHours(0, 0, 0, 0);
+            const daysUntil = Math.round((dl.getTime() - today.getTime()) / 86400000);
+            const color = daysUntil < 0 ? "text-red-600" : daysUntil <= 2 ? "text-amber-600" : "text-slate-500";
+            return (
+              <div className={`flex items-center gap-1 ml-auto ${color}`} title={daysUntil < 0 ? "Дедлайн просрочен" : "Дедлайн"}>
+                <AlarmClock size={12} />
+                <span>{formatDate(dl, "short")}</span>
+              </div>
+            );
+          })()}
+        </div>
+      )}
     </Link>
   );
 }
@@ -313,7 +345,7 @@ function DropZone({
       ref={drop}
       className={`min-h-[200px] p-2 rounded-lg transition-colors ${isOver ? "bg-blue-50 ring-2 ring-blue-300" : ""}`}
     >
-      <div className="space-y-3">{children}</div>
+      <div className="grid grid-cols-2 gap-3 items-start">{children}</div>
       {canAddTask && (
         <div>
           <button
@@ -336,6 +368,7 @@ function DropZone({
 function ColumnHeader({
   column, index, columns, moveColumn, taskCount, isScrum,
   onUpdate, onAddAfter, onRemove, note, onSaveNote, readOnly = false,
+  collapsed = false, onToggleCollapse,
 }: {
   column: ColumnResponse;
   index: number;
@@ -349,6 +382,8 @@ function ColumnHeader({
   note: string | null;
   onSaveNote: (val: string | null) => void;
   readOnly?: boolean;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }) {
   const [{ isDragging }, drag] = useDrag({
     type: ItemType.COLUMN,
@@ -390,16 +425,51 @@ function ColumnHeader({
     setEditingWip(false);
   }
 
+  if (collapsed) {
+    return (
+      <th
+        ref={(node) => drag(drop(node))}
+        className={`p-2 text-center font-semibold w-14 min-w-[56px] border-b-2 border-slate-300 border-r border-r-slate-200 last:border-r-0 bg-slate-100 align-top ${isDragging ? "opacity-50" : ""}`}
+      >
+        <div className="flex flex-col items-center gap-2">
+          <button
+            onClick={onToggleCollapse}
+            className="p-1 text-slate-500 hover:text-blue-600 hover:bg-slate-200 rounded"
+            title="Развернуть колонку"
+          >
+            <ChevronRight size={16} />
+          </button>
+          <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-slate-200 text-slate-600">{taskCount}</span>
+          <span
+            className="text-slate-700 text-sm font-semibold whitespace-nowrap"
+            style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
+          >
+            {column.name}
+          </span>
+        </div>
+      </th>
+    );
+  }
+
   return (
     <th
       ref={(node) => drag(drop(node))}
-      className={`p-4 text-left font-semibold min-w-[280px] border-b-2 border-slate-300 bg-slate-100 ${isDragging ? "opacity-50" : ""}`}
+      className={`p-4 text-left font-semibold min-w-[520px] border-b-2 border-slate-300 border-r border-r-slate-200 last:border-r-0 bg-slate-100 ${isDragging ? "opacity-50" : ""}`}
     >
       <div className="flex items-center gap-2">
         <GripVertical size={18} className="text-slate-400 cursor-move shrink-0" />
         <div className="flex-1 min-w-0">
           {/* Name */}
           <div className="flex items-center gap-2">
+            {onToggleCollapse && (
+              <button
+                onClick={onToggleCollapse}
+                className="p-1 text-slate-400 hover:text-blue-600 hover:bg-slate-200 rounded shrink-0"
+                title="Свернуть колонку"
+              >
+                <ChevronLeft size={16} />
+              </button>
+            )}
             {editingName && !readOnly ? (
               <input ref={nameInputRef} autoFocus value={nameVal} onChange={e => setNameVal(e.target.value)}
                 onBlur={saveName} onKeyDown={e => { if (e.key === "Enter") saveName(); if (e.key === "Escape") { setNameVal(column.name); setEditingName(false); } }}
@@ -482,6 +552,7 @@ function ColumnHeader({
 
 function SwimlaneRow({
   swimlane, index, columns, tasks, userCache, moveTask, onAddTask, canAddTaskInColumn, getAddTaskHint, returnUrl, moveSwimlane, canDrag, note, onSaveNote, isScrum, onUpdateWip, canEditTasks = true,
+  collapsed = false, onToggleCollapse, collapsedCols,
 }: {
   swimlane: ComputedSwimlane;
   index: number;
@@ -500,6 +571,9 @@ function SwimlaneRow({
   isScrum?: boolean;
   onUpdateWip?: (swimlaneId: string, value: number | null) => void;
   canEditTasks?: boolean;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
+  collapsedCols?: Set<string>;
 }) {
   const [{ isDragging }, drag] = useDrag({
     type: ItemType.SWIMLANE,
@@ -534,14 +608,23 @@ function SwimlaneRow({
 
   return (
     <tr ref={(node) => drag(drop(node))} className={`border-b border-slate-200 ${isDragging ? "opacity-50" : ""}`}>
-      <td className="p-4 font-semibold align-top sticky left-0 z-10 border-r-2 border-slate-300 bg-slate-100">
+      <td className={`${collapsed ? "p-2" : "p-4"} font-semibold align-top md:sticky md:left-0 z-10 border-r-2 border-slate-300 bg-slate-100 w-40 md:w-auto`}>
         <div className="flex items-start gap-2">
           <GripVertical size={18} className={`flex-shrink-0 mt-1 ${canDrag ? "text-slate-400 cursor-move" : "text-slate-200 cursor-default"}`} />
           <div className="flex-1">
             <div className="flex items-center gap-2">
+              {onToggleCollapse && (
+                <button
+                  onClick={onToggleCollapse}
+                  className="p-1 text-slate-400 hover:text-blue-600 hover:bg-slate-200 rounded shrink-0"
+                  title={collapsed ? "Развернуть дорожку" : "Свернуть дорожку"}
+                >
+                  {collapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+                </button>
+              )}
               <span className="text-slate-700">{swimlane.name}</span>
               <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-slate-200 text-slate-600">{swimlaneTasks.length}</span>
-              {onSaveNote && <NotePopover note={note} onSave={onSaveNote} align="left" />}
+              {onSaveNote && !collapsed && <NotePopover note={note} onSave={onSaveNote} align="left" />}
             </div>
             {showWip && swimlane.wipLimit != null && !editingWip && (
               <div className={`text-xs text-slate-500 font-normal mt-1 ${canEditWip ? "cursor-pointer hover:text-blue-600" : ""}`}
@@ -562,9 +645,13 @@ function SwimlaneRow({
         </div>
       </td>
       {columns.map((column) => {
+        const colCollapsed = collapsedCols?.has(column.id) ?? false;
+        if (collapsed || colCollapsed) {
+          return <td key={column.id} className={`bg-slate-50 border-r border-r-slate-200 last:border-r-0 ${colCollapsed ? "w-14 min-w-[56px]" : ""} ${collapsed ? "py-2" : "p-2"}`} />;
+        }
         const cellTasks = tasks.filter((t) => t.columnId === column.id && swimlane.taskIds.has(t.id));
         return (
-          <td key={column.id} className="p-4 align-top bg-slate-50">
+          <td key={column.id} className="p-4 align-top bg-slate-50 border-r border-r-slate-200 last:border-r-0">
             <DropZone columnId={column.id} swimlaneId={swimlane.backendId ?? null} moveTask={moveTask}
               onAddTask={() => onAddTask(column.id, swimlane.backendId ?? null)}
               canAddTask={canAddTaskInColumn ? canAddTaskInColumn(column) : true}
@@ -653,6 +740,7 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
   const [userCache, setUserCache] = useState<Map<string, UserProfileResponse>>(new Map());
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState<Record<string, string[]>>({});
+  const [dateFilters, setDateFilters] = useState<{ createdFrom: string; createdTo: string; deadlineFrom: string; deadlineTo: string }>({ createdFrom: "", createdTo: "", deadlineFrom: "", deadlineTo: "" });
   const [filterFields, setFilterFields] = useState<BoardField[]>([]);
   const [fieldValuesMap, setFieldValuesMap] = useState<Map<string, TaskFieldValue[]>>(new Map());
   const [watcherMap, setWatcherMap] = useState<Map<string, string[]>>(new Map());
@@ -662,8 +750,68 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
   const [columnError, setColumnError] = useState<{ message: string; dismissible: boolean } | null>(null);
   const [activeSprintName, setActiveSprintName] = useState<string | null>(null);
   const [activeSprintId, setActiveSprintId] = useState<string | null>(null);
+  const [collapsedCols, setCollapsedCols] = useState<Set<string>>(new Set());
+  const [collapsedSwimlanes, setCollapsedSwimlanes] = useState<Set<string>>(new Set());
 
   const isScrum = projectType === "scrum";
+
+  useEffect(() => {
+    if (!boardId) { setCollapsedCols(new Set()); setCollapsedSwimlanes(new Set()); return; }
+    try {
+      const raw = localStorage.getItem(`board:${boardId}:collapsed`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setCollapsedCols(new Set(Array.isArray(parsed.cols) ? parsed.cols : []));
+        setCollapsedSwimlanes(new Set(Array.isArray(parsed.swim) ? parsed.swim : []));
+      } else {
+        setCollapsedCols(new Set());
+        setCollapsedSwimlanes(new Set());
+      }
+    } catch { /**/ }
+  }, [boardId]);
+
+  const persistCollapsed = useCallback((cols: Set<string>, swim: Set<string>) => {
+    if (!boardId) return;
+    try { localStorage.setItem(`board:${boardId}:collapsed`, JSON.stringify({ cols: Array.from(cols), swim: Array.from(swim) })); } catch { /**/ }
+  }, [boardId]);
+
+  const toggleColumnCollapse = useCallback((colId: string) => {
+    setCollapsedCols((prev) => {
+      const next = new Set(prev);
+      if (next.has(colId)) next.delete(colId); else next.add(colId);
+      setCollapsedSwimlanes((swim) => { persistCollapsed(next, swim); return swim; });
+      return next;
+    });
+  }, [persistCollapsed]);
+
+  const toggleSwimlaneCollapse = useCallback((swimId: string) => {
+    setCollapsedSwimlanes((prev) => {
+      const next = new Set(prev);
+      if (next.has(swimId)) next.delete(swimId); else next.add(swimId);
+      setCollapsedCols((cols) => { persistCollapsed(cols, next); return cols; });
+      return next;
+    });
+  }, [persistCollapsed]);
+
+  const toggleAllColumns = useCallback(() => {
+    setCollapsedCols((prev) => {
+      const allIds = columns.map(c => c.id);
+      const allCollapsed = allIds.length > 0 && allIds.every(id => prev.has(id));
+      const next = allCollapsed ? new Set<string>() : new Set(allIds);
+      setCollapsedSwimlanes((swim) => { persistCollapsed(next, swim); return swim; });
+      return next;
+    });
+  }, [columns, persistCollapsed]);
+
+  const toggleAllSwimlanes = useCallback(() => {
+    setCollapsedSwimlanes((prev) => {
+      const allKeys = computedSwimlanes.map(s => s.backendId ?? s.key);
+      const allCollapsed = allKeys.length > 0 && allKeys.every(k => prev.has(k));
+      const next = allCollapsed ? new Set<string>() : new Set(allKeys);
+      setCollapsedCols((cols) => { persistCollapsed(cols, next); return cols; });
+      return next;
+    });
+  }, [computedSwimlanes, persistCollapsed]);
 
   const loadData = useCallback(async () => {
     if (!boardId) return;
@@ -958,7 +1106,7 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
       await updateSwimlane(boardId, swimId, { [field]: value });
       onBoardChanged?.();
     } catch (e: any) {
-      toast.error(e.message || "Ошибка обновления дорожки");
+      toastError(e, "Ошибка обновления дорожки");
       if (field === "wipLimit") loadData();
     }
   }
@@ -1011,7 +1159,7 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
         }
       }
     } catch (e: any) {
-      toast.error(e.message || "Ошибка перемещения задачи");
+      toastError(e, "Ошибка перемещения задачи");
       loadData(); // rollback
     }
   };
@@ -1087,8 +1235,12 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
     });
   };
 
-  const clearFilters = () => setFilters({});
-  const hasActiveFilters = Object.values(filters).some((f) => f.length > 0);
+  const clearFilters = () => {
+    setFilters({});
+    setDateFilters({ createdFrom: "", createdTo: "", deadlineFrom: "", deadlineTo: "" });
+  };
+  const hasActiveDateFilters = !!(dateFilters.createdFrom || dateFilters.createdTo || dateFilters.deadlineFrom || dateFilters.deadlineTo);
+  const hasActiveFilters = Object.values(filters).some((f) => f.length > 0) || hasActiveDateFilters;
 
   // Build filter options for each filterable field
   const getFilterOptions = (field: BoardField): { value: string; label: string }[] => {
@@ -1138,6 +1290,21 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
         if (!raw || !selectedValues.includes(raw)) return false;
       }
     }
+    // Date range filters — compare by date part (first 10 chars of ISO datetime)
+    const createdDate = task.createdAt ? task.createdAt.slice(0, 10) : null;
+    if (dateFilters.createdFrom) {
+      if (!createdDate || createdDate < dateFilters.createdFrom) return false;
+    }
+    if (dateFilters.createdTo) {
+      if (!createdDate || createdDate > dateFilters.createdTo) return false;
+    }
+    const deadlineDate = task.deadline ? task.deadline.slice(0, 10) : null;
+    if (dateFilters.deadlineFrom) {
+      if (!deadlineDate || deadlineDate < dateFilters.deadlineFrom) return false;
+    }
+    if (dateFilters.deadlineTo) {
+      if (!deadlineDate || deadlineDate > dateFilters.deadlineTo) return false;
+    }
     return true;
   };
 
@@ -1177,7 +1344,7 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
           </div>
         )}
         {/* Filters */}
-        {tasks.length > 0 && filterFields.length > 0 && (
+        {tasks.length > 0 && (
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 px-5 py-4">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wide">Фильтры</h3>
@@ -1187,24 +1354,115 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
                 </button>
               )}
             </div>
-            <div className="flex flex-wrap gap-2">
-              {filterFields.map((field) => {
-                const opts = getFilterOptions(field);
-                if (opts.length === 0) return null;
-                return (
-                  <FilterDropdown
-                    key={field.id}
-                    label={field.name}
-                    options={opts.map(o => o.value)}
-                    selectedValues={filters[field.id] || []}
-                    onToggle={(v) => toggleFilter(field.id, v)}
-                    renderOption={(v) => opts.find(o => o.value === v)?.label || v}
+            {filterFields.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {filterFields.map((field) => {
+                  const opts = getFilterOptions(field);
+                  if (opts.length === 0) return null;
+                  return (
+                    <FilterDropdown
+                      key={field.id}
+                      label={field.name}
+                      options={opts.map(o => o.value)}
+                      selectedValues={filters[field.id] || []}
+                      onToggle={(v) => toggleFilter(field.id, v)}
+                      renderOption={(v) => opts.find(o => o.value === v)?.label || v}
+                    />
+                  );
+                })}
+              </div>
+            )}
+            <div className={`flex flex-wrap gap-x-6 gap-y-3 ${filterFields.length > 0 ? "mt-3 pt-3 border-t border-slate-100" : ""}`}>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 w-full sm:w-auto">
+                <span className="text-sm font-medium text-slate-600 shrink-0">Создана:</span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <input
+                    type="date"
+                    value={dateFilters.createdFrom}
+                    onChange={(e) => setDateFilters(prev => ({ ...prev, createdFrom: e.target.value }))}
+                    max={dateFilters.createdTo || undefined}
+                    className="px-2 py-1 text-sm border border-slate-200 rounded-md text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 flex-1 min-w-0 max-w-[140px]"
                   />
-                );
-              })}
+                  <span className="text-slate-400 text-sm shrink-0">—</span>
+                  <input
+                    type="date"
+                    value={dateFilters.createdTo}
+                    onChange={(e) => setDateFilters(prev => ({ ...prev, createdTo: e.target.value }))}
+                    min={dateFilters.createdFrom || undefined}
+                    className="px-2 py-1 text-sm border border-slate-200 rounded-md text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 flex-1 min-w-0 max-w-[140px]"
+                  />
+                </div>
+                {(dateFilters.createdFrom || dateFilters.createdTo) && (
+                  <button
+                    onClick={() => setDateFilters(prev => ({ ...prev, createdFrom: "", createdTo: "" }))}
+                    className="p-1 text-slate-400 hover:text-red-500"
+                    title="Сбросить период создания"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 w-full sm:w-auto">
+                <span className="text-sm font-medium text-slate-600 shrink-0">Дедлайн:</span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <input
+                    type="date"
+                    value={dateFilters.deadlineFrom}
+                    onChange={(e) => setDateFilters(prev => ({ ...prev, deadlineFrom: e.target.value }))}
+                    max={dateFilters.deadlineTo || undefined}
+                    className="px-2 py-1 text-sm border border-slate-200 rounded-md text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 flex-1 min-w-0 max-w-[140px]"
+                  />
+                  <span className="text-slate-400 text-sm shrink-0">—</span>
+                  <input
+                    type="date"
+                    value={dateFilters.deadlineTo}
+                    onChange={(e) => setDateFilters(prev => ({ ...prev, deadlineTo: e.target.value }))}
+                    min={dateFilters.deadlineFrom || undefined}
+                    className="px-2 py-1 text-sm border border-slate-200 rounded-md text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 flex-1 min-w-0 max-w-[140px]"
+                  />
+                </div>
+                {(dateFilters.deadlineFrom || dateFilters.deadlineTo) && (
+                  <button
+                    onClick={() => setDateFilters(prev => ({ ...prev, deadlineFrom: "", deadlineTo: "" }))}
+                    className="p-1 text-slate-400 hover:text-red-500"
+                    title="Сбросить период дедлайна"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         )}
+
+        {/* Collapse toolbar */}
+        {columns.length > 0 && (() => {
+          const allColsCollapsed = columns.length > 0 && columns.every(c => collapsedCols.has(c.id));
+          const allSwimKeys = computedSwimlanes.map(s => s.backendId ?? s.key);
+          const allSwimsCollapsed = allSwimKeys.length > 0 && allSwimKeys.every(k => collapsedSwimlanes.has(k));
+          return (
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={toggleAllColumns}
+                className="px-4 py-2 border border-slate-200 rounded-full text-slate-700 bg-white hover:border-slate-300 text-sm font-medium flex items-center gap-2 transition-colors"
+                title={allColsCollapsed ? "Развернуть все колонки" : "Свернуть все колонки"}
+              >
+                {allColsCollapsed ? "Развернуть все колонки" : "Свернуть все колонки"}
+                {allColsCollapsed ? <ChevronRight size={14} className="text-slate-400" /> : <ChevronLeft size={14} className="text-slate-400" />}
+              </button>
+              {computedSwimlanes.length > 0 && (
+                <button
+                  onClick={toggleAllSwimlanes}
+                  className="px-4 py-2 border border-slate-200 rounded-full text-slate-700 bg-white hover:border-slate-300 text-sm font-medium flex items-center gap-2 transition-colors"
+                  title={allSwimsCollapsed ? "Развернуть все дорожки" : "Свернуть все дорожки"}
+                >
+                  {allSwimsCollapsed ? "Развернуть все дорожки" : "Свернуть все дорожки"}
+                  {allSwimsCollapsed ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronUp size={14} className="text-slate-400" />}
+                </button>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Column error */}
         {columnError && (
@@ -1224,7 +1482,7 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50">
                   {computedSwimlanes.length > 0 && (
-                    <th className="p-4 text-left font-semibold text-slate-700 w-48 sticky left-0 bg-slate-50 z-10" />
+                    <th className="p-4 text-left font-semibold text-slate-700 w-40 md:w-48 md:sticky md:left-0 bg-slate-50 z-10" />
                   )}
                   {columns.map((column, index) => (
                     <ColumnHeader
@@ -1241,6 +1499,8 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
                       note={getColumnNote(column.id)}
                       onSaveNote={canEditBoard ? (val) => saveColumnNote(column.id, val) : () => {}}
                       readOnly={!canEditBoard}
+                      collapsed={collapsedCols.has(column.id)}
+                      onToggleCollapse={() => toggleColumnCollapse(column.id)}
                     />
                   ))}
                 </tr>
@@ -1249,35 +1509,44 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
                 {computedSwimlanes.length > 0 ? (
                   (() => {
                     const canDrag = computedSwimlanes.length > 1 && computedSwimlanes.every(s => !!s.backendId);
-                    return computedSwimlanes.map((swimlane, index) => (
-                      <SwimlaneRow
-                        key={swimlane.key}
-                        swimlane={swimlane}
-                        index={index}
-                        columns={columns}
-                        tasks={filteredTasks}
-                        userCache={userCache}
-                        moveTask={moveTask}
-                        onAddTask={handleAddTask}
-                        canAddTaskInColumn={canAddTaskInColumn}
-                        getAddTaskHint={getAddTaskHint}
-                        returnUrl={boardReturnUrl}
-                        moveSwimlane={moveSwimlane}
-                        canDrag={canDrag}
-                        note={getSwimlaneNote(swimlane.backendId)}
-                        onSaveNote={canEditBoard && swimlane.backendId ? (val) => saveSwimlaneNote(swimlane.backendId!, val) : undefined}
-                        isScrum={isScrum}
-                        onUpdateWip={(swimId, value) => handleUpdateSwimlane(swimId, "wipLimit", value)}
-                        canEditTasks={canEditTasks}
-                      />
-                    ));
+                    return computedSwimlanes.map((swimlane, index) => {
+                      const swimKey = swimlane.backendId ?? swimlane.key;
+                      return (
+                        <SwimlaneRow
+                          key={swimlane.key}
+                          swimlane={swimlane}
+                          index={index}
+                          columns={columns}
+                          tasks={filteredTasks}
+                          userCache={userCache}
+                          moveTask={moveTask}
+                          onAddTask={handleAddTask}
+                          canAddTaskInColumn={canAddTaskInColumn}
+                          getAddTaskHint={getAddTaskHint}
+                          returnUrl={boardReturnUrl}
+                          moveSwimlane={moveSwimlane}
+                          canDrag={canDrag}
+                          note={getSwimlaneNote(swimlane.backendId)}
+                          onSaveNote={canEditBoard && swimlane.backendId ? (val) => saveSwimlaneNote(swimlane.backendId!, val) : undefined}
+                          isScrum={isScrum}
+                          onUpdateWip={(swimId, value) => handleUpdateSwimlane(swimId, "wipLimit", value)}
+                          canEditTasks={canEditTasks}
+                          collapsed={collapsedSwimlanes.has(swimKey)}
+                          onToggleCollapse={() => toggleSwimlaneCollapse(swimKey)}
+                          collapsedCols={collapsedCols}
+                        />
+                      );
+                    });
                   })()
                 ) : (
                   <tr>
                     {columns.map((column) => {
+                      if (collapsedCols.has(column.id)) {
+                        return <td key={column.id} className="bg-slate-50 w-14 min-w-[56px] border-r border-r-slate-200 last:border-r-0" />;
+                      }
                       const cellTasks = getFilteredTasks(column.id);
                       return (
-                        <td key={column.id} className="p-4 align-top bg-slate-50">
+                        <td key={column.id} className="p-4 align-top bg-slate-50 border-r border-r-slate-200 last:border-r-0">
                           <DropZone
                             columnId={column.id}
                             swimlaneId={null}

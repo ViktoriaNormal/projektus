@@ -1,4 +1,5 @@
 import { apiRequest } from './client';
+import { unwrapList } from '../lib/api-unwrap';
 
 export interface ProjectOwner {
   id: string;
@@ -22,14 +23,9 @@ export interface ProjectResponse {
 }
 
 export function getProjects() {
-  return apiRequest<ProjectResponse[]>('/projects').then((result) => {
-    if (Array.isArray(result)) return result;
-    if (result && typeof result === 'object' && 'projects' in result) {
-      const arr = (result as unknown as { projects: ProjectResponse[] }).projects;
-      if (Array.isArray(arr)) return arr;
-    }
-    return [];
-  });
+  return apiRequest<ProjectResponse[]>('/projects').then((result) =>
+    unwrapList<ProjectResponse>(result, ['projects'])
+  );
 }
 
 export function getProject(projectId: string) {
@@ -132,13 +128,7 @@ export interface ProjectPermission {
 // Формат ответа: { permissions: [{ area: "project.boards", access: "full" }, ...] }
 
 export function getMyProjectPermissions(projectId: string) {
-  return apiRequest<ProjectPermission[]>(`/projects/${projectId}/my-permissions`).then(result => {
-    if (Array.isArray(result)) return result;
-    if (result && typeof result === 'object') {
-      const obj = result as unknown as Record<string, unknown>;
-      if (Array.isArray(obj.permissions)) return obj.permissions as ProjectPermission[];
-      if (Array.isArray(obj.items)) return obj.items as ProjectPermission[];
-    }
-    return [];
-  });
+  return apiRequest<ProjectPermission[]>(`/projects/${projectId}/my-permissions`).then(result =>
+    unwrapList<ProjectPermission>(result, ['permissions'])
+  );
 }
