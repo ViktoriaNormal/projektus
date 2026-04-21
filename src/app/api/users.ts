@@ -1,5 +1,6 @@
-import { apiRequest } from './client';
+import { apiRequest, camelizeResponse } from './client';
 import type { UserResponse } from './auth';
+import { normalizeSearchQuery } from '../lib/search';
 
 export interface SystemRolePermission {
   code: string;
@@ -14,10 +15,15 @@ export interface SystemRoleResponse {
   permissions: SystemRolePermission[];
 }
 
+export interface ProjectRoleRef {
+  id: string;
+  name: string;
+}
+
 export interface ProjectRoleResponse {
   projectId: string;
   projectName: string;
-  roles: string[];
+  roles: ProjectRoleRef[];
   permissions: string[];
 }
 
@@ -43,13 +49,27 @@ export function getUser(userId: string) {
   return apiRequest<UserProfileResponse>(`/users/${userId}`);
 }
 
-export function searchUsers(query: string, limit = 20, offset = 0) {
+export interface UsersPage {
+  users: UserProfileResponse[];
+  total: number;
+}
+
+/** Постраничный поиск с total. limit=0 — вернёт только total без массива users. */
+export function searchUsersPage(query: string, limit = 20, offset = 0): Promise<UsersPage> {
   const params = new URLSearchParams();
-  if (query) params.set('q', query);
+  const q = normalizeSearchQuery(query);
+  if (q) params.set('q', q);
   params.set('limit', String(limit));
   params.set('offset', String(offset));
-  return apiRequest<{ users: UserProfileResponse[] }>(`/users?${params.toString()}`)
-    .then((res) => res.users);
+  return apiRequest<UsersPage>(`/users?${params.toString()}`).then((res) => ({
+    users: Array.isArray(res?.users) ? res.users : [],
+    total: typeof res?.total === 'number' ? res.total : 0,
+  }));
+}
+
+/** Совместимый shim: возвращает только массив users для старых вызовов (autocomplete и т. п.). */
+export function searchUsers(query: string, limit = 20, offset = 0): Promise<UserProfileResponse[]> {
+  return searchUsersPage(query, limit, offset).then((p) => p.users);
 }
 
 export function updateUser(
@@ -78,11 +98,13 @@ export function uploadAvatar(userId: string, file: File) {
     body: formData,
   }).then(async (res) => {
     if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      throw new Error(body?.error?.message || 'Не удалось загрузить аватар');
+      const rawErr = await res.json().catch(() => null);
+      const err = camelizeResponse<{ error?: { message?: string } }>(rawErr);
+      throw new Error(err?.error?.message || 'Не удалось загрузить аватар');
     }
-    const body = await res.json();
-    return body.data as UserProfileResponse;
+    const raw = await res.json();
+    const body = camelizeResponse<{ data: UserProfileResponse }>(raw);
+    return body.data;
   });
 }
 

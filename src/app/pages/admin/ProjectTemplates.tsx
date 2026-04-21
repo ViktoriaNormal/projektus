@@ -8,7 +8,7 @@ import {
   Trash2,
   ArrowUp,
   ArrowDown,
-  ArrowLeft,
+  ChevronLeft,
   Columns,
   Layers,
   FileText,
@@ -240,7 +240,7 @@ function TemplateCard({ template, refs, onEdit }: { template: ProjectTemplateDet
                 <div className="bg-slate-50 px-4 py-2.5 border-b border-slate-200">
                   <p className="font-semibold text-sm">{board.name}</p>
                   {board.description && (
-                    <p className="text-xs text-slate-500 mt-0.5">{board.description}</p>
+                    <p className="text-xs text-slate-500 mt-0.5 whitespace-pre-wrap">{board.description}</p>
                   )}
                 </div>
 
@@ -269,27 +269,46 @@ function TemplateCard({ template, refs, onEdit }: { template: ProjectTemplateDet
                     )}
                   </div>
 
-                  {/* Swimlanes */}
-                  {board.swimlaneGroupBy && board.swimlanes.length > 0 && (
+                  {/* Swimlanes — shown whenever a grouping parameter is configured, even if
+                      the swimlane values are dynamic (user, tags, etc.) and so not pre-seeded
+                      in the template. Otherwise the user can't tell that the board is
+                      grouped at all until the first task is created. */}
+                  {board.swimlaneGroupBy && (() => {
+                    const groupField = board.fields.find(f => f.id === board.swimlaneGroupBy);
+                    const isPriorityField = groupField?.name === "Приоритизация";
+                    const priorityTypeName = isPriorityField
+                      ? (refs?.priorityTypeOptions.find(p => p.key === board.priorityType)?.name ?? board.priorityType)
+                      : null;
+                    const isVirtualTags = board.swimlaneGroupBy === "__tags__";
+                    const label = priorityTypeName
+                      ?? (isVirtualTags ? "Теги" : null)
+                      ?? groupField?.name
+                      ?? board.swimlaneGroupBy;
+                    return (
                     <div>
                       <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
-                        Дорожки (по {board.fields.find(f => f.id === board.swimlaneGroupBy)?.name || board.swimlaneGroupBy})
+                        Дорожки (по параметру {label})
                       </p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {board.swimlanes.map((sw) => (
-                          <span
-                            key={sw.id}
-                            className="px-2.5 py-1 bg-amber-50 text-amber-700 text-xs rounded-md border border-amber-100 font-medium"
-                          >
-                            {sw.name}
-                            {sw.wipLimit != null && (
-                              <span className="text-amber-400 ml-1 font-normal">WIP:{sw.wipLimit}</span>
-                            )}
-                          </span>
-                        ))}
-                      </div>
+                      {board.swimlanes.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {board.swimlanes.map((sw) => (
+                            <span
+                              key={sw.id}
+                              className="px-2.5 py-1 bg-amber-50 text-amber-700 text-xs rounded-md border border-amber-100 font-medium"
+                            >
+                              {sw.name}
+                              {sw.wipLimit != null && (
+                                <span className="text-amber-400 ml-1 font-normal">WIP:{sw.wipLimit}</span>
+                              )}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-400">Формируются динамически по значениям задач</p>
+                      )}
                     </div>
-                  )}
+                    );
+                  })()}
 
                   {/* All task fields */}
                   <div>
@@ -311,7 +330,7 @@ function TemplateCard({ template, refs, onEdit }: { template: ProjectTemplateDet
                             key={f.id}
                             className="px-2.5 py-1 bg-purple-50 text-purple-600 text-xs rounded-md border border-purple-100"
                           >
-                            {f.name}{f.isRequired && <span className="text-red-400 ml-0.5">*</span>}
+                            {f.name}
                           </span>
                         ))}
                       </div>
@@ -342,7 +361,7 @@ function TemplateCard({ template, refs, onEdit }: { template: ProjectTemplateDet
                   }`}
                 >
                   {p.name}
-                  {p.isRequired && <span className="text-red-400 ml-0.5">*</span>}
+                  {p.isSystem && p.isRequired && <span className="text-red-400 ml-0.5">*</span>}
                 </span>
               ))}
             </div>
@@ -1055,19 +1074,18 @@ function TemplateEditor({
   return (
     <div className="space-y-6">
       {/* Top bar */}
-      <div className="flex items-center gap-4">
-        <button
-          onClick={onCancel}
-          className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-        >
-          <ArrowLeft size={20} />
-        </button>
-        <div className="flex-1">
-          <h1 className="text-2xl font-bold">Редактирование шаблона</h1>
-          <p className="text-slate-500 text-sm mt-0.5">
-            {data.projectType === "scrum" ? "Scrum" : "Kanban"} — {data.name}
-          </p>
-        </div>
+      <button
+        onClick={onCancel}
+        className="flex items-center gap-1.5 text-sm text-slate-600 hover:text-blue-600 transition-colors"
+      >
+        <ChevronLeft size={16} />
+        <span>Назад к шаблонам</span>
+      </button>
+      <div>
+        <h1 className="text-2xl font-bold">Редактирование шаблона</h1>
+        <p className="text-slate-500 text-sm mt-0.5">
+          {data.projectType === "scrum" ? "Scrum" : "Kanban"} — {data.name}
+        </p>
       </div>
 
       {/* Auto-save notice */}
@@ -1330,7 +1348,7 @@ function DraggableBoardTab({
             </span>
           )}
         </div>
-        <div className="text-xs opacity-75 mt-1 font-normal truncate max-w-48 min-h-4">
+        <div className="text-xs opacity-75 mt-1 font-normal whitespace-pre-wrap min-h-4">
           {board.description || "\u00A0"}
         </div>
       </button>
@@ -1640,7 +1658,7 @@ function BoardSwimlanesTab({
           К каждой дорожке можно добавить заметку — например, чтобы описать правила приоритизации или обработки задач в этой категории.
         </p>
         <div>
-          <label className="block text-sm font-medium mb-2">Группировать задачи по:</label>
+          <label className="block text-sm font-medium mb-2">Группировать задачи по параметру:</label>
           <Select
             value={swimlaneGroupBy}
             onValueChange={onSetGroupBy}
@@ -1666,7 +1684,7 @@ function BoardSwimlanesTab({
               </div>
               <div className="flex-1">
                 <h4 className="font-medium text-purple-900 mb-1">
-                  Группировка по {selectedField ? getFieldDisplayName(selectedField) : swimlaneGroupBy}
+                  Группировка по параметру {swimlaneGroupBy === "__tags__" ? "Теги" : (selectedField ? getFieldDisplayName(selectedField) : swimlaneGroupBy)}
                 </h4>
                 <p className="text-sm text-purple-700">
                   Дорожки будут созданы автоматически для каждого значения выбранного параметра.
@@ -1797,7 +1815,6 @@ function BoardTaskTemplateTab({
   const [showAddForm, setShowAddForm] = useState(false);
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState<TaskField["type"]>("text");
-  const [newRequired, setNewRequired] = useState(false);
   const [newOptions, setNewOptions] = useState<string[]>([]);
   const [optionInput, setOptionInput] = useState("");
 
@@ -1815,12 +1832,13 @@ function BoardTaskTemplateTab({
       await createTemplateBoardField(templateId, board.id, {
         name: newName.trim(),
         fieldType: newType,
-        isRequired: newRequired,
+        // Custom task parameters are always optional — the UI doesn't let users mark
+        // them as required anymore (only system parameters are required by design).
+        isRequired: false,
         options: ["select", "multiselect"].includes(newType) ? newOptions : undefined,
       });
       setNewName("");
       setNewType("text");
-      setNewRequired(false);
       setNewOptions([]);
       setShowAddForm(false);
       await onReload();
@@ -1872,7 +1890,11 @@ function BoardTaskTemplateTab({
   }
 
   function getCurrentPriorityValues(): string[] {
+    // Учитываем оба возможных места хранения: `board.priorityOptions` и
+    // `priorityField.options`. Какое из них реально наполняется — зависит от бэкенда.
     if (board.priorityOptions && board.priorityOptions.length > 0) return board.priorityOptions;
+    const fromField = priorityField?.options ?? [];
+    if (fromField.length > 0) return fromField;
     return refs.priorityTypeOptions.find(o => o.key === board.priorityType)?.defaultValues || [];
   }
 
@@ -2006,9 +2028,7 @@ function BoardTaskTemplateTab({
             <div>
               <p className="text-xs text-slate-600 mb-2">Значения параметра {priorityLabel}:</p>
               {(() => {
-                const fieldOpts = priorityField?.options?.length ? priorityField.options : [];
-                const defaultOpts = refs.priorityTypeOptions.find(o => o.key === board.priorityType)?.defaultValues || [];
-                const currentValues = fieldOpts.length > 0 ? fieldOpts : defaultOpts;
+                const currentValues = getCurrentPriorityValues();
                 return (<>
               <div className="flex flex-wrap gap-1.5 mb-2">
                 {currentValues.map((val) => (
@@ -2076,7 +2096,7 @@ function BoardTaskTemplateTab({
               const unitName = currentUnit?.name || board.estimationUnit;
               const example = board.estimationUnit === "story_points"
                 ? "Пример: 1, 2, 3, 5, 8, 13 (числа Фибоначчи)"
-                : "Пример: 2ч 30м, 4ч, 1д 2ч (часы и минуты)";
+                : "Пример: 4, 10, 48 (часы)";
               return (
                 <p className="text-xs text-slate-500">
                   Текущая единица: <strong>{unitName}</strong>. {example}
@@ -2209,20 +2229,9 @@ function BoardTaskTemplateTab({
                 </div>
               )}
 
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="field-required"
-                  checked={newRequired}
-                  onChange={(e) => setNewRequired(e.target.checked)}
-                  className="w-4 h-4 text-purple-600 rounded"
-                />
-                <label htmlFor="field-required" className="text-sm">Обязательное поле</label>
-              </div>
-
               <div className="flex gap-2 pt-2">
                 <button
-                  onClick={() => { setShowAddForm(false); setNewName(""); setNewType("text"); setNewRequired(false); setNewOptions([]); }}
+                  onClick={() => { setShowAddForm(false); setNewName(""); setNewType("text"); setNewOptions([]); }}
                   className="flex-1 px-4 py-2 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
                 >
                   Отмена
@@ -2254,9 +2263,6 @@ function BoardTaskTemplateTab({
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
                           <p className="font-medium">{field.name}</p>
-                          {field.isRequired && (
-                            <span className="text-xs px-1.5 py-0.5 bg-red-100 text-red-700 rounded">обязательное</span>
-                          )}
                           <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">кастомное</span>
                         </div>
                         <p className="text-sm text-slate-600 mt-0.5">Тип: {FIELD_TYPE_LABELS[field.fieldType] || field.fieldType}</p>
@@ -2276,29 +2282,16 @@ function BoardTaskTemplateTab({
 
                   {isExpanded && (
                     <div className="px-4 pb-4 space-y-3 border-t border-slate-100 pt-3">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-xs font-medium mb-1">Название *</label>
-                          <DebouncedInput
-                            value={field.name}
-                            onSave={(val) => handleUpdateCustomField(field.id, { name: val })}
-                            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                            placeholder="Название параметра..."
-                            required
-                            requiredMessage="Название параметра не может быть пустым"
-                          />
-                        </div>
-                        <div className="flex items-end pb-1">
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={field.isRequired}
-                              onChange={(e) => handleUpdateCustomField(field.id, { isRequired: e.target.checked })}
-                              className="w-4 h-4 text-purple-600 rounded"
-                            />
-                            <span className="text-sm">Обязательное поле</span>
-                          </label>
-                        </div>
+                      <div>
+                        <label className="block text-xs font-medium mb-1">Название *</label>
+                        <DebouncedInput
+                          value={field.name}
+                          onSave={(val) => handleUpdateCustomField(field.id, { name: val })}
+                          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                          placeholder="Название параметра..."
+                          required
+                          requiredMessage="Название параметра не может быть пустым"
+                        />
                       </div>
 
                       {["select", "multiselect"].includes(field.fieldType) && (
@@ -2388,7 +2381,6 @@ function ProjectParamsSection({ templateId, isScrum, refs, params, onReload }: {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState("text");
-  const [newRequired, setNewRequired] = useState(false);
   const [newOptions, setNewOptions] = useState<string[]>([]);
   const [optionInput, setOptionInput] = useState("");
 
@@ -2428,12 +2420,13 @@ function ProjectParamsSection({ templateId, isScrum, refs, params, onReload }: {
       await createTemplateProjectParam(templateId, {
         name: newName.trim(),
         fieldType: newType,
-        isRequired: newRequired,
+        // Custom project parameters are always optional — the UI doesn't let users mark
+        // them as required anymore.
+        isRequired: false,
         options: ["select", "multiselect"].includes(newType) ? newOptions : null,
       });
       setNewName("");
       setNewType("text");
-      setNewRequired(false);
       setNewOptions([]);
       setShowAddForm(false);
       await onReload();
@@ -2582,20 +2575,9 @@ function ProjectParamsSection({ templateId, isScrum, refs, params, onReload }: {
                   </div>
                 )}
 
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="project-param-required"
-                    checked={newRequired}
-                    onChange={(e) => setNewRequired(e.target.checked)}
-                    className="w-4 h-4 text-purple-600 rounded"
-                  />
-                  <label htmlFor="project-param-required" className="text-sm">Обязательное поле</label>
-                </div>
-
                 <div className="flex gap-2 pt-2">
                   <button
-                    onClick={() => { setShowAddForm(false); setNewName(""); setNewType("text"); setNewRequired(false); setNewOptions([]); }}
+                    onClick={() => { setShowAddForm(false); setNewName(""); setNewType("text"); setNewOptions([]); }}
                     className="flex-1 px-4 py-2 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
                   >
                     Отмена
@@ -2627,9 +2609,6 @@ function ProjectParamsSection({ templateId, isScrum, refs, params, onReload }: {
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
                             <p className="font-medium text-sm">{param.name}</p>
-                            {param.isRequired && (
-                              <span className="text-xs px-1.5 py-0.5 bg-red-100 text-red-700 rounded">обязательное</span>
-                            )}
                             <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">кастомное</span>
                           </div>
                           <p className="text-sm text-slate-600 mt-0.5">Тип: {FIELD_TYPE_LABELS_LOCAL[param.fieldType] || param.fieldType}</p>
@@ -2649,29 +2628,16 @@ function ProjectParamsSection({ templateId, isScrum, refs, params, onReload }: {
 
                     {isExpanded && (
                       <div className="px-4 pb-4 space-y-3 border-t border-slate-100 pt-3">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-xs font-medium mb-1">Название *</label>
-                            <DebouncedInput
-                              value={param.name}
-                              onSave={(val) => handleUpdateCustomParam(param.id, { name: val })}
-                              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                              placeholder="Название параметра..."
-                              required
-                              requiredMessage="Название параметра не может быть пустым"
-                            />
-                          </div>
-                          <div className="flex items-end pb-1">
-                            <label className="flex items-center gap-2 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={param.isRequired}
-                                onChange={(e) => handleUpdateCustomParam(param.id, { isRequired: e.target.checked })}
-                                className="w-4 h-4 text-purple-600 rounded"
-                              />
-                              <span className="text-sm">Обязательное поле</span>
-                            </label>
-                          </div>
+                        <div>
+                          <label className="block text-xs font-medium mb-1">Название *</label>
+                          <DebouncedInput
+                            value={param.name}
+                            onSave={(val) => handleUpdateCustomParam(param.id, { name: val })}
+                            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                            placeholder="Название параметра..."
+                            required
+                            requiredMessage="Название параметра не может быть пустым"
+                          />
                         </div>
 
                         {["select", "multiselect"].includes(param.fieldType) && (
@@ -2780,11 +2746,13 @@ function ProjectRolesSection({
     if (a.area.startsWith("project.")) areaMap[a.area.slice(8)] = a;
     else areaMap[`project.${a.area}`] = a;
   }
+  // Backend возвращает area уже с префиксом `project.` — добавляем его только если его ещё нет.
+  const toProjectArea = (area: string) => (area.startsWith("project.") ? area : `project.${area}`);
 
   async function handleAddRole() {
     if (!newRoleName.trim()) return;
     try {
-      const defaultPerms: TemplateRolePermission[] = permissionAreas.map(a => ({ area: `project.${a.area}`, access: "none" as const }));
+      const defaultPerms: TemplateRolePermission[] = permissionAreas.map(a => ({ area: toProjectArea(a.area), access: "none" as const }));
       const newRole = await createTemplateRole(templateId, {
         name: newRoleName.trim(),
         description: newRoleDescription.trim(),
@@ -2959,7 +2927,7 @@ function ProjectRolesSection({
                       <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Права доступа</p>
                       <div className="space-y-1.5">
                         {permissionAreas.map((areaDef) => {
-                          const permArea = `project.${areaDef.area}`;
+                          const permArea = toProjectArea(areaDef.area);
                           const perm = role.permissions.find(p => p.area === permArea);
                           const currentAccess = perm?.access || (role.isAdmin ? "full" : "none");
                           const allAccessLevels = [...accessLevels, ...(accessLevels.find(l => l.key === "none") ? [] : [{ key: "none", name: "Нет доступа", description: "" }])];

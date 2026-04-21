@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Plus, Search, Edit, Trash2, UserCheck, UserX, Shield, X, Loader2,
   AlertCircle, CheckCircle2, Save, Eye, EyeOff, Info, ShieldCheck, Check,
+  Briefcase, FolderKanban,
 } from 'lucide-react';
 import { Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle } from '../../components/ui/Modal';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
@@ -9,10 +10,12 @@ import { Select, SelectOption } from '../../components/ui/Select';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { PageSpinner } from '../../components/ui/Spinner';
 import {
-  getAdminUsers, createAdminUser, updateAdminUser, deleteAdminUser,
+  getAdminUsersPage, getAdminUsersStats, createAdminUser, updateAdminUser, deleteAdminUser,
   getSystemRoles,
   type AdminUser, type SystemRole, type UpdateUserPayload,
 } from '../../api/admin';
+import { useInfinitePage } from '../../hooks/useInfinitePage';
+import { getUserProjectRoles, type ProjectRoleResponse } from '../../api/users';
 import { getPasswordPolicy, type PasswordPolicy } from '../../api/auth';
 import { ApiError } from '../../api/client';
 import { UserAvatar } from '../../components/UserAvatar';
@@ -38,18 +41,102 @@ const emptyForm: UserForm = {
   roleIds: [],
 };
 
+const PAGE_SIZE = 40;
+
+interface UserRolesCellProps {
+  user: AdminUser;
+  /** `null` — ещё грузим; `undefined` — не начинали; массив — готовые данные. */
+  projectRoles: ProjectRoleResponse[] | null | undefined;
+  compact?: boolean;
+}
+
+function UserRolesCell({ user, projectRoles, compact = false }: UserRolesCellProps) {
+  const badgeCls = compact
+    ? 'px-2.5 py-1 text-xs font-semibold rounded-full inline-flex items-center gap-1'
+    : 'px-3 py-1 text-sm font-semibold rounded-full inline-flex items-center gap-1';
+  const iconSize = compact ? 12 : 14;
+  const projectList = Array.isArray(projectRoles) ? projectRoles.filter((p) => p.roles.length > 0) : [];
+  const hasAny = user.roles.length > 0 || projectList.length > 0;
+
+  return (
+    <div className="space-y-2">
+      {/* Системные роли */}
+      <div>
+        <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Системные</p>
+        {user.roles.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {user.roles.map((role) => (
+              <span key={role.id} className={`${badgeCls} bg-purple-100 text-purple-700`}>
+                <Shield size={iconSize} />
+                {role.name}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <span className="text-xs text-slate-400 italic">Нет системных ролей</span>
+        )}
+      </div>
+
+      {/* Проектные роли */}
+      <div>
+        <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Проектные</p>
+        {projectRoles === null || projectRoles === undefined ? (
+          <span className="inline-flex items-center gap-1 text-xs text-slate-400">
+            <Loader2 size={iconSize} className="animate-spin" />
+            Загрузка...
+          </span>
+        ) : projectList.length === 0 ? (
+          <span className="text-xs text-slate-400 italic">Нет проектных ролей</span>
+        ) : (
+          <div className="space-y-1.5">
+            {projectList.map((project) => (
+              <div key={project.projectId} className="flex flex-wrap items-center gap-1.5">
+                <span className="inline-flex items-center gap-1 text-xs text-slate-600 font-medium">
+                  <FolderKanban size={iconSize} className="text-slate-400" />
+                  {project.projectName}:
+                </span>
+                {project.roles.map((role) => (
+                  <span key={role.id} className={`${badgeCls} bg-indigo-100 text-indigo-700`}>
+                    {role.name}
+                  </span>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {!hasAny && projectRoles !== null && projectRoles !== undefined && (
+        <span className="text-xs text-slate-400 italic">Ролей нет</span>
+      )}
+    </div>
+  );
+}
+
 export default function AdminUsers() {
   const { hasFullPermission } = useAuth();
   const canEdit = hasFullPermission('system.users.manage');
-  const [users, setUsers] = useState<AdminUser[]>([]);
   const [roles, setRoles] = useState<SystemRole[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [reloadToken, setReloadToken] = useState(0);
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Filters
+  // Filters (серверные)
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterRole, setFilterRole] = useState<string>('all');
+
+  // Глобальные счётчики (не зависят от q/status/role).
+  const [stats, setStats] = useState({ total: 0, activeCount: 0, inactiveCount: 0 });
+
+  // Кэш проектных ролей по userId. Дёргаем /users/{id}/project-roles,
+  // когда пользователь появляется в текущей странице. `null` — грузим.
+  const [projectRoles, setProjectRoles] = useState<Record<string, ProjectRoleResponse[] | null>>({});
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(searchQuery), 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -67,30 +154,80 @@ export default function AdminUsers() {
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
-    loadData();
+    loadAuxData();
   }, []);
 
-  async function loadData() {
+  // Глобальная статистика: при первой загрузке и после create/update/delete.
+  useEffect(() => {
+    let cancelled = false;
+    getAdminUsersStats()
+      .then((s) => { if (!cancelled) setStats(s); })
+      .catch(() => { /* ignore */ });
+    return () => { cancelled = true; };
+  }, [reloadToken]);
+
+  const fetcher = useMemo(
+    () => async (limit: number, offset: number) => {
+      const isActive =
+        filterStatus === 'active' ? true :
+        filterStatus === 'inactive' ? false : undefined;
+      const page = await getAdminUsersPage(limit, offset, {
+        q: debouncedQuery || undefined,
+        isActive,
+        roleId: filterRole === 'all' ? undefined : filterRole,
+      });
+      return { items: page.users, total: page.total };
+    },
+    [debouncedQuery, filterStatus, filterRole],
+  );
+
+  const {
+    items: users,
+    total: foundCount,
+    loading: usersLoading,
+    loadingMore,
+    hasMore,
+    sentinelRef,
+  } = useInfinitePage<AdminUser>(fetcher, PAGE_SIZE, [debouncedQuery, filterStatus, filterRole, reloadToken]);
+
+  const filtersActive =
+    debouncedQuery !== '' || filterStatus !== 'all' || filterRole !== 'all';
+
+  // Подтягиваем проектные роли для каждого пользователя, которого впервые увидели на странице.
+  useEffect(() => {
+    const missing = users.filter((u) => !(u.id in projectRoles));
+    if (missing.length === 0) return;
+    setProjectRoles((prev) => {
+      const next = { ...prev };
+      for (const u of missing) next[u.id] = null;
+      return next;
+    });
+    missing.forEach((u) => {
+      getUserProjectRoles(u.id)
+        .then((list) => {
+          setProjectRoles((prev) => ({ ...prev, [u.id]: Array.isArray(list) ? list : [] }));
+        })
+        .catch(() => {
+          setProjectRoles((prev) => ({ ...prev, [u.id]: [] }));
+        });
+    });
+  }, [users, projectRoles]);
+
+  // Сбрасываем кэш проектных ролей после CUD-операций — они могли поменяться.
+  useEffect(() => {
+    setProjectRoles({});
+  }, [reloadToken]);
+
+  async function loadAuxData() {
     const errors: string[] = [];
     try {
-      const [usersResult, rolesResult, policyResult] = await Promise.allSettled([
-        getAdminUsers(),
+      const [rolesResult, policyResult] = await Promise.allSettled([
         getSystemRoles(),
         getPasswordPolicy(),
       ]);
 
       if (policyResult.status === 'fulfilled' && policyResult.value) {
         setPolicy(policyResult.value);
-      }
-
-      if (usersResult.status === 'fulfilled' && Array.isArray(usersResult.value)) {
-        setUsers(usersResult.value);
-      } else {
-        setUsers([]);
-        const reason = usersResult.status === 'rejected'
-          ? (usersResult.reason instanceof ApiError ? usersResult.reason.message : String(usersResult.reason))
-          : 'Неверный формат ответа';
-        errors.push(`Пользователи: ${reason}`);
       }
 
       if (rolesResult.status === 'fulfilled' && Array.isArray(rolesResult.value)) {
@@ -108,40 +245,19 @@ export default function AdminUsers() {
       }
     } catch {
       setMsg({ type: 'error', text: 'Не удалось загрузить данные' });
-    } finally {
-      setLoading(false);
     }
   }
 
-  async function loadUsers() {
-    try {
-      const data = await getAdminUsers();
-      setUsers(Array.isArray(data) ? data : []);
-    } catch {
-      setMsg({ type: 'error', text: 'Не удалось загрузить пользователей' });
-    }
+  function reloadUsers() {
+    setReloadToken((n) => n + 1);
   }
 
-  const filteredUsers = users.filter((user) => {
-    const q = searchQuery.toLowerCase();
-    const matchesSearch =
-      !q ||
-      user.fullName.toLowerCase().includes(q) ||
-      user.email.toLowerCase().includes(q) ||
-      user.username.toLowerCase().includes(q);
-    const matchesStatus =
-      filterStatus === 'all' ||
-      (filterStatus === 'active' && user.isActive) ||
-      (filterStatus === 'inactive' && !user.isActive);
-    const matchesRole =
-      filterRole === 'all' ||
-      user.roles.some((r) => r.id === filterRole);
-    return matchesSearch && matchesStatus && matchesRole;
-  });
+  // Фильтрация теперь серверная — отображаем список как есть.
+  const filteredUsers = users;
 
-  const totalCount = users.length;
-  const activeCount = users.filter((u) => u.isActive).length;
-  const inactiveCount = users.filter((u) => !u.isActive).length;
+  const totalCount = stats.total;
+  const activeCount = stats.activeCount;
+  const inactiveCount = stats.inactiveCount;
 
   const passwordChecks = policy
     ? [
@@ -236,7 +352,7 @@ export default function AdminUsers() {
         setMsg({ type: 'success', text: `Пользователь "${form.fullName.trim()}" создан` });
       }
       setModalOpen(false);
-      await loadUsers();
+      reloadUsers();
     } catch (err) {
       if (err instanceof ApiError) {
         setModalError(err.message);
@@ -255,7 +371,7 @@ export default function AdminUsers() {
       await deleteAdminUser(deleteTarget.id);
       setMsg({ type: 'success', text: `Пользователь "${deleteTarget.fullName}" удалён` });
       setDeleteTarget(null);
-      await loadUsers();
+      reloadUsers();
     } catch (err) {
       if (err instanceof ApiError) {
         setMsg({ type: 'error', text: err.message });
@@ -266,10 +382,6 @@ export default function AdminUsers() {
     } finally {
       setDeleting(false);
     }
-  }
-
-  if (loading) {
-    return <PageSpinner tone="text-purple-600" />;
   }
 
   return (
@@ -306,7 +418,19 @@ export default function AdminUsers() {
           ) : (
             <AlertCircle size={18} className="shrink-0 mt-0.5" />
           )}
-          <span>{msg.text}</span>
+          <span className="flex-1">{msg.text}</span>
+          <button
+            type="button"
+            onClick={() => setMsg(null)}
+            aria-label="Закрыть"
+            className={`shrink-0 -m-1 p-1 rounded-md transition-colors ${
+              msg.type === 'success'
+                ? 'hover:bg-green-100 text-green-700'
+                : 'hover:bg-red-100 text-red-700'
+            }`}
+          >
+            <X size={16} />
+          </button>
         </div>
       )}
 
@@ -343,7 +467,7 @@ export default function AdminUsers() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className={`grid grid-cols-1 gap-6 ${filtersActive ? 'md:grid-cols-2 xl:grid-cols-4' : 'md:grid-cols-3'}`}>
         <div className="bg-white rounded-xl p-6 shadow-md border border-slate-100">
           <div className="flex items-center gap-3">
             <div className="bg-blue-100 p-3 rounded-lg">
@@ -379,22 +503,42 @@ export default function AdminUsers() {
             </div>
           </div>
         </div>
+
+        {filtersActive && (
+          <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-6 shadow-md border border-purple-100">
+            <div className="flex items-center gap-3">
+              <div className="bg-purple-600 p-3 rounded-lg">
+                <Search className="text-white" size={24} />
+              </div>
+              <div>
+                <p className="text-slate-600 text-sm">Найдено</p>
+                <p className="text-2xl font-bold">{foundCount}</p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
+      {usersLoading && <PageSpinner tone="text-purple-600" />}
+
       {/* Users Table — desktop */}
+      {!usersLoading && (
       <div className="hidden md:block bg-white rounded-xl shadow-md border border-slate-100 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                  Пользователь
+                  Пользователь (ФИО, логин)
                 </th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
                   Email
                 </th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                  Роль
+                  Должность
+                </th>
+                <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
+                  Роли
                 </th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
                   Статус
@@ -408,7 +552,7 @@ export default function AdminUsers() {
               {filteredUsers.map((user) => (
                 <tr
                   key={user.id}
-                  className="hover:bg-slate-50 transition-colors"
+                  className="hover:bg-slate-50 transition-colors align-top"
                 >
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
@@ -423,8 +567,9 @@ export default function AdminUsers() {
                           role: user.roles[0]?.name || '',
                         }}
                         size="md"
+                        className="shrink-0"
                       />
-                      <div>
+                      <div className="min-w-0">
                         <p className="font-semibold">{user.fullName}</p>
                         <p className="text-sm text-slate-500">@{user.username}</p>
                       </div>
@@ -433,21 +578,18 @@ export default function AdminUsers() {
                   <td className="px-6 py-4 text-sm text-slate-600">
                     {user.email}
                   </td>
+                  <td className="px-6 py-4 text-sm text-slate-700">
+                    {user.position ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        <Briefcase size={14} className="text-slate-400 shrink-0" />
+                        {user.position}
+                      </span>
+                    ) : (
+                      <span className="text-slate-400 italic">—</span>
+                    )}
+                  </td>
                   <td className="px-6 py-4">
-                    <div className="flex flex-wrap gap-1">
-                      {user.roles.map((role) => (
-                        <span
-                          key={role.id}
-                          className="px-3 py-1 bg-purple-100 text-purple-700 text-sm font-semibold rounded-full inline-flex items-center gap-1"
-                        >
-                          <Shield size={14} />
-                          {role.name}
-                        </span>
-                      ))}
-                      {user.roles.length === 0 && (
-                        <span className="text-sm text-slate-400 italic">Нет роли</span>
-                      )}
-                    </div>
+                    <UserRolesCell user={user} projectRoles={projectRoles[user.id]} />
                   </td>
                   <td className="px-6 py-4">
                     <span
@@ -486,8 +628,10 @@ export default function AdminUsers() {
           </table>
         </div>
       </div>
+      )}
 
       {/* Users Cards — mobile */}
+      {!usersLoading && (
       <ul className="md:hidden space-y-3">
         {filteredUsers.map((user) => (
           <li
@@ -511,6 +655,12 @@ export default function AdminUsers() {
                 <p className="font-semibold truncate">{user.fullName}</p>
                 <p className="text-sm text-slate-500 truncate">@{user.username}</p>
                 <p className="text-xs text-slate-500 mt-0.5 truncate">{user.email}</p>
+                {user.position && (
+                  <p className="text-xs text-slate-700 mt-1 flex items-center gap-1 truncate">
+                    <Briefcase size={12} className="text-slate-400 shrink-0" />
+                    <span className="truncate">{user.position}</span>
+                  </p>
+                )}
               </div>
               {canEdit && (
                 <div className="flex items-center gap-1 shrink-0">
@@ -531,9 +681,9 @@ export default function AdminUsers() {
                 </div>
               )}
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="space-y-2">
               <span
-                className={`px-2.5 py-1 text-xs font-semibold rounded-full ${
+                className={`inline-block px-2.5 py-1 text-xs font-semibold rounded-full ${
                   user.isActive
                     ? 'bg-green-100 text-green-700'
                     : 'bg-red-100 text-red-700'
@@ -541,30 +691,26 @@ export default function AdminUsers() {
               >
                 {user.isActive ? 'Активен' : 'Заблокирован'}
               </span>
-              {user.roles.map((role) => (
-                <span
-                  key={role.id}
-                  className="px-2.5 py-1 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full inline-flex items-center gap-1"
-                >
-                  <Shield size={12} />
-                  {role.name}
-                </span>
-              ))}
-              {user.roles.length === 0 && (
-                <span className="text-xs text-slate-400 italic">Нет роли</span>
-              )}
+              <UserRolesCell user={user} projectRoles={projectRoles[user.id]} compact />
             </div>
           </li>
         ))}
       </ul>
+      )}
 
-      {filteredUsers.length === 0 && (
+      {!usersLoading && filteredUsers.length === 0 && (
         <div className="bg-white rounded-xl border border-slate-200">
           <EmptyState
             icon={<Search size={48} />}
             title="Пользователи не найдены"
             description="Попробуйте изменить критерии поиска"
           />
+        </div>
+      )}
+
+      {hasMore && (
+        <div ref={sentinelRef} className="flex items-center justify-center py-6">
+          {loadingMore && <Loader2 size={24} className="animate-spin text-purple-600" />}
         </div>
       )}
 

@@ -18,6 +18,11 @@ function convertKeys(obj: unknown): unknown {
   return obj;
 }
 
+/** Exported for API helpers that bypass apiRequest (e.g. multipart uploads). */
+export function camelizeResponse<T>(raw: unknown): T {
+  return convertKeys(raw) as T;
+}
+
 // ── camelCase → snake_case deep converter (for request bodies) ──
 
 function camelToSnake(str: string): string {

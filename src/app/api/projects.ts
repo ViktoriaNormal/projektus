@@ -12,7 +12,7 @@ export interface ProjectResponse {
   id: string;
   key: string;
   name: string;
-  description: string;
+  description: string | null;
   projectType: 'scrum' | 'kanban';
   ownerId: string;
   status: 'active' | 'archived' | 'paused';
@@ -68,11 +68,17 @@ export function deleteProject(projectId: string) {
 
 // ── Project Members ─────────────────────────────────────────
 
+export interface ProjectMemberRoleRef {
+  id: string;
+  name: string;
+}
+
 export interface ProjectMemberResponse {
   id: string;
   projectId: string;
   userId: string;
-  roles: string[];
+  /** С 2026-04 бэкенд возвращает массив {id, name}. Запросы (addProjectMember, updateMemberRoles) по-прежнему принимают массив id. */
+  roles: ProjectMemberRoleRef[];
 }
 
 export function getProjectMembers(projectId: string) {

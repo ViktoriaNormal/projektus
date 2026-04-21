@@ -1,23 +1,17 @@
 import { useState, useEffect, useCallback } from "react";
-import { Link } from "react-router";
 import { Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 import { searchTasks, type TaskResponse } from "../api/tasks";
 import { getProjects, getProjectMembers, type ProjectResponse } from "../api/projects";
 import { getUser, type UserProfileResponse } from "../api/users";
-import { getBoardColumns, type ColumnResponse } from "../api/boards";
+import { getBoard, getBoardColumns, getProjectReferences, type BoardResponse, type ColumnResponse, type ProjectReferences } from "../api/boards";
 import { getTaskTags, type TagResponse } from "../api/tags";
 import { getTaskWatchers } from "../api/watchers";
 import { useAuth } from "../contexts/AuthContext";
-import { UserAvatar } from "../components/UserAvatar";
-import { priorityColor } from "../lib/status-colors";
-import { formatDate } from "../lib/format";
 import { Select, SelectOption } from "../components/ui/Select";
 import { EmptyState } from "../components/ui/EmptyState";
-
-function toAvatarUser(u: UserProfileResponse) {
-  return { fullName: u.fullName, avatarUrl: u.avatarUrl ?? undefined };
-}
+import { PageSpinner } from "../components/ui/Spinner";
+import { TaskListItem } from "../components/tasks/TaskListItem";
 
 function getTaskStatus(task: TaskResponse, columnCache: Map<string, ColumnResponse>): string {
   // Prefer backend-provided column info
@@ -46,6 +40,8 @@ export default function Tasks() {
   const [columnCache, setColumnCache] = useState<Map<string, ColumnResponse>>(new Map());
   const [tagCache, setTagCache] = useState<Map<string, TagResponse[]>>(new Map());
   const [watcherTaskIds, setWatcherTaskIds] = useState<Set<string>>(new Set());
+  const [boardCache, setBoardCache] = useState<Map<string, BoardResponse>>(new Map());
+  const [refs, setRefs] = useState<ProjectReferences | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -74,10 +70,11 @@ export default function Tasks() {
       setUserCache(newUserCache);
 
       // Resolve columns for status (skip if backend provides columnSystemType)
+      const boardIds = new Set<string>();
+      allTasks.forEach(t => { if (t.boardId) boardIds.add(t.boardId); });
+
       const needsColumnResolve = allTasks.some(t => t.columnId && !t.columnSystemType);
       if (needsColumnResolve) {
-        const boardIds = new Set<string>();
-        allTasks.forEach(t => { if (t.boardId) boardIds.add(t.boardId); });
         const newColumnCache = new Map<string, ColumnResponse>();
         await Promise.allSettled(
           [...boardIds].map(async (boardId) => {
@@ -89,6 +86,24 @@ export default function Tasks() {
         );
         setColumnCache(newColumnCache);
       }
+
+      // Resolve boards to get priorityType / estimationUnit for each task
+      const newBoardCache = new Map<string, BoardResponse>();
+      await Promise.allSettled(
+        [...boardIds].map(async (boardId) => {
+          try {
+            const b = await getBoard(boardId);
+            newBoardCache.set(b.id, b);
+          } catch { /**/ }
+        })
+      );
+      setBoardCache(newBoardCache);
+
+      // Refs (priority type labels, estimation unit labels) — one request
+      try {
+        const r = await getProjectReferences();
+        setRefs(r);
+      } catch { /**/ }
 
       // Resolve tags (skip if backend provides tags in response)
       const needsTagResolve = allTasks.some(t => !t.tags);
@@ -136,8 +151,14 @@ export default function Tasks() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // Показываем задачи только из активных проектов — архивные считаются неактуальными
+  const activeProjectIds = new Set(
+    projects.filter(p => p.status === "active").map(p => p.id),
+  );
+
   // Client-side filters — "Мои задачи" always scoped to tasks where current user is author, executor or watcher
   const filteredTasks = tasks.filter((task) => {
+    if (!activeProjectIds.has(task.projectId)) return false;
     const matchesSearch =
       task.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       task.key.toLowerCase().includes(searchQuery.toLowerCase());
@@ -154,11 +175,7 @@ export default function Tasks() {
   });
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
-      </div>
-    );
+    return <PageSpinner />;
   }
 
   return (
@@ -166,8 +183,8 @@ export default function Tasks() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Все задачи</h1>
-          <p className="text-slate-600 mt-1">Управление задачами по всем проектам</p>
+          <h1 className="text-3xl font-bold">Мои задачи</h1>
+          <p className="text-slate-600 mt-1">Управление моими задачами по всем проектам (где я автор/исполнитель/наблюдатель)</p>
         </div>
       </div>
 
@@ -187,7 +204,7 @@ export default function Tasks() {
 
           <Select value={filterProject} onValueChange={setFilterProject} ariaLabel="Фильтр по проекту">
             <SelectOption value="all">Все проекты</SelectOption>
-            {projects.filter(p => tasks.some(t => t.projectId === p.id)).map(p => (
+            {projects.filter(p => p.status === "active" && tasks.some(t => t.projectId === p.id)).map(p => (
               <SelectOption key={p.id} value={p.id}>{p.key} — {p.name}</SelectOption>
             ))}
           </Select>
@@ -203,94 +220,18 @@ export default function Tasks() {
 
       {/* Tasks List */}
       <div className="space-y-3">
-        {filteredTasks.map((task) => {
-          const project = projects.find((p) => p.id === task.projectId);
-          const executor = task.executorUserId ? userCache.get(task.executorUserId) : null;
-          const taskTags = task.tags ?? tagCache.get(task.id) ?? [];
-
-          return (
-            <Link
-              key={task.id}
-              to={`/tasks/${task.id}`}
-              className="block bg-white rounded-xl p-6 shadow-md border border-slate-100 hover:shadow-lg hover:border-blue-300 transition-all"
-            >
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-sm font-mono text-slate-500 font-semibold">
-                      {task.key}
-                    </span>
-                    {project && (
-                      <span className="px-2 py-1 bg-slate-100 text-slate-700 text-xs font-mono rounded">
-                        {project.key}
-                      </span>
-                    )}
-                    {task.priority && (
-                      <span className={`px-3 py-1 text-xs font-semibold rounded border ${
-                        priorityColor(task.priority)
-                      }`}>
-                        {task.priority}
-                      </span>
-                    )}
-                  </div>
-                  <h3 className="text-lg font-bold mb-2">{task.name}</h3>
-                  {task.description && (
-                    <p className="text-slate-600 text-sm line-clamp-2">{task.description}</p>
-                  )}
-                </div>
-                {task.progress != null && task.progress > 0 && (
-                  <div className="ml-4">
-                    <div className="text-right mb-2">
-                      <span className="text-sm font-semibold text-blue-600">{task.progress}%</span>
-                    </div>
-                    <div className="w-24 bg-slate-200 rounded-full h-2">
-                      <div
-                        className="bg-gradient-to-r from-blue-500 to-blue-600 h-2 rounded-full"
-                        style={{ width: `${task.progress}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {taskTags.length > 0 && (
-                <div className="flex items-center gap-2 mb-3">
-                  {taskTags.map((tag) => (
-                    <span key={typeof tag === "string" ? tag : tag.id}
-                      className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded">
-                      {typeof tag === "string" ? tag : tag.name}
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              <div className="flex items-center justify-between text-sm">
-                <div className="flex items-center gap-4">
-                  {executor ? (
-                    <div className="flex items-center gap-2">
-                      <UserAvatar user={toAvatarUser(executor)} size="sm" />
-                      <span className="text-slate-600">Исполнитель: {executor.fullName}</span>
-                    </div>
-                  ) : (
-                    <span className="text-slate-400">Не назначен</span>
-                  )}
-                </div>
-                <div className="flex items-center gap-4">
-                  {task.deadline && (
-                    <span className="text-slate-500">
-                      Срок: {formatDate(task.deadline, "dmy")}
-                    </span>
-                  )}
-                  {task.estimation && (
-                    <span className="text-slate-600 font-semibold">
-                      {task.estimation}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </Link>
-          );
-        })}
+        {filteredTasks.map((task) => (
+          <TaskListItem
+            key={task.id}
+            task={task}
+            project={projects.find((p) => p.id === task.projectId)}
+            executor={task.executorUserId ? userCache.get(task.executorUserId) : null}
+            taskTags={task.tags ?? tagCache.get(task.id) ?? []}
+            board={boardCache.get(task.boardId)}
+            refs={refs}
+            returnUrl="/tasks"
+          />
+        ))}
       </div>
 
       {filteredTasks.length === 0 && (

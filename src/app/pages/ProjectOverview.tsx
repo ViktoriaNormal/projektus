@@ -10,7 +10,6 @@ import {
   Activity,
   Ban,
   Video,
-  MapPin,
   ListTodo,
   Copy,
   Star,
@@ -19,26 +18,13 @@ import { toast } from "sonner";
 import { UserAvatar } from "../components/UserAvatar";
 import { searchTasks, type TaskResponse } from "../api/tasks";
 import { getProjectSprints, getSprintTasks, type SprintResponse } from "../api/sprints";
-import { getMeetings, type MeetingResponse } from "../api/meetings";
+import { getMeetings, getMeeting, type MeetingResponse, type MeetingDetailsResponse } from "../api/meetings";
 import { apiRequest } from "../api/client";
-import type { ProjectMemberResponse } from "../api/projects";
-import type { UserProfileResponse } from "../api/users";
+import { getProjects, type ProjectMemberResponse, type ProjectResponse } from "../api/projects";
+import { getUser, type UserProfileResponse } from "../api/users";
 import { formatDate } from "../lib/format";
-
-const meetingTypeLabels: Record<string, string> = {
-  scrum_planning: "Планирование спринта",
-  daily_scrum: "Daily Scrum",
-  sprint_review: "Обзор спринта",
-  sprint_retrospective: "Ретроспектива",
-  kanban_daily: "Ежедневная встреча",
-  kanban_risk_review: "Обзор рисков",
-  kanban_strategy_review: "Обзор стратегии",
-  kanban_service_delivery_review: "Обзор предоставления услуг",
-  kanban_operations_review: "Обзор операций",
-  kanban_replenishment: "Пополнение запасов",
-  kanban_delivery_planning: "Планирование поставок",
-  custom: "Пользовательское событие",
-};
+import { MeetingCard } from "../components/meetings/MeetingCard";
+import { MeetingModal } from "../components/modals/MeetingModal";
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -74,6 +60,10 @@ export default function ProjectOverview({
   const [tasks, setTasks] = useState<TaskResponse[]>([]);
   const [sprints, setSprints] = useState<SprintResponse[]>([]);
   const [meetings, setMeetings] = useState<MeetingResponse[]>([]);
+  const [meetingProjects, setMeetingProjects] = useState<ProjectResponse[]>([]);
+  const [organizerNames, setOrganizerNames] = useState<Map<string, string>>(new Map());
+  const [selectedMeeting, setSelectedMeeting] = useState<MeetingDetailsResponse | undefined>(undefined);
+  const [showMeetingModal, setShowMeetingModal] = useState(false);
   const [blockedTaskIds, setBlockedTaskIds] = useState<Set<string>>(new Set());
   const [activeSprintTasks, setActiveSprintTasks] = useState<TaskResponse[]>([]);
   const [loading, setLoading] = useState(true);
@@ -82,13 +72,22 @@ export default function ProjectOverview({
     async function load() {
       setLoading(true);
       try {
+        // Compute current week boundaries (Mon 00:00 inclusive — next Mon 00:00 exclusive).
+        // Used for both the API request window and the client-side filter for the block
+        // "Проектные встречи текущей недели".
+        const weekNow = new Date();
+        const weekdayIdx = weekNow.getDay(); // 0 = Sun, 1 = Mon, … 6 = Sat
+        const diffToMonday = weekdayIdx === 0 ? -6 : 1 - weekdayIdx;
+        const weekStart = new Date(weekNow);
+        weekStart.setDate(weekNow.getDate() + diffToMonday);
+        weekStart.setHours(0, 0, 0, 0);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 7);
+
         const [tasksResult, sprintsResult, meetingsResult] = await Promise.allSettled([
           searchTasks({ projectId }),
           projectType === "scrum" ? getProjectSprints(projectId) : Promise.resolve([]),
-          getMeetings(
-            new Date().toISOString(),
-            new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
-          ),
+          getMeetings(weekStart.toISOString(), weekEnd.toISOString()),
         ]);
 
         const allTasks = tasksResult.status === "fulfilled" ? tasksResult.value : [];
@@ -105,29 +104,54 @@ export default function ProjectOverview({
         setTasks(allTasks);
         setActiveSprintTasks(sprintTaskList);
 
-        // Filter meetings by projectId
+        // Keep only this-week meetings of the current project (including cancelled and
+        // already-finished ones — the UI labels each with the appropriate badge).
         if (meetingsResult.status === "fulfilled") {
           const raw = meetingsResult.value;
           const meetingsArray = Array.isArray(raw) ? raw : (raw as any)?.meetings ?? [];
-          setMeetings(
-            meetingsArray
-              .filter((m: MeetingResponse) => m.projectId === projectId && m.status === "active")
-              .sort((a: MeetingResponse, b: MeetingResponse) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
-              .slice(0, 5)
+          const weekStartMs = weekStart.getTime();
+          const weekEndMs = weekEnd.getTime();
+          const filtered: MeetingResponse[] = meetingsArray
+            .filter((m: MeetingResponse) => {
+              if (m.projectId !== projectId) return false;
+              const startMs = new Date(m.startTime).getTime();
+              return startMs >= weekStartMs && startMs < weekEndMs;
+            })
+            .sort((a: MeetingResponse, b: MeetingResponse) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+          setMeetings(filtered);
+          // Prefetch project list (so MeetingCard can show the linked project) and
+          // resolve organizer display names for the Copy-invite button.
+          try { setMeetingProjects(await getProjects()); } catch { /**/ }
+          const organizerIds = Array.from(new Set(filtered.map(m => m.organizerId).filter((id): id is string => !!id)));
+          const names = new Map<string, string>();
+          await Promise.allSettled(
+            organizerIds.map(async (id) => {
+              try { const u = await getUser(id); names.set(id, u.fullName); } catch { /**/ }
+            }),
           );
+          setOrganizerNames(names);
         }
 
-        // Load dependencies to find blocked tasks
+        // Load dependencies to find blocked tasks — a task is blocked only while at least one
+        // of its blockers is still incomplete; once the blocker is in a "completed" column,
+        // the link is considered resolved and the task is no longer shown as blocked.
+        const statusMap = new Map<string, string | null>();
+        allTasks.forEach(t => statusMap.set(t.id, t.columnSystemType ?? null));
         const blocked = new Set<string>();
         await Promise.allSettled(
           allTasks.slice(0, 50).map(async (task) => {
+            if (task.columnSystemType === "completed") return;
             try {
               const deps = await apiRequest<TaskDependencyResponse[]>(
                 `/tasks/${task.id}/dependencies`
               );
-              if (deps.some((d) => d.type === "is_blocked_by")) {
-                blocked.add(task.id);
-              }
+              const hasActiveBlocker = deps.some(
+                (d) =>
+                  d.type === "is_blocked_by" &&
+                  statusMap.has(d.dependsOnTaskId) &&
+                  statusMap.get(d.dependsOnTaskId) !== "completed",
+              );
+              if (hasActiveBlocker) blocked.add(task.id);
             } catch {
               /* skip */
             }
@@ -144,18 +168,20 @@ export default function ProjectOverview({
   // ── Derived data ────────────────────────────────────────────
 
   const now = new Date();
+  const todayStart = new Date(now);
+  todayStart.setHours(0, 0, 0, 0);
 
   // Task summary — based on active sprint tasks across all boards
   const statTasks = projectType === "scrum" ? activeSprintTasks : tasks;
   const totalTasks = statTasks.length;
   const overdueTasks = statTasks.filter(
-    (t) => t.deadline && new Date(t.deadline) < now
+    (t) => t.deadline && new Date(t.deadline) < todayStart
   );
   const completedTasks = statTasks.filter(t => t.columnSystemType === "completed").length;
   const inProgressTasks = statTasks.filter(t => t.columnSystemType === "in_progress").length;
 
   // Deadlines (≤3 days including today)
-  const threeDaysLater = new Date(now);
+  const threeDaysLater = new Date(todayStart);
   threeDaysLater.setDate(threeDaysLater.getDate() + 3);
   threeDaysLater.setHours(23, 59, 59, 999);
   const upcomingDeadlines = tasks
@@ -163,7 +189,7 @@ export default function ProjectOverview({
       if (!t.deadline) return false;
       if (t.columnSystemType === "completed") return false;
       const d = new Date(t.deadline);
-      return d >= now && d <= threeDaysLater;
+      return d >= todayStart && d <= threeDaysLater;
     })
     .sort((a, b) => new Date(a.deadline!).getTime() - new Date(b.deadline!).getTime())
     .slice(0, 8);
@@ -202,7 +228,7 @@ export default function ProjectOverview({
               </span>
             </div>
             {activeSprint.goal && (
-              <p className="text-sm text-blue-700 mb-3">{activeSprint.goal}</p>
+              <p className="text-sm text-blue-700 mb-3 whitespace-pre-wrap">{activeSprint.goal}</p>
             )}
             <div className="flex items-center gap-4 text-sm text-blue-600">
               <div className="flex items-center gap-1">
@@ -403,17 +429,15 @@ export default function ProjectOverview({
               const executor = task.executorUserId
                 ? memberUsers.get(task.executorUserId)
                 : null;
-              const daysLeft = Math.ceil(
-                (new Date(task.deadline!).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+              const dl = new Date(task.deadline!);
+              dl.setHours(0, 0, 0, 0);
+              const daysLeft = Math.round(
+                (dl.getTime() - todayStart.getTime()) / (1000 * 60 * 60 * 24)
               );
               return (
                 <div
                   key={task.id}
-                  className={`flex items-center gap-3 p-3 rounded-lg border ${
-                    daysLeft <= 2
-                      ? "bg-orange-50 border-orange-200"
-                      : "bg-slate-50 border-slate-200"
-                  }`}
+                  className="flex items-center gap-3 p-3 rounded-lg border bg-orange-50 border-orange-200"
                 >
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">
@@ -424,11 +448,7 @@ export default function ProjectOverview({
                   {executor && (
                     <UserAvatar user={toAvatarUser(executor)} size="sm" />
                   )}
-                  <span
-                    className={`text-xs font-semibold whitespace-nowrap ${
-                      daysLeft <= 2 ? "text-orange-600" : "text-slate-600"
-                    }`}
-                  >
+                  <span className="text-xs font-semibold whitespace-nowrap text-orange-600">
                     {daysLeft === 0
                       ? "сегодня"
                       : daysLeft === 1
@@ -446,89 +466,74 @@ export default function ProjectOverview({
         )}
       </div>
 
-      {/* Ближайшие встречи проекта */}
+      {/* Проектные встречи текущей недели */}
       <div className="bg-white rounded-xl p-6 shadow-md border border-slate-100">
         <div className="flex items-center gap-2 mb-4">
           <Video size={20} className="text-purple-600" />
-          <h3 className="text-lg font-bold">Ближайшие встречи</h3>
+          <h3 className="text-lg font-bold">Проектные встречи текущей недели</h3>
         </div>
 
         {meetings.length > 0 ? (
           <div className="space-y-3">
             {meetings.map((meeting) => {
-              const start = new Date(meeting.startTime);
-              const end = new Date(meeting.endTime);
-              const isToday = start.toDateString() === now.toDateString();
-              const isTomorrow =
-                start.toDateString() ===
-                new Date(now.getTime() + 24 * 60 * 60 * 1000).toDateString();
-
-              const dateLabel = isToday
-                ? "Сегодня"
-                : isTomorrow
-                ? "Завтра"
-                : start.toLocaleDateString("ru-RU", {
-                    day: "numeric",
-                    month: "short",
-                  });
-
+              const startMs = new Date(meeting.startTime).getTime();
+              const endMs = new Date(meeting.endTime).getTime();
+              const nowMs = now.getTime();
+              const isCancelled = meeting.status === "cancelled";
+              let badge: string | undefined;
+              let badgeClass: string | undefined;
+              if (!isCancelled) {
+                if (startMs <= nowMs && endMs > nowMs) {
+                  badge = "Идёт";
+                  badgeClass = "bg-green-50 text-green-700 border-green-200";
+                } else if (startMs > nowMs) {
+                  badge = "Запланирована";
+                  badgeClass = "bg-blue-50 text-blue-700 border-blue-200";
+                } else {
+                  badge = "Прошла";
+                  badgeClass = "bg-slate-100 text-slate-500 border-slate-200";
+                }
+              }
               return (
-                <div
+                <MeetingCard
                   key={meeting.id}
-                  className={`flex items-start gap-3 p-4 rounded-lg border ${
-                    isToday
-                      ? "bg-purple-50 border-purple-200"
-                      : "bg-slate-50 border-slate-200"
-                  }`}
-                >
-                  <div
-                    className={`p-2 rounded-lg flex-shrink-0 ${
-                      isToday ? "bg-purple-100" : "bg-slate-200"
-                    }`}
-                  >
-                    <Calendar
-                      size={16}
-                      className={isToday ? "text-purple-600" : "text-slate-600"}
-                    />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm">{meeting.name}</p>
-                    <div className="flex items-center gap-3 mt-1 text-xs text-slate-600">
-                      <span className="font-semibold">{dateLabel}</span>
-                      <span>
-                        {start.toLocaleTimeString("ru-RU", {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}{" "}
-                        –{" "}
-                        {end.toLocaleTimeString("ru-RU", {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </span>
-                      {meeting.meetingType && (
-                        <span className="px-1.5 py-0.5 bg-slate-200 rounded text-slate-700">
-                          {meetingTypeLabels[meeting.meetingType] || meeting.meetingType}
-                        </span>
-                      )}
-                    </div>
-                    {meeting.location && (
-                      <div className="flex items-center gap-1 mt-1 text-xs text-slate-500">
-                        <MapPin size={12} />
-                        <span>{meeting.location}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                  meeting={meeting}
+                  projects={meetingProjects}
+                  organizerName={meeting.organizerId ? organizerNames.get(meeting.organizerId) : undefined}
+                  cancelled={isCancelled}
+                  badge={badge}
+                  badgeClass={badgeClass}
+                  onClick={async () => {
+                    try {
+                      const details = await getMeeting(meeting.id);
+                      setSelectedMeeting(details);
+                    } catch {
+                      setSelectedMeeting({ ...meeting, participants: [] });
+                    }
+                    setShowMeetingModal(true);
+                  }}
+                />
               );
             })}
           </div>
         ) : (
           !loading && (
-            <p className="text-slate-500 text-sm">Нет запланированных встреч</p>
+            <p className="text-slate-500 text-sm">На этой неделе встреч по проекту нет</p>
           )
         )}
       </div>
+
+      {selectedMeeting && (
+        <MeetingModal
+          meeting={selectedMeeting}
+          isOpen={showMeetingModal}
+          mode="edit"
+          onClose={() => {
+            setShowMeetingModal(false);
+            setSelectedMeeting(undefined);
+          }}
+        />
+      )}
 
       {/* Команда проекта */}
       <div className="bg-white rounded-xl p-6 shadow-md border border-slate-100">

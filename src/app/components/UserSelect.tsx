@@ -1,12 +1,12 @@
-import { useState, useRef, useEffect, useCallback } from "react";
-import { ChevronDown, Search, X, Copy, Check } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { ChevronDown, Search, X, Check } from "lucide-react";
 import { UserAvatar } from "./UserAvatar";
-import { toast } from "sonner";
 
 export interface UserOption {
   id: string;
   fullName: string;
-  email?: string;
+  /** Login (username) shown under the full name — same style as comment author headers. */
+  username?: string;
   avatarUrl?: string;
 }
 
@@ -59,7 +59,7 @@ export function UserSelect({ options, value, onChange, placeholder = "Не вы�
   const selected = value ? options.find(u => u.id === value) : null;
   const filtered = options.filter(u =>
     u.fullName.toLowerCase().includes(search.toLowerCase()) ||
-    (u.email && u.email.toLowerCase().includes(search.toLowerCase()))
+    (u.username && u.username.toLowerCase().includes(search.toLowerCase()))
   );
 
   return (
@@ -71,12 +71,8 @@ export function UserSelect({ options, value, onChange, placeholder = "Не вы�
             <UserAvatar user={{ fullName: selected.fullName, avatarUrl: selected.avatarUrl }} size="sm" />
             <div className="min-w-0">
               <p className="text-sm font-medium truncate">{selected.fullName}</p>
-              {selected.email && (
-                <div className="flex items-center gap-1">
-                  <span className="text-xs text-slate-500 truncate">{selected.email}</span>
-                  <span role="button" onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(selected.email!); toast.success("Email скопирован"); }}
-                    className="p-0.5 text-slate-400 hover:text-blue-600 transition-colors shrink-0"><Copy size={11} /></span>
-                </div>
+              {selected.username && (
+                <span className="text-xs text-slate-500 truncate block">{selected.username}</span>
               )}
             </div>
           </div>
@@ -109,7 +105,7 @@ export function UserSelect({ options, value, onChange, placeholder = "Не вы�
                 <UserAvatar user={{ fullName: u.fullName, avatarUrl: u.avatarUrl }} size="sm" />
                 <div className="min-w-0">
                   <p className="text-sm font-medium truncate">{u.fullName}</p>
-                  {u.email && <p className="text-xs text-slate-500 truncate">{u.email}</p>}
+                  {u.username && <p className="text-xs text-slate-500 truncate">{u.username}</p>}
                 </div>
                 {value === u.id && <Check size={16} className="text-blue-600 shrink-0 ml-auto" />}
               </button>
@@ -143,7 +139,7 @@ export function UserMultiSelect({ options, value, onChange, placeholder = "Вы�
   const selectedUsers = value.map(id => options.find(u => u.id === id)).filter(Boolean) as UserOption[];
   const filtered = options.filter(u =>
     u.fullName.toLowerCase().includes(search.toLowerCase()) ||
-    (u.email && u.email.toLowerCase().includes(search.toLowerCase()))
+    (u.username && u.username.toLowerCase().includes(search.toLowerCase()))
   );
 
   const toggle = (userId: string) => {
@@ -182,7 +178,7 @@ export function UserMultiSelect({ options, value, onChange, placeholder = "Вы�
                   <UserAvatar user={{ fullName: u.fullName, avatarUrl: u.avatarUrl }} size="sm" />
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate">{u.fullName}</p>
-                    {u.email && <p className="text-xs text-slate-500 truncate">{u.email}</p>}
+                    {u.username && <p className="text-xs text-slate-500 truncate">{u.username}</p>}
                   </div>
                 </label>
               );
@@ -203,13 +199,7 @@ export function UserMultiSelect({ options, value, onChange, placeholder = "Вы�
                 <UserAvatar user={{ fullName: u.fullName, avatarUrl: u.avatarUrl }} size="sm" />
                 <div className="min-w-0">
                   <p className="text-sm font-medium">{u.fullName}</p>
-                  {u.email && (
-                    <div className="flex items-center gap-1">
-                      <span className="text-xs text-slate-500 truncate">{u.email}</span>
-                      <button onClick={() => { navigator.clipboard.writeText(u.email!); toast.success("Email скопирован"); }}
-                        className="p-0.5 text-slate-400 hover:text-blue-600 transition-colors shrink-0"><Copy size={12} /></button>
-                    </div>
-                  )}
+                  {u.username && <p className="text-xs text-slate-500 truncate">{u.username}</p>}
                 </div>
               </div>
               <button onClick={() => toggle(u.id)} className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 p-1 text-red-600 hover:bg-red-50 rounded"><X size={14} /></button>

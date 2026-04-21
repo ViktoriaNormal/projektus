@@ -177,19 +177,26 @@ function DebouncedInput({ value, onSave, className, placeholder, required, requi
 // ── DateTimeInput ─────────────────────────────────────────────
 
 function DateTimeInput({ value, onSave }: { value: string | null; onSave: (val: string | null) => void }) {
+  // Backend stores datetime in UTC ISO; the <input type="date"> / <input type="time">
+  // fields show the user's LOCAL date/time. Naive `.slice()` on the UTC string shifts
+  // the displayed moment by the TZ offset (the old bug — 00:00 local saved as 21:00Z,
+  // then shown back as "21:00"). Convert explicitly via getFullYear/getMonth/…/getMinutes.
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  const toLocalDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const toLocalTime = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
   const parsed = value ? new Date(value) : null;
-  const isValid = parsed && !isNaN(parsed.getTime());
+  const isValid = !!(parsed && !isNaN(parsed.getTime()));
 
-  const [dateStr, setDateStr] = useState(isValid ? parsed.toISOString().slice(0, 10) : "");
-  const [timeStr, setTimeStr] = useState(isValid ? parsed.toISOString().slice(11, 16) : "");
+  const [dateStr, setDateStr] = useState(isValid ? toLocalDate(parsed!) : "");
+  const [timeStr, setTimeStr] = useState(isValid ? toLocalTime(parsed!) : "");
   const [error, setError] = useState("");
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const p = value ? new Date(value) : null;
-    const v = p && !isNaN(p.getTime());
-    setDateStr(v ? p.toISOString().slice(0, 10) : "");
-    setTimeStr(v ? p.toISOString().slice(11, 16) : "");
+    const v = !!(p && !isNaN(p.getTime()));
+    setDateStr(v ? toLocalDate(p!) : "");
+    setTimeStr(v ? toLocalTime(p!) : "");
   }, [value]);
 
   function trySave(d: string, t: string) {
@@ -316,13 +323,7 @@ function UserPicker({ value, onSave, multiple }: {
               </div>
               <div className="min-w-0">
                 <p className="text-sm font-medium truncate">{selected.fullName}</p>
-                {selected.email && (
-                  <div className="flex items-center gap-1">
-                    <span className="text-xs text-slate-500 truncate">{selected.email}</span>
-                    <span role="button" onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(selected.email); }}
-                      className="p-0.5 text-slate-400 hover:text-purple-600 transition-colors shrink-0"><Copy size={11} /></span>
-                  </div>
-                )}
+                {selected.username && <p className="text-xs text-slate-500 truncate">{selected.username}</p>}
               </div>
             </div>
           ) : (
@@ -336,7 +337,7 @@ function UserPicker({ value, onSave, multiple }: {
               <div className="relative">
                 <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input type="text" autoFocus value={query} onChange={e => handleSearch(e.target.value)}
-                  placeholder="Поиск по имени или email..."
+                  placeholder="Поиск по имени или логину..."
                   className="w-full pl-8 pr-3 py-1.5 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500" />
               </div>
             </div>
@@ -355,7 +356,7 @@ function UserPicker({ value, onSave, multiple }: {
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate">{u.fullName}</p>
-                    {u.email && <p className="text-xs text-slate-500 truncate">{u.email}</p>}
+                    {u.username && <p className="text-xs text-slate-500 truncate">{u.username}</p>}
                   </div>
                   {selectedIds.includes(u.id) && <Check size={16} className="text-purple-600 shrink-0 ml-auto" />}
                 </button>
@@ -397,7 +398,7 @@ function UserPicker({ value, onSave, multiple }: {
             <div className="relative">
               <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
               <input type="text" autoFocus value={query} onChange={e => handleSearch(e.target.value)}
-                placeholder="Поиск по имени или email..."
+                placeholder="Поиск по имени или логину..."
                 className="w-full pl-8 pr-3 py-1.5 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500" />
             </div>
           </div>
@@ -412,7 +413,7 @@ function UserPicker({ value, onSave, multiple }: {
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate">{u.fullName}</p>
-                    {u.email && <p className="text-xs text-slate-500 truncate">{u.email}</p>}
+                    {u.username && <p className="text-xs text-slate-500 truncate">{u.username}</p>}
                   </div>
                 </label>
               );
@@ -435,13 +436,7 @@ function UserPicker({ value, onSave, multiple }: {
                 </div>
                 <div className="min-w-0">
                   <p className="text-sm font-medium">{u.fullName}</p>
-                  {u.email && (
-                    <div className="flex items-center gap-1">
-                      <span className="text-xs text-slate-500 truncate">{u.email}</span>
-                      <button onClick={() => navigator.clipboard.writeText(u.email)}
-                        className="p-0.5 text-slate-400 hover:text-purple-600 transition-colors shrink-0"><Copy size={12} /></button>
-                    </div>
-                  )}
+                  {u.username && <p className="text-xs text-slate-500 truncate">{u.username}</p>}
                 </div>
               </div>
               <button onClick={() => toggle(u.id)} className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 p-1 text-red-600 hover:bg-red-50 rounded"><X size={14} /></button>
@@ -466,7 +461,7 @@ function CopyButton({ text }: { text: string }) {
 
 // ── Types ──────────────────────────────────────────────────────
 
-interface MemberUser { userId: string; fullName: string; email?: string; avatarUrl?: string; }
+interface MemberUser { userId: string; fullName: string; username?: string; avatarUrl?: string; }
 
 interface ProjectParamsSectionProps {
   projectId: string;
@@ -493,7 +488,6 @@ export default function ProjectParamsSection({
   const [showAddForm, setShowAddForm] = useState(false);
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState("text");
-  const [newRequired, setNewRequired] = useState(false);
   const [newOptions, setNewOptions] = useState<string[]>([]);
   const [optionInput, setOptionInput] = useState("");
 
@@ -598,10 +592,12 @@ export default function ProjectParamsSection({
     }
     try {
       await createProjectParam(projectId, {
-        name: newName.trim(), fieldType: newType, isRequired: newRequired,
+        // Custom project parameters are always optional — the UI doesn't let users mark
+        // them as required anymore.
+        name: newName.trim(), fieldType: newType, isRequired: false,
         options: ["select", "multiselect"].includes(newType) ? newOptions : null,
       });
-      setNewName(""); setNewType("text"); setNewRequired(false); setNewOptions([]);
+      setNewName(""); setNewType("text"); setNewOptions([]);
       setShowAddForm(false);
       await onReload();
     } catch (e: any) { toastError(e, "Не удалось добавить параметр"); }
@@ -658,11 +654,11 @@ export default function ProjectParamsSection({
 
     // user / user_list types — from project members
     if (param.fieldType === "user") {
-      const memberOptions = members.map(m => ({ id: m.userId, fullName: m.fullName, email: m.email, avatarUrl: m.avatarUrl }));
+      const memberOptions = members.map(m => ({ id: m.userId, fullName: m.fullName, username: m.username, avatarUrl: m.avatarUrl }));
       return <UserSelect options={memberOptions} value={param.value || null} onChange={val => handleSaveParamValue(param.id, val)} placeholder="Не выбран" />;
     }
     if (param.fieldType === "user_list") {
-      const memberOptions = members.map(m => ({ id: m.userId, fullName: m.fullName, email: m.email, avatarUrl: m.avatarUrl }));
+      const memberOptions = members.map(m => ({ id: m.userId, fullName: m.fullName, username: m.username, avatarUrl: m.avatarUrl }));
       const selectedIds = param.value ? param.value.split(",").map(s => s.trim()).filter(Boolean) : [];
       return <UserMultiSelect options={memberOptions} value={selectedIds} onChange={ids => handleSaveParamValue(param.id, ids.length > 0 ? ids.join(",") : null)} />;
     }
@@ -863,12 +859,8 @@ export default function ProjectParamsSection({
                     )}
                   </div>
                 )}
-                <div className="flex items-center gap-2">
-                  <input type="checkbox" id="pp-required" checked={newRequired} onChange={(e) => setNewRequired(e.target.checked)} className="w-4 h-4 text-purple-600 rounded" />
-                  <label htmlFor="pp-required" className="text-sm">Обязательное поле</label>
-                </div>
                 <div className="flex gap-2 pt-2">
-                  <button onClick={() => { setShowAddForm(false); setNewName(""); setNewType("text"); setNewRequired(false); setNewOptions([]); }}
+                  <button onClick={() => { setShowAddForm(false); setNewName(""); setNewType("text"); setNewOptions([]); }}
                     className="flex-1 px-4 py-2 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">Отмена</button>
                   <button onClick={addCustomParam} disabled={!newName.trim()}
                     className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">Добавить</button>
@@ -886,7 +878,6 @@ export default function ProjectParamsSection({
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex items-center gap-2 flex-1">
                         <span className="font-medium text-sm">{param.name}</span>
-                        {param.isRequired && <span className="text-xs px-1.5 py-0.5 bg-red-100 text-red-700 rounded">обязательное</span>}
                         <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">кастомное</span>
                         <span className="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">{FIELD_TYPE_LABELS[param.fieldType] || param.fieldType}</span>
                       </div>
@@ -949,14 +940,6 @@ export default function ProjectParamsSection({
                   <label className="block text-sm font-medium mb-1">Тип параметра</label>
                   <input type="text" value={FIELD_TYPE_LABELS[editingParam.fieldType] || editingParam.fieldType} disabled
                     className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-slate-100 text-slate-500 cursor-not-allowed" />
-                </div>
-                <div>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" checked={editingParam.isRequired}
-                      onChange={(e) => { handleUpdateCustomParam(editingParam.id, { isRequired: e.target.checked }); }}
-                      className="w-4 h-4 text-purple-600 rounded" />
-                    <span className="text-sm">Обязательное поле</span>
-                  </label>
                 </div>
                 {["select", "multiselect"].includes(editingParam.fieldType) && (
                   <div>

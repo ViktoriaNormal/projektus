@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Search,
   Mail,
@@ -8,12 +8,14 @@ import {
   MessageCircle,
   Copy,
   Check,
+  Loader2,
 } from 'lucide-react';
 import { PageSpinner } from '../components/ui/Spinner';
 import { EmptyState } from '../components/ui/EmptyState';
 import { UserAvatar } from '../components/UserAvatar';
-import { searchUsers, type UserProfileResponse } from '../api/users';
+import { searchUsersPage, type UserProfileResponse } from '../api/users';
 import { useAuth } from '../contexts/AuthContext';
+import { useInfinitePage } from '../hooks/useInfinitePage';
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -36,47 +38,45 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+const PAGE_SIZE = 40;
+
 export default function Team() {
   const { user: authUser } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
-  const [users, setUsers] = useState<UserProfileResponse[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [debouncedQuery, setDebouncedQuery] = useState('');
   const [totalLoaded, setTotalLoaded] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
 
-  const loadUsers = useCallback(async (query: string) => {
-    setLoading(true);
-    try {
-      const result = await searchUsers(query, 100, 0);
-      const list = Array.isArray(result) ? result : [];
-      setUsers(list);
-      if (!query && !totalLoaded) {
-        setTotalCount(list.length);
-        setTotalLoaded(true);
-      }
-    } catch {
-      setUsers([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [totalLoaded]);
-
   useEffect(() => {
-    loadUsers('');
-  }, []);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      loadUsers(searchQuery);
-    }, 300);
-    return () => clearTimeout(timeout);
+    const t = setTimeout(() => setDebouncedQuery(searchQuery), 300);
+    return () => clearTimeout(t);
   }, [searchQuery]);
+
+  const fetcher = useMemo(
+    () =>
+      async (limit: number, offset: number) => {
+        const page = await searchUsersPage(debouncedQuery, limit, offset);
+        return { items: page.users, total: page.total };
+      },
+    [debouncedQuery],
+  );
+
+  const { items: users, total: foundCount, loading, loadingMore, hasMore, sentinelRef } =
+    useInfinitePage<UserProfileResponse>(fetcher, PAGE_SIZE, [debouncedQuery]);
+
+  // Захватываем "всего сотрудников" с первого ответа без поискового запроса.
+  useEffect(() => {
+    if (!debouncedQuery && !totalLoaded && !loading) {
+      setTotalCount(foundCount);
+      setTotalLoaded(true);
+    }
+  }, [debouncedQuery, totalLoaded, loading, foundCount]);
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">Коллеги</h1>
-        <p className="text-slate-600 mt-1">Поиск коллег по организации</p>
+        <h1 className="text-3xl font-bold">Сотрудники</h1>
+        <p className="text-slate-600 mt-1">Поиск сотрудников по организации</p>
       </div>
 
       {/* Search Bar */}
@@ -117,7 +117,7 @@ export default function Team() {
             </div>
             <div>
               <p className="text-slate-600 text-sm">Найдено</p>
-              <p className="text-2xl font-bold">{users.length}</p>
+              <p className="text-2xl font-bold">{foundCount}</p>
             </div>
           </div>
         </div>
@@ -217,9 +217,16 @@ export default function Team() {
         <div className="bg-white rounded-xl border border-slate-200">
           <EmptyState
             icon={<Search size={48} />}
-            title="Коллеги не найдены"
+            title="Сотрудники не найдены"
             description="Попробуйте изменить критерии поиска"
           />
+        </div>
+      )}
+
+      {/* Infinite scroll sentinel + loading indicator */}
+      {!loading && hasMore && (
+        <div ref={sentinelRef} className="flex items-center justify-center py-6">
+          {loadingMore && <Loader2 size={24} className="animate-spin text-blue-600" />}
         </div>
       )}
     </div>

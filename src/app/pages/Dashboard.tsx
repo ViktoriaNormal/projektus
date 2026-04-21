@@ -9,44 +9,59 @@ import {
 } from "lucide-react";
 import { PageSpinner } from "../components/ui/Spinner";
 import { useAuth } from "../contexts/AuthContext";
-import { UserAvatar } from "../components/UserAvatar";
 import { searchTasks, type TaskResponse } from "../api/tasks";
 import { getProjects, getProjectMembers, type ProjectResponse } from "../api/projects";
-import { getMeetings, type MeetingResponse } from "../api/meetings";
-import { priorityColor } from "../lib/status-colors";
-import { formatDate } from "../lib/format";
+import { getMeeting, getMeetings, createMeeting, updateMeeting, cancelMeeting, addParticipants, type MeetingResponse, type MeetingDetailsResponse, type CreateMeetingData, type UpdateMeetingData } from "../api/meetings";
+import { getBoard, getProjectReferences, type BoardResponse, type ProjectReferences } from "../api/boards";
+import { getUser, type UserProfileResponse } from "../api/users";
 import { EmptyState } from "../components/ui/EmptyState";
-
-const meetingTypeLabelMap: Record<string, string> = {
-  scrum_planning: "Планирование спринта",
-  daily_scrum: "Daily Scrum",
-  sprint_review: "Обзор спринта",
-  sprint_retrospective: "Ретроспектива",
-  kanban_daily: "Ежедневная встреча",
-  kanban_risk_review: "Обзор рисков",
-  kanban_strategy_review: "Обзор стратегии",
-  kanban_service_delivery_review: "Обзор предоставления услуг",
-  kanban_operations_review: "Обзор операций",
-  kanban_replenishment: "Пополнение запасов",
-  kanban_delivery_planning: "Планирование поставок",
-  custom: "Пользовательское событие",
-};
+import { TaskListItem } from "../components/tasks/TaskListItem";
+import { MeetingCard } from "../components/meetings/MeetingCard";
+import { MeetingModal } from "../components/modals/MeetingModal";
+import { ProjectCard } from "../components/projects/ProjectCard";
 
 export default function Dashboard() {
   const { user } = useAuth();
   const [tasks, setTasks] = useState<TaskResponse[]>([]);
   const [projects, setProjects] = useState<ProjectResponse[]>([]);
   const [meetings, setMeetings] = useState<MeetingResponse[]>([]);
+  const [boardCache, setBoardCache] = useState<Map<string, BoardResponse>>(new Map());
+  const [refs, setRefs] = useState<ProjectReferences | null>(null);
+  const [currentUserProfile, setCurrentUserProfile] = useState<UserProfileResponse | null>(null);
+  const [projectOwners, setProjectOwners] = useState<Record<string, UserProfileResponse>>({});
   const [loading, setLoading] = useState(true);
+  const [selectedMeeting, setSelectedMeeting] = useState<MeetingDetailsResponse | undefined>();
+  const [showMeetingModal, setShowMeetingModal] = useState(false);
+
+  const handleMeetingClick = async (meeting: MeetingResponse) => {
+    try {
+      const details = await getMeeting(meeting.id);
+      setSelectedMeeting(details);
+    } catch {
+      setSelectedMeeting({ ...meeting, participants: [] });
+    }
+    setShowMeetingModal(true);
+  };
+
+  const handleCreateMeeting = async (data: CreateMeetingData) => {
+    await createMeeting(data);
+  };
+
+  const handleUpdateMeeting = async (meetingId: string, data: UpdateMeetingData, newParticipantIds?: string[]) => {
+    await updateMeeting(meetingId, data);
+    if (newParticipantIds && newParticipantIds.length > 0) {
+      await addParticipants(meetingId, newParticipantIds);
+    }
+  };
+
+  const handleCancelMeeting = async (meetingId: string) => {
+    await cancelMeeting(meetingId);
+  };
 
   useEffect(() => {
     if (!user) return;
 
     setLoading(true);
-
-    const loadTasks = searchTasks({})
-      .then(t => setTasks(t.filter(task => task.executorUserId === user.id)))
-      .catch(() => setTasks([]));
 
     const loadProjects = getProjects()
       .then(async (allProjects) => {
@@ -63,8 +78,52 @@ export default function Dashboard() {
           .map(r => r.value)
           .filter((p): p is ProjectResponse => p !== null);
         setProjects(myProjects);
+
+        // Load owner profiles for the first 4 (rendered on dashboard).
+        const ownerIds = [...new Set(myProjects.slice(0, 4).map(p => p.ownerId).filter(Boolean))];
+        const owners: Record<string, UserProfileResponse> = {};
+        await Promise.allSettled(
+          ownerIds.map(async (id) => {
+            try { owners[id] = await getUser(id); } catch { /**/ }
+          }),
+        );
+        setProjectOwners(owners);
+
+        return new Set(myProjects.map(p => p.id));
       })
-      .catch(() => setProjects([]));
+      .catch(() => {
+        setProjects([]);
+        return new Set<string>();
+      });
+
+    const loadTasks = Promise.all([searchTasks({}), loadProjects])
+      .then(async ([allTasks, activeProjectIds]) => {
+        const myTasks = allTasks.filter(task =>
+          task.executorUserId === user.id && activeProjectIds.has(task.projectId),
+        );
+        setTasks(myTasks);
+        // Pre-load boards for the first 4 tasks (rendered on the dashboard) to get priorityType/estimationUnit.
+        const boardIds = new Set(myTasks.slice(0, 4).map(t => t.boardId).filter(Boolean));
+        const cache = new Map<string, BoardResponse>();
+        await Promise.allSettled(
+          [...boardIds].map(async (id) => {
+            try {
+              const b = await getBoard(id);
+              cache.set(b.id, b);
+            } catch { /**/ }
+          }),
+        );
+        setBoardCache(cache);
+      })
+      .catch(() => setTasks([]));
+
+    const loadRefs = getProjectReferences()
+      .then(setRefs)
+      .catch(() => { /**/ });
+
+    const loadCurrentUser = getUser(user.id)
+      .then(setCurrentUserProfile)
+      .catch(() => { /**/ });
 
     const today = new Date();
     const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -76,7 +135,7 @@ export default function Dashboard() {
       })
       .catch(() => setMeetings([]));
 
-    Promise.allSettled([loadTasks, loadProjects, loadMeetings])
+    Promise.allSettled([loadTasks, loadProjects, loadMeetings, loadRefs, loadCurrentUser])
       .finally(() => setLoading(false));
   }, [user]);
 
@@ -109,48 +168,21 @@ export default function Dashboard() {
               to="/tasks"
               className="text-blue-600 hover:text-blue-700 text-sm font-medium"
             >
-              Все задачи →
+              Мои задачи →
             </Link>
           </div>
           {tasks.length > 0 ? (
             <div className="space-y-3">
               {tasks.slice(0, 4).map((task) => (
-                <Link
+                <TaskListItem
                   key={task.id}
-                  to={`/tasks/${task.id}`}
-                  className="block p-3 border border-slate-200 rounded-lg hover:border-blue-300 hover:shadow-sm transition-all"
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xs font-mono text-slate-500">{task.key}</span>
-                        {task.priority && (
-                          <span
-                            className={`px-2 py-0.5 text-xs font-semibold rounded border ${
-                              priorityColor(task.priority)
-                            }`}
-                          >
-                            {task.priority}
-                          </span>
-                        )}
-                      </div>
-                      <p className="font-medium text-sm">{task.name}</p>
-                      {task.deadline && (
-                        <p className="text-xs text-slate-500 mt-1">
-                          Срок: {formatDate(task.deadline, "dmy")}
-                        </p>
-                      )}
-                    </div>
-                    <div className="ml-3 flex flex-col items-end gap-1">
-                      {user && <UserAvatar user={user} size="sm" />}
-                      {task.progress != null && task.progress > 0 && (
-                        <div className="text-xs font-semibold text-blue-600">
-                          {task.progress}%
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </Link>
+                  task={task}
+                  project={projects.find((p) => p.id === task.projectId)}
+                  executor={currentUserProfile}
+                  board={boardCache.get(task.boardId)}
+                  refs={refs}
+                  returnUrl="/"
+                />
               ))}
             </div>
           ) : (
@@ -179,40 +211,23 @@ export default function Dashboard() {
                 const end = new Date(meeting.endTime);
                 const now = new Date();
                 const isOngoing = start <= now && end > now;
+                const isPast = end <= now;
+                const badge = isOngoing ? "Идёт" : isPast ? "Прошла" : undefined;
+                const badgeClass = isOngoing
+                  ? "bg-green-50 text-green-700 border-green-200"
+                  : isPast
+                  ? "bg-slate-100 text-slate-500 border-slate-200"
+                  : undefined;
                 return (
-                  <div
+                  <MeetingCard
                     key={meeting.id}
-                    className={`p-4 border rounded-lg transition-colors ${
-                      isOngoing
-                        ? "border-green-300 bg-green-50"
-                        : "border-slate-200 hover:border-indigo-300"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between mb-1">
-                      <h3 className="font-semibold text-sm">{meeting.name}</h3>
-                      {isOngoing && (
-                        <span className="px-2 py-0.5 text-xs font-semibold rounded bg-green-100 text-green-700 border border-green-200 shrink-0">
-                          Идёт
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-slate-600 mb-2">
-                      {meetingTypeLabelMap[meeting.meetingType] || meeting.meetingType}
-                    </p>
-                    <div className="flex items-center gap-4 text-xs text-slate-500">
-                      <div className="flex items-center gap-1">
-                        <Clock size={12} />
-                        <span>
-                          {start.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
-                          {" — "}
-                          {end.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
-                        </span>
-                      </div>
-                      {meeting.location && (
-                        <span className="text-slate-400">{meeting.location}</span>
-                      )}
-                    </div>
-                  </div>
+                    meeting={meeting}
+                    projects={projects}
+                    organizerName={user?.fullName}
+                    onClick={() => handleMeetingClick(meeting)}
+                    badge={badge}
+                    badgeClass={badgeClass}
+                  />
                 );
               })}
             </div>
@@ -239,34 +254,26 @@ export default function Dashboard() {
         {projects.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {projects.slice(0, 4).map((project) => (
-              <Link
-                key={project.id}
-                to={`/projects/${project.id}`}
-                className="block p-4 border border-slate-200 rounded-lg hover:border-purple-300 hover:shadow-sm transition-all"
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="px-2 py-1 bg-slate-100 text-slate-700 text-xs font-mono font-semibold rounded">
-                    {project.key}
-                  </span>
-                  <span
-                    className={`px-2 py-0.5 text-xs font-semibold rounded ${
-                      project.projectType === "scrum"
-                        ? "bg-blue-100 text-blue-700"
-                        : "bg-green-100 text-green-700"
-                    }`}
-                  >
-                    {project.projectType === "scrum" ? "Scrum" : "Kanban"}
-                  </span>
-                </div>
-                <h3 className="font-semibold mb-1">{project.name}</h3>
-                <p className="text-sm text-slate-600 line-clamp-2">{project.description}</p>
-              </Link>
+              <ProjectCard key={project.id} project={project} owner={projectOwners[project.ownerId]} />
             ))}
           </div>
         ) : (
           <EmptyState icon={<FolderKanban size={48} className="opacity-50" />} title="Нет активных проектов" compact />
         )}
       </div>
+
+      {/* Meeting details modal — mirrors Calendar behaviour */}
+      {selectedMeeting && (
+        <MeetingModal
+          meeting={selectedMeeting}
+          isOpen={showMeetingModal}
+          mode="edit"
+          onClose={() => { setShowMeetingModal(false); setSelectedMeeting(undefined); }}
+          onSave={handleCreateMeeting}
+          onUpdate={handleUpdateMeeting}
+          onCancel={handleCancelMeeting}
+        />
+      )}
     </div>
   );
 }

@@ -776,7 +776,7 @@ function BoardSwimlanesTab({
               </div>
               <div className="flex-1">
                 <h4 className="font-medium text-purple-900 mb-1">
-                  Группировка по {selectedField ? getFieldDisplayName(selectedField) : swimlaneGroupBy}
+                  Группировка по параметру {swimlaneGroupBy === "__tags__" ? "Теги" : (selectedField ? getFieldDisplayName(selectedField) : swimlaneGroupBy)}
                 </h4>
                 <p className="text-sm text-purple-700">
                   Дорожки будут созданы автоматически для каждого значения выбранного параметра.
@@ -884,7 +884,6 @@ function BoardTaskTemplateTab({
   const [showAddForm, setShowAddForm] = useState(false);
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState("text");
-  const [newRequired, setNewRequired] = useState(false);
   const [newOptions, setNewOptions] = useState<string[]>([]);
   const [optionInput, setOptionInput] = useState("");
 
@@ -968,10 +967,12 @@ function BoardTaskTemplateTab({
     }
     try {
       await createBoardField(boardId, {
-        name: newName.trim(), fieldType: newType, isRequired: newRequired,
+        // Custom task parameters are always optional — the UI doesn't let users mark them
+        // as required anymore (only system parameters are required by design).
+        name: newName.trim(), fieldType: newType, isRequired: false,
         options: ["select", "multiselect"].includes(newType) ? newOptions : undefined,
       });
-      setNewName(""); setNewType("text"); setNewRequired(false); setNewOptions([]); setShowAddForm(false);
+      setNewName(""); setNewType("text"); setNewOptions([]); setShowAddForm(false);
       await onReload();
     } catch (e: any) { toastError(e, "Не удалось добавить параметр"); }
   }
@@ -1102,7 +1103,7 @@ function BoardTaskTemplateTab({
                 const unitName = currentUnit?.name || currentEstimationUnit;
                 const example = currentEstimationUnit === "story_points"
                   ? "Пример: 1, 2, 3, 5, 8, 13 (числа Фибоначчи)"
-                  : "Пример: 2ч 30м, 4ч, 1д 2ч (часы и минуты)";
+                  : "Пример: 4, 10, 48 (часы)";
                 return <p className="text-xs text-slate-500">Текущая единица: <strong>{unitName}</strong>. {example}</p>;
               })()}
             </div>
@@ -1190,12 +1191,8 @@ function BoardTaskTemplateTab({
                   )}
                 </div>
               )}
-              <div className="flex items-center gap-2">
-                <input type="checkbox" id="cf-req" checked={newRequired} onChange={(e) => setNewRequired(e.target.checked)} className="w-4 h-4 text-purple-600 rounded" />
-                <label htmlFor="cf-req" className="text-sm">Обязательное поле</label>
-              </div>
               <div className="flex gap-2 pt-2">
-                <button onClick={() => { setShowAddForm(false); setNewName(""); setNewType("text"); setNewRequired(false); setNewOptions([]); }}
+                <button onClick={() => { setShowAddForm(false); setNewName(""); setNewType("text"); setNewOptions([]); }}
                   className="flex-1 px-4 py-2 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">Отмена</button>
                 <button onClick={handleAddCustomField} disabled={!newName.trim()}
                   className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">Добавить</button>
@@ -1218,7 +1215,6 @@ function BoardTaskTemplateTab({
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
                           <p className="font-medium">{field.name}</p>
-                          {field.isRequired && <span className="text-xs px-1.5 py-0.5 bg-red-100 text-red-700 rounded">обязательное</span>}
                           <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">кастомное</span>
                         </div>
                         <p className="text-sm text-slate-600 mt-0.5">Тип: {FIELD_TYPE_LABELS[field.fieldType] || field.fieldType}</p>
@@ -1234,27 +1230,16 @@ function BoardTaskTemplateTab({
 
                   {isExpanded && (
                     <div className="px-4 pb-4 space-y-3 border-t border-slate-100 pt-3">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-xs font-medium mb-1">Название *</label>
-                          <DebouncedInput
-                            value={field.name}
-                            onSave={(val) => handleUpdateCustomField(field.id, { name: val })}
-                            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                            placeholder="Название параметра..."
-                            required
-                            requiredMessage="Название параметра не может быть пустым"
-                          />
-                        </div>
-                        <div className="flex items-end pb-1">
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={field.isRequired}
-                              onChange={(e) => handleUpdateCustomField(field.id, { isRequired: e.target.checked })}
-                              className="w-4 h-4 text-purple-600 rounded"
-                            />
-                            <span className="text-sm">Обязательное поле</span>
-                          </label>
-                        </div>
+                      <div>
+                        <label className="block text-xs font-medium mb-1">Название *</label>
+                        <DebouncedInput
+                          value={field.name}
+                          onSave={(val) => handleUpdateCustomField(field.id, { name: val })}
+                          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                          placeholder="Название параметра..."
+                          required
+                          requiredMessage="Название параметра не может быть пустым"
+                        />
                       </div>
 
                       {["select", "multiselect"].includes(field.fieldType) && (

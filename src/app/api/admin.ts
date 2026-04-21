@@ -1,5 +1,6 @@
 import { apiRequest } from './client';
 import type { PasswordPolicy } from './auth';
+import { normalizeSearchQuery } from '../lib/search';
 
 // ── Permission Catalog ──────────────────────────────────────
 
@@ -101,14 +102,59 @@ export interface UpdateUserPayload {
   roleIds?: string[];
 }
 
+export interface AdminUsersFilters {
+  /** Поиск ILIKE по username, email, fullName, position. */
+  q?: string;
+  /** Фильтр по активности. */
+  isActive?: boolean;
+  /** Только с назначенной системной ролью. */
+  roleId?: string;
+  /** Включать soft-deleted. По умолчанию false. */
+  includeDeleted?: boolean;
+}
+
 export interface AdminUsersResponse {
   total: number;
+  activeCount: number;
+  inactiveCount: number;
   users: AdminUser[];
 }
 
-export async function getAdminUsers(): Promise<AdminUser[]> {
-  const data = await apiRequest<AdminUsersResponse>('/admin/users');
-  return data.users;
+function buildAdminUsersQuery(limit: number, offset: number, filters?: AdminUsersFilters) {
+  const params = new URLSearchParams();
+  params.set('limit', String(limit));
+  params.set('offset', String(offset));
+  if (filters?.q) {
+    const q = normalizeSearchQuery(filters.q);
+    if (q) params.set('q', q);
+  }
+  if (filters?.isActive !== undefined) params.set('is_active', String(filters.isActive));
+  if (filters?.roleId) params.set('role_id', filters.roleId);
+  if (filters?.includeDeleted) params.set('include_deleted', 'true');
+  return params.toString();
+}
+
+/** Постраничный запрос — возвращает users, total (с учётом фильтров) и глобальные active/inactive счётчики. */
+export function getAdminUsersPage(
+  limit = 20,
+  offset = 0,
+  filters?: AdminUsersFilters,
+): Promise<AdminUsersResponse> {
+  return apiRequest<AdminUsersResponse>(`/admin/users?${buildAdminUsersQuery(limit, offset, filters)}`).then((d) => ({
+    users: Array.isArray(d?.users) ? d.users : [],
+    total: typeof d?.total === 'number' ? d.total : 0,
+    activeCount: typeof d?.activeCount === 'number' ? d.activeCount : 0,
+    inactiveCount: typeof d?.inactiveCount === 'number' ? d.inactiveCount : 0,
+  }));
+}
+
+/** Только статистика (limit=0) — без выгрузки users[]. Возвращает глобальные счётчики. */
+export function getAdminUsersStats(): Promise<{ total: number; activeCount: number; inactiveCount: number }> {
+  return getAdminUsersPage(0, 0).then((d) => ({
+    total: d.total,
+    activeCount: d.activeCount,
+    inactiveCount: d.inactiveCount,
+  }));
 }
 
 export function getAdminUser(userId: string) {

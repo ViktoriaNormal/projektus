@@ -1,5 +1,5 @@
 import { Link } from "react-router";
-import { Link as LinkIcon, Plus } from "lucide-react";
+import { Link as LinkIcon, Plus, Trash2 } from "lucide-react";
 import type { TaskDependency } from "../../api/dependencies";
 import type { TaskResponse } from "../../api/tasks";
 
@@ -7,8 +7,14 @@ interface DependenciesSectionProps {
   dependencies: TaskDependency[];
   /** Resolves a dependency to the target TaskResponse, or null if not loaded. */
   getDepTask: (dep: TaskDependency) => TaskResponse | null;
+  /** Link to the detail page of the given task; falls back to `/tasks/{id}` if omitted. */
+  buildTaskHref?: (task: TaskResponse) => string;
   canEditTask: boolean;
   onAddDependency: () => void;
+  /** Delete handler — when provided, a trash icon is shown next to each dep. */
+  onDeleteDependency?: (dep: TaskDependency) => void;
+  /** Set of dependency IDs currently being deleted — used to disable buttons. */
+  deletingIds?: Set<string>;
 }
 
 type DepTypeConfig = { predicate: (d: TaskDependency) => boolean; label: string; color: string };
@@ -24,9 +30,15 @@ const DEP_TYPES: DepTypeConfig[] = [
 export function DependenciesSection({
   dependencies,
   getDepTask,
+  buildTaskHref,
   canEditTask,
   onAddDependency,
+  onDeleteDependency,
+  deletingIds,
 }: DependenciesSectionProps) {
+  // Defensive filter: if the counterpart task cannot be resolved (e.g. it was deleted and the
+  // backend hasn't cleaned the record yet, or the project task list is stale), drop the row.
+  const visibleDeps = dependencies.filter((d) => !!getDepTask(d));
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
@@ -44,20 +56,36 @@ export function DependenciesSection({
       </div>
       <div className="space-y-2">
         {DEP_TYPES.flatMap((cfg) =>
-          dependencies.filter(cfg.predicate).map((dep) => {
+          visibleDeps.filter(cfg.predicate).map((dep) => {
             const t = getDepTask(dep);
             if (!t) return null;
+            const href = buildTaskHref ? buildTaskHref(t) : `/tasks/${t.id}`;
+            const isDeleting = deletingIds?.has(dep.id) ?? false;
             return (
-              <div key={dep.id} className="p-3 border border-slate-200 rounded-lg">
-                <div className={`text-xs font-medium mb-1 ${cfg.color}`}>{cfg.label}</div>
-                <Link to={`/tasks/${t.id}`} className="text-sm text-blue-600 hover:underline">
-                  {t.key}: {t.name}
-                </Link>
+              <div key={dep.id} className="p-3 border border-slate-200 rounded-lg flex items-start gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className={`text-xs font-medium mb-1 ${cfg.color}`}>{cfg.label}</div>
+                  <Link to={href} className="text-sm text-blue-600 hover:underline break-words">
+                    {t.key}: {t.name}
+                  </Link>
+                </div>
+                {canEditTask && onDeleteDependency && (
+                  <button
+                    type="button"
+                    onClick={() => onDeleteDependency(dep)}
+                    disabled={isDeleting}
+                    className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                    title="Удалить связь"
+                    aria-label="Удалить связь"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </div>
             );
           }),
         )}
-        {dependencies.length === 0 && (
+        {visibleDeps.length === 0 && (
           <p className="text-sm text-slate-400 py-3">Нет связей</p>
         )}
       </div>

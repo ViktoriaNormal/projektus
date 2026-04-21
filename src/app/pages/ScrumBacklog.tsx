@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Plus, Play, CheckCircle2, Target, Calendar, AlarmClock, Edit, Trash2, X, AlertCircle, ChevronDown, Check, User } from "lucide-react";
+import { Plus, Play, CheckCircle2, Target, Calendar, AlarmClock, Edit, Trash2, X, AlertCircle, ChevronDown, Check, User, Loader2 } from "lucide-react";
 import { Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle } from "../components/ui/Modal";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { Select, SelectOption } from "../components/ui/Select";
@@ -23,7 +23,8 @@ import {
   getSprintTasks,
   type SprintResponse,
 } from "../api/sprints";
-import { type TaskResponse } from "../api/tasks";
+import { searchTasks, type TaskResponse } from "../api/tasks";
+import { getTaskDependencies } from "../api/dependencies";
 import { getUser, type UserProfileResponse } from "../api/users";
 import { getProjectBoards, type BoardResponse } from "../api/boards";
 import { getProject, updateProject, type ProjectResponse } from "../api/projects";
@@ -69,6 +70,10 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
   const [userCache, setUserCache] = useState<Map<string, UserProfileResponse>>(new Map());
   const [boards, setBoards] = useState<BoardResponse[]>([]);
   const [loading, setLoading] = useState(true);
+  // blockedByMap: taskId → list of blocker task IDs (from is_blocked_by deps)
+  const [blockedByMap, setBlockedByMap] = useState<Map<string, string[]>>(new Map());
+  // projectTaskStatus: taskId → columnSystemType, used to resolve blocker completion status
+  const [projectTaskStatus, setProjectTaskStatus] = useState<Map<string, string | null>>(new Map());
 
   // UI state
   const [showSprintModal, setShowSprintModal] = useState(false);
@@ -152,6 +157,25 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
         })
       );
       setUserCache(newCache);
+
+      // Dependencies (is_blocked_by) for every visible task + project-wide task status for blocker lookup
+      const blockedMap = new Map<string, string[]>();
+      await Promise.allSettled(
+        allLoadedTasks.map(async (t) => {
+          try {
+            const deps = await getTaskDependencies(t.id);
+            const blockerIds = deps.filter(d => d.type === "is_blocked_by").map(d => d.dependsOnTaskId);
+            if (blockerIds.length > 0) blockedMap.set(t.id, blockerIds);
+          } catch { /**/ }
+        })
+      );
+      setBlockedByMap(blockedMap);
+      try {
+        const allProj = await searchTasks({ projectId });
+        const statusMap = new Map<string, string | null>();
+        allProj.forEach(t => statusMap.set(t.id, t.columnSystemType ?? null));
+        setProjectTaskStatus(statusMap);
+      } catch { /**/ }
     } catch (e: any) {
       toast.error("Ошибка загрузки данных бэклога");
     } finally {
@@ -310,6 +334,25 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
         })
       );
       setUserCache(newCache);
+
+      // Refresh blocker data
+      const blockedMap = new Map<string, string[]>();
+      await Promise.allSettled(
+        allLoadedTasks.map(async (t) => {
+          try {
+            const deps = await getTaskDependencies(t.id);
+            const blockerIds = deps.filter(d => d.type === "is_blocked_by").map(d => d.dependsOnTaskId);
+            if (blockerIds.length > 0) blockedMap.set(t.id, blockerIds);
+          } catch { /**/ }
+        })
+      );
+      setBlockedByMap(blockedMap);
+      try {
+        const allProj = await searchTasks({ projectId });
+        const statusMap = new Map<string, string | null>();
+        allProj.forEach(t => statusMap.set(t.id, t.columnSystemType ?? null));
+        setProjectTaskStatus(statusMap);
+      } catch { /**/ }
     } catch { /**/ }
   }, [projectId]);
 
@@ -493,6 +536,18 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
     }
   };
 
+  // ── Blocked tasks derivation ───────────────────────────────
+
+  const isTaskCompleted = (taskId: string): boolean => {
+    return projectTaskStatus.get(taskId) === "completed";
+  };
+  const taskExists = (taskId: string): boolean => projectTaskStatus.has(taskId);
+  const blockedTaskIds = new Set<string>();
+  blockedByMap.forEach((blockerIds, taskId) => {
+    if (isTaskCompleted(taskId)) return;
+    if (blockerIds.some(bid => taskExists(bid) && !isTaskCompleted(bid))) blockedTaskIds.add(taskId);
+  });
+
   // ── Render task card ───────────────────────────────────────
 
   const renderTask = (task: TaskResponse, source: "backlog" | string, isDraggable: boolean = true) => (
@@ -503,6 +558,7 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
       draggable={isDraggable && canEdit}
       returnUrl={returnUrl}
       userCache={userCache}
+      isBlocked={blockedTaskIds.has(task.id)}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     />
@@ -512,8 +568,8 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+      <div className="flex items-center justify-center h-96">
+        <Loader2 size={40} className="animate-spin text-blue-600" />
       </div>
     );
   }
@@ -652,14 +708,14 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
                           <span className="text-xs font-semibold text-purple-700 uppercase tracking-wide">{board.name}</span>
                           <span className="text-xs text-slate-400">({bTasks.length})</span>
                         </div>
-                        <div className="grid grid-cols-2 gap-2 items-start">
+                        <div className="grid grid-cols-2 gap-2">
                           {bTasks.map(task => renderTask(task, "backlog"))}
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 gap-2 items-start">
+                  <div className="grid grid-cols-2 gap-2">
                     {backlogTasks.map(task => renderTask(task, "backlog"))}
                   </div>
                 )
@@ -762,14 +818,14 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
                               <span className="text-xs font-semibold text-blue-700 uppercase tracking-wide">{board.name}</span>
                               <span className="text-xs text-slate-400">({bTasks.length})</span>
                             </div>
-                            <div className="grid grid-cols-2 gap-2 items-start">
+                            <div className="grid grid-cols-2 gap-2">
                               {bTasks.map(task => renderTask(task, sprint.id))}
                             </div>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <div className="grid grid-cols-2 gap-2 items-start">
+                      <div className="grid grid-cols-2 gap-2">
                         {tasks.map(task => renderTask(task, sprint.id))}
                       </div>
                     )
@@ -874,7 +930,7 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
                   <span className="font-medium">{board.name}</span>
                   {board.isDefault && <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">по умолчанию</span>}
                 </div>
-                {board.description && <p className="text-sm text-slate-500 mt-1">{board.description}</p>}
+                {board.description && <p className="text-sm text-slate-500 mt-1 whitespace-pre-wrap">{board.description}</p>}
               </button>
             ))}
           </div>

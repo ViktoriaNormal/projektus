@@ -1,5 +1,17 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import { type UserResponse, type AuthResponse, refreshToken as refreshTokenApi, logout as logoutApi } from '../api/auth';
+import { camelizeResponse } from '../api/client';
+
+/**
+ * Нормализует пользователя к camelCase. Защищает от старых записей в localStorage,
+ * которые сохранились со snake_case (из-за бага в uploadAvatar до фикса).
+ */
+function normalizeUser(raw: unknown): UserResponse | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  // Если уже в camelCase — проходит через camelizeResponse без изменений.
+  return camelizeResponse<UserResponse>(obj);
+}
 
 interface AuthContextValue {
   user: UserResponse | null;
@@ -52,8 +64,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('access_token', data.accessToken);
     localStorage.setItem('refresh_token', data.refreshToken);
     if (data.user) {
-      localStorage.setItem('user', JSON.stringify(data.user));
-      setUser(data.user);
+      const u = normalizeUser(data.user);
+      if (u) {
+        localStorage.setItem('user', JSON.stringify(u));
+        setUser(u);
+      }
     }
     const perms = extractPermissions(data.roles);
     const permMap = extractPermissionMap(data.roles);
@@ -64,8 +79,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateUser = useCallback((updatedUser: UserResponse) => {
-    localStorage.setItem('user', JSON.stringify(updatedUser));
-    setUser(updatedUser);
+    const u = normalizeUser(updatedUser);
+    if (!u) return;
+    localStorage.setItem('user', JSON.stringify(u));
+    setUser(u);
   }, []);
 
   const clearAuth = useCallback(() => {
@@ -99,7 +116,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (savedUser && token) {
       try {
-        setUser(JSON.parse(savedUser));
+        const normalized = normalizeUser(JSON.parse(savedUser));
+        if (normalized) {
+          setUser(normalized);
+          localStorage.setItem('user', JSON.stringify(normalized));
+        } else {
+          clearAuth();
+        }
       } catch {
         clearAuth();
       }
@@ -109,10 +132,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .then((data) => {
           localStorage.setItem('access_token', data.accessToken);
           localStorage.setItem('refresh_token', data.refreshToken);
-          const u = localStorage.getItem('user');
-          if (u) {
+          const raw = localStorage.getItem('user');
+          if (raw) {
             try {
-              setUser(JSON.parse(u));
+              const normalized = normalizeUser(JSON.parse(raw));
+              if (normalized) {
+                setUser(normalized);
+                localStorage.setItem('user', JSON.stringify(normalized));
+              } else {
+                clearAuth();
+              }
             } catch {
               clearAuth();
             }

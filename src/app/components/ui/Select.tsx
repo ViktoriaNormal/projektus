@@ -92,7 +92,9 @@ export const SelectOption = forwardRef<HTMLDivElement, SelectOptionProps>(
       value={value === "" ? EMPTY_SENTINEL : value}
       disabled={disabled}
       className={cn(
-        "relative flex items-center gap-2 px-3 py-2 text-sm rounded-md cursor-pointer outline-none",
+        // pl-8 оставляет место под абсолютно-позиционированную галочку (left-2 + 14px icon).
+        // Важно: отступ именно здесь, а не внутри ItemText — иначе Radix проносит его в Trigger.
+        "relative flex items-center gap-2 pl-8 pr-3 py-2 text-sm rounded-md cursor-pointer outline-none",
         "data-[highlighted]:bg-blue-50 data-[highlighted]:text-blue-700",
         "data-[state=checked]:bg-blue-50 data-[state=checked]:text-blue-700",
         "data-[disabled]:opacity-60 data-[disabled]:cursor-not-allowed",
@@ -102,9 +104,7 @@ export const SelectOption = forwardRef<HTMLDivElement, SelectOptionProps>(
       <SelectPrimitive.ItemIndicator className="absolute left-2 inline-flex items-center">
         <Check size={14} />
       </SelectPrimitive.ItemIndicator>
-      <SelectPrimitive.ItemText asChild>
-        <span className="pl-5">{children}</span>
-      </SelectPrimitive.ItemText>
+      <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
     </SelectPrimitive.Item>
   ),
 );

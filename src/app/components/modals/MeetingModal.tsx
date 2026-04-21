@@ -1,8 +1,9 @@
-import { X, Calendar as CalendarIcon, Clock, MapPin, Users, Save, Search, Plus, UserPlus, Loader2, Crown } from "lucide-react";
+import { X, Calendar as CalendarIcon, Clock, MapPin, Users, Save, Search, Plus, UserPlus, Loader2, Crown, Copy, Check } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { UserAvatar } from "../UserAvatar";
 import { Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle } from "../ui/Modal";
+import { CopyInviteButton } from "../meetings/CopyInviteButton";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { Select, SelectOption } from "../ui/Select";
 import { toastError } from "../../lib/errors";
@@ -31,6 +32,15 @@ function formatLocalDateTime(date: Date): string {
   return `${y}-${m}-${d}T${h}:${min}`;
 }
 
+/** Converts ISO timestamp (with TZ, e.g. UTC Z) to a local datetime-local input value.
+ *  Тупой `iso.slice(0,16)` не работает: показывает UTC-часы как будто локальные. */
+function isoToLocalInput(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return formatLocalDateTime(d);
+}
+
 function getRoundedNow(): string {
   const now = new Date();
   const minutes = now.getMinutes();
@@ -57,13 +67,13 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
   const [name, setName] = useState(meeting?.name || "");
   const [description, setDescription] = useState(meeting?.description || "");
   const [selectedProject, setSelectedProject] = useState<string | null>(meeting?.projectId || null);
-  const [selectedType, setSelectedType] = useState(meeting?.meetingType || "");
-  const initStart = meeting?.startTime ? meeting.startTime.slice(0, 16)
+  const [selectedType, setSelectedType] = useState(meeting?.meetingType || "custom");
+  const initStart = meeting?.startTime ? isoToLocalInput(meeting.startTime)
     : defaultStartDate && !defaultStartDate.includes("T")
       ? `${defaultStartDate}T${getRoundedNow().slice(11)}`
       : defaultStartDate || getRoundedNow();
   const [startTime, setStartTime] = useState(initStart);
-  const [endTime, setEndTime] = useState(meeting?.endTime ? meeting.endTime.slice(0, 16) : plusOneHour(initStart));
+  const [endTime, setEndTime] = useState(meeting?.endTime ? isoToLocalInput(meeting.endTime) : plusOneHour(initStart));
   const [location, setLocation] = useState(meeting?.location || "");
   const [selectedParticipants, setSelectedParticipants] = useState<UserProfileResponse[]>([]);
   const [organizerProfile, setOrganizerProfile] = useState<UserProfileResponse | null>(null);
@@ -73,6 +83,7 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
   const [searchResults, setSearchResults] = useState<UserProfileResponse[]>([]);
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [locationCopied, setLocationCopied] = useState(false);
   const [realProjects, setRealProjects] = useState<ProjectResponse[]>([]);
   const loadingProjectMembersRef = useRef(false);
 
@@ -107,8 +118,8 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
       setDescription(meeting.description || "");
       setSelectedProject(meeting.projectId || null);
       setSelectedType(meeting.meetingType);
-      setStartTime(meeting.startTime ? meeting.startTime.slice(0, 16) : "");
-      setEndTime(meeting.endTime ? meeting.endTime.slice(0, 16) : "");
+      setStartTime(isoToLocalInput(meeting.startTime));
+      setEndTime(isoToLocalInput(meeting.endTime));
       setLocation(meeting.location || "");
       const ids = meeting.participants.map((p) => p.userId);
       setExistingParticipantIds(ids);
@@ -120,7 +131,7 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
       setName("");
       setDescription("");
       setSelectedProject(null);
-      setSelectedType("");
+      setSelectedType("custom");
       setStartTime(start);
       setEndTime(plusOneHour(start));
       setLocation("");
@@ -338,7 +349,12 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
     >
       <form onSubmit={handleSubmit} className="contents">
         <ModalHeader>
-          <ModalTitle>{mode === "create" ? "Создать встречу" : "Редактировать встречу"}</ModalTitle>
+          <div className="flex items-center justify-between gap-3 w-full">
+            <ModalTitle>{mode === "create" ? "Создать встречу" : "Информация о встрече"}</ModalTitle>
+            {mode === "edit" && meeting && (
+              <CopyInviteButton meeting={meeting} organizerName={organizerProfile?.fullName} size="md" />
+            )}
+          </div>
         </ModalHeader>
         <ModalBody>
           <div className="space-y-4">
@@ -460,15 +476,33 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
               <MapPin size={16} />
               Место проведения <span className="text-red-500">*</span>
             </label>
-            <input
-              type="text"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              disabled={readOnly}
-              className={`w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${readOnly ? "bg-slate-50 text-slate-500 cursor-not-allowed" : ""}`}
-              placeholder="Конференц-зал, Online и т.д."
-              required
-            />
+            <div className="relative">
+              <input
+                type="text"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                disabled={readOnly}
+                className={`w-full pl-4 pr-11 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${readOnly ? "bg-slate-50 text-slate-500 cursor-not-allowed" : ""}`}
+                placeholder="Конференц-зал, Online и т.д."
+                required
+              />
+              {location && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(location).then(() => {
+                      setLocationCopied(true);
+                      setTimeout(() => setLocationCopied(false), 1500);
+                    });
+                  }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                  title="Скопировать место проведения"
+                  aria-label="Скопировать место проведения"
+                >
+                  {locationCopied ? <Check size={16} className="text-green-600" /> : <Copy size={16} />}
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Participants Section */}
@@ -535,7 +569,7 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
                               </span>
                             )}
                           </p>
-                          <p className="text-xs text-slate-500">{user.email}</p>
+                          <p className="text-xs text-slate-500">{user.username}</p>
                         </div>
                       </div>
                       {!isOrganizerUser && isOrganizer && (
@@ -590,13 +624,13 @@ export function MeetingModal({ meeting, isOpen, onClose, onSave, onUpdate, onCan
                         <UserAvatar user={{ fullName: user.fullName, avatarUrl: user.avatarUrl }} size="sm" />
                         <div className="flex-1">
                           <p className="text-sm font-medium">{user.fullName}</p>
-                          <p className="text-xs text-slate-500">{user.email}</p>
+                          <p className="text-xs text-slate-500">{user.username}</p>
                         </div>
                       </div>
                     ))
                   ) : (
                     <p className="text-sm text-slate-500 text-center py-4">
-                      {searchQuery ? "Коллеги не найдены" : "Начните вводить для поиска"}
+                      {searchQuery ? "Сотрудники не найдены" : "Начните вводить для поиска"}
                     </p>
                   )}
                 </div>

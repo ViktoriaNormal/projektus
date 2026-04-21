@@ -54,14 +54,14 @@ export function CompletedSprintRow({
                       <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{board.name}</span>
                       <span className="text-xs text-slate-400">({bTasks.length})</span>
                     </div>
-                    <div className="grid grid-cols-2 gap-2 items-start">
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
                       {bTasks.map((task) => renderTask(task, sprint.id, false))}
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-2 items-start">
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
                 {tasks.map((task) => renderTask(task, sprint.id, false))}
               </div>
             )

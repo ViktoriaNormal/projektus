@@ -616,10 +616,10 @@ export default function Profile() {
                         <div className="mt-1 flex flex-wrap gap-1">
                           {pr.roles.map((role) => (
                             <span
-                              key={role}
+                              key={role.id}
                               className="inline-block px-2 py-0.5 bg-blue-100 text-blue-800 text-xs rounded-md font-medium"
                             >
-                              {role}
+                              {role.name}
                             </span>
                           ))}
                         </div>

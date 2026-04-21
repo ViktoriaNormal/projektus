@@ -19,3 +19,9 @@ export function addDependency(taskId: string, data: { dependsOnTaskId: string; t
     body: JSON.stringify(data),
   });
 }
+
+export function deleteDependency(taskId: string, dependencyId: string) {
+  return apiRequest<null>(`/tasks/${taskId}/dependencies/${dependencyId}`, {
+    method: 'DELETE',
+  });
+}

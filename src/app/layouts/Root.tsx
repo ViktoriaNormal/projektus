@@ -124,10 +124,24 @@ export default function Root() {
   }
 
   const isActive = (path: string) => {
-    if (path === "/") {
-      return location.pathname === "/";
+    // Task detail / task create pages (/tasks/:id, /tasks/new) don't belong to any section
+    // of the sidebar on their own — they're modal-like views opened from Dashboard, Projects,
+    // Calendar etc. Use the ?returnUrl= param to resolve which section should stay highlighted;
+    // if no returnUrl is present, nothing is highlighted.
+    let pathname = location.pathname;
+    if (/^\/tasks\/.+/.test(pathname)) {
+      const ret = new URLSearchParams(location.search).get("returnUrl");
+      if (!ret) return false;
+      try {
+        pathname = new URL(ret, window.location.origin).pathname;
+      } catch {
+        return false;
+      }
     }
-    return location.pathname.startsWith(path);
+    if (path === "/") {
+      return pathname === "/";
+    }
+    return pathname === path || pathname.startsWith(path + "/");
   };
 
   const navItems = [
@@ -135,7 +149,7 @@ export default function Root() {
     { path: "/projects", icon: FolderKanban, label: "Проекты" },
     { path: "/tasks", icon: CheckSquare, label: "Мои задачи" },
     { path: "/calendar", icon: Calendar, label: "Календарь" },
-    { path: "/team", icon: UsersRound, label: "Коллеги" },
+    { path: "/team", icon: UsersRound, label: "Сотрудники" },
   ];
 
   const adminItems = [
@@ -177,7 +191,7 @@ export default function Root() {
               >
                 <Bell size={20} />
                 {unreadCount > 0 && (
-                  <span className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
+                  <span className="absolute -top-0.5 -right-0.5 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center ring-2 ring-white">
                     {unreadCount}
                   </span>
                 )}

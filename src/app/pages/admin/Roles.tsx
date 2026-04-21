@@ -3,7 +3,7 @@ import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { PageSpinner } from '../../components/ui/Spinner';
 import {
   Plus, Trash2, Shield, Loader2, AlertCircle, CheckCircle2,
-  Users, ChevronUp, ChevronDown, Eye, EyeOff,
+  Users, ChevronUp, ChevronDown, Eye, EyeOff, X,
 } from 'lucide-react';
 import {
   getSystemRoles, createSystemRole, updateSystemRole, deleteSystemRole,
@@ -248,7 +248,19 @@ export default function AdminRoles() {
           ) : (
             <AlertCircle size={18} className="shrink-0 mt-0.5" />
           )}
-          <span>{msg.text}</span>
+          <span className="flex-1">{msg.text}</span>
+          <button
+            type="button"
+            onClick={() => setMsg(null)}
+            aria-label="Закрыть"
+            className={`shrink-0 -m-1 p-1 rounded-md transition-colors ${
+              msg.type === 'success'
+                ? 'hover:bg-green-100 text-green-700'
+                : 'hover:bg-red-100 text-red-700'
+            }`}
+          >
+            <X size={16} />
+          </button>
         </div>
       )}
 

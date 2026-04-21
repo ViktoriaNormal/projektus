@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Key, Save, Info, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Key, Save, Info, Loader2, AlertCircle, CheckCircle2, X } from 'lucide-react';
 import { getAdminPasswordPolicy, updateAdminPasswordPolicy } from '../../api/admin';
 import { ApiError } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
@@ -88,11 +88,27 @@ export default function AdminPasswordPolicy() {
       </div>
 
       <div className="bg-white rounded-xl p-6 shadow-md border border-slate-100">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="bg-gradient-to-br from-purple-500 to-pink-500 p-3 rounded-lg">
-            <Key className="text-white" size={24} />
+        <div className="flex items-center justify-between gap-3 mb-6">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="bg-gradient-to-br from-purple-500 to-pink-500 p-3 rounded-lg shrink-0">
+              <Key className="text-white" size={24} />
+            </div>
+            <h2 className="text-xl font-bold truncate">Требования к паролю</h2>
           </div>
-          <h2 className="text-xl font-bold">Требования к паролю</h2>
+          {canEdit && (
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="shrink-0 px-6 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all shadow-md hover:shadow-lg flex items-center gap-2 font-medium disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {saving ? (
+                <Loader2 size={20} className="animate-spin" />
+              ) : (
+                <Save size={20} />
+              )}
+              <span className="hidden sm:inline">{saving ? 'Сохранение...' : 'Сохранить изменения'}</span>
+            </button>
+          )}
         </div>
 
         <div className="space-y-6">
@@ -109,7 +125,19 @@ export default function AdminPasswordPolicy() {
               ) : (
                 <AlertCircle size={18} className="shrink-0 mt-0.5" />
               )}
-              <span>{msg.text}</span>
+              <span className="flex-1">{msg.text}</span>
+              <button
+                type="button"
+                onClick={() => setMsg(null)}
+                aria-label="Закрыть"
+                className={`shrink-0 -m-1 p-1 rounded-md transition-colors ${
+                  msg.type === 'success'
+                    ? 'hover:bg-green-100 text-green-700'
+                    : 'hover:bg-red-100 text-red-700'
+                }`}
+              >
+                <X size={16} />
+              </button>
             </div>
           )}
 
@@ -250,23 +278,6 @@ export default function AdminPasswordPolicy() {
             </div>
           </div>
 
-          {/* Save Button */}
-          {canEdit && (
-          <div className="flex justify-end gap-3 pt-4">
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all shadow-md hover:shadow-lg flex items-center gap-2 font-medium disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {saving ? (
-                <Loader2 size={20} className="animate-spin" />
-              ) : (
-                <Save size={20} />
-              )}
-              {saving ? 'Сохранение...' : 'Сохранить изменения'}
-            </button>
-          </div>
-          )}
         </div>
       </div>
     </div>

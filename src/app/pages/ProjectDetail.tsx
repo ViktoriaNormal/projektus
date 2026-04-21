@@ -17,7 +17,9 @@ import {
   FileText,
   Menu,
   Copy,
+  Check,
   ChevronUp,
+  ChevronLeft,
   Loader2,
   Search,
   Info,
@@ -88,6 +90,7 @@ interface DraggableBoardTabProps {
   onEdit: (board: BoardTab) => void;
   onDelete: (id: string) => void;
   canEditBoard?: boolean;
+  canDelete?: boolean;
 }
 
 const DraggableBoardTab = ({
@@ -99,6 +102,7 @@ const DraggableBoardTab = ({
   onEdit,
   onDelete,
   canEditBoard = true,
+  canDelete = true,
 }: DraggableBoardTabProps) => {
   const [{ isDragging }, drag] = useDrag({
     type: "BOARD_TAB",
@@ -127,7 +131,7 @@ const DraggableBoardTab = ({
     >
       <button
         onClick={() => onSelect(board.id)}
-        className={`px-4 py-2.5 rounded-t-lg font-medium transition-all whitespace-nowrap border-b-2 ${
+        className={`px-4 py-2.5 rounded-t-lg font-medium transition-all whitespace-nowrap border-b-2 text-left ${
           isActive
             ? "bg-white text-blue-600 border-blue-600"
             : "bg-slate-50 text-slate-700 border-transparent hover:bg-slate-100"
@@ -139,9 +143,11 @@ const DraggableBoardTab = ({
             <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded font-normal">по умолчанию</span>
           )}
         </span>
-        {board.description && (
-          <div className="text-xs opacity-75 mt-1 font-normal">{board.description}</div>
-        )}
+        {/* Always render the description slot (with a non-breaking space fallback) so all
+            tabs in the row end up the same height regardless of which ones have descriptions. */}
+        <div className="text-xs opacity-75 mt-1 font-normal whitespace-pre-wrap min-h-4">
+          {board.description || " "}
+        </div>
       </button>
       {canEditBoard && (
         <div className="flex items-center gap-0.5 pb-0.5">
@@ -152,7 +158,7 @@ const DraggableBoardTab = ({
           >
             <Settings size={14} className="text-slate-600" />
           </button>
-          {!board.isDefault && (
+          {canDelete && !board.isDefault && (
             <button
               onClick={() => onDelete(board.id)}
               className="p-1.5 hover:bg-red-100 rounded transition-all"
@@ -199,7 +205,10 @@ export default function ProjectDetail() {
   const [activeTab, setActiveTab] = useState<"overview" | "boards" | "backlog" | "metrics" | "params" | "analytics">(
     initialTab && ["overview", "boards", "backlog", "metrics", "params", "analytics"].includes(initialTab) ? initialTab : "overview"
   );
-  const [activeBoardId, setActiveBoardId] = useState<string | null>(null);
+  // Allow the task-detail "Назад" navigation to restore the exact board the user came from
+  // (via ?boardId=... in the return URL). Falls back to the first board when omitted.
+  const initialBoardId = urlSearchParams.get("boardId");
+  const [activeBoardId, setActiveBoardId] = useState<string | null>(initialBoardId);
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [showEditMemberModal, setShowEditMemberModal] = useState(false);
   const [showBoardSettingsModal, setShowBoardSettingsModal] = useState(false);
@@ -217,6 +226,10 @@ export default function ProjectDetail() {
   const [userSearchQuery, setUserSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<UserProfileResponse[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  // Full profile of the user picked in the Add-Member modal — stored separately so the
+  // blue "picked" chip can display fullName + login even after the search-results list
+  // is cleared (memberUsers only has existing project members, not candidates).
+  const [selectedUserProfile, setSelectedUserProfile] = useState<UserProfileResponse | null>(null);
   const [newMemberRoles, setNewMemberRoles] = useState<string[]>([]);
 
   // Params tab state
@@ -276,11 +289,22 @@ export default function ProjectDetail() {
         order: x.order,
         isDefault: x.isDefault ?? false,
       })));
-      if (sorted.length > 0 && !activeBoardId) {
-        setActiveBoardId(sorted[0].id);
+      if (sorted.length > 0) {
+        // Use the functional setter so the "fallback" check reads the current
+        // activeBoardId — callers (e.g. confirmDeleteBoard) may have just switched the
+        // active board right before invoking loadBoards(), and a stale closure value
+        // would cause the fallback to clobber their pick.
+        setActiveBoardId((prev) => {
+          const exists = prev && sorted.some((s) => s.id === prev);
+          if (exists) return prev;
+          // When there's no valid selection yet (fresh load, deleted board, stale URL),
+          // prefer the project's default board over the first-by-order one.
+          const defaultBoard = sorted.find((s) => s.isDefault);
+          return (defaultBoard ?? sorted[0]).id;
+        });
       }
     } catch { /* silently */ }
-  }, [projectId, activeBoardId]);
+  }, [projectId]);
 
   const loadMembers = useCallback(async () => {
     if (!projectId) return;
@@ -411,6 +435,7 @@ export default function ProjectDetail() {
       toast.success("Участник добавлен");
       setShowAddMemberModal(false);
       setSelectedUserId(null);
+      setSelectedUserProfile(null);
       setNewMemberRoles([]);
       setUserSearchQuery("");
       setSearchResults([]);
@@ -449,7 +474,7 @@ export default function ProjectDetail() {
     // Protect last admin
     const adminRole = projectRoles.find(r => r.isAdmin);
     if (adminRole) {
-      const admins = members.filter(m => (m.roles || []).includes(adminRole.id));
+      const admins = members.filter(m => (m.roles || []).some(r => r.id === adminRole.id));
       if (admins.length === 1 && admins[0].id === memberId) {
         toast.error("Нельзя удалить последнего администратора проекта. Сначала назначьте роль администратора другому участнику.");
         return;
@@ -484,7 +509,11 @@ export default function ProjectDetail() {
 
   const handleDeleteBoard = (boardId: string) => {
     const board = boardTabs.find(b => b.id === boardId);
-    if (board?.isDefault) return;
+    // Mirrors the template deletion rules: can't remove the board marked "по умолчанию"
+    // and can't remove the last board — there must always be at least one board on the
+    // project, as in the template editor.
+    if (!board || board.isDefault) return;
+    if (boardTabs.length <= 1) return;
     setDeleteBoardTarget(boardId);
   };
 
@@ -495,6 +524,9 @@ export default function ProjectDetail() {
       if (activeBoardId === deleteBoardTarget) {
         const idx = boardTabs.findIndex(b => b.id === deleteBoardTarget);
         const remaining = boardTabs.filter(b => b.id !== deleteBoardTarget);
+        // After delete the active board slides one position to the left (same convention
+        // as the template editor's `activeBoardIndex = max(0, index - 1)` fallback) and
+        // falls back to the first remaining board if we were at index 0.
         if (remaining.length > 0) {
           setActiveBoardId(idx > 0 ? remaining[idx - 1].id : remaining[0].id);
         } else {
@@ -567,6 +599,13 @@ export default function ProjectDetail() {
 
   const handleSearchUsers = async (q: string) => {
     setUserSearchQuery(q);
+    // Any edit of the search input drops the previous selection so the blue "selected"
+    // chip doesn't linger (with a now-stale display name) and the results list / empty
+    // state comes back as the user expects.
+    if (selectedUserId) {
+      setSelectedUserId(null);
+      setSelectedUserProfile(null);
+    }
     if (q.length < 2) {
       setSearchResults([]);
       return;
@@ -634,6 +673,15 @@ export default function ProjectDetail() {
 
   return (
     <div className="max-w-[1600px] mx-auto space-y-6 min-w-0">
+      {/* Back button */}
+      <button
+        onClick={() => navigate("/projects")}
+        className="flex items-center gap-1.5 text-sm text-slate-600 hover:text-blue-600 transition-colors"
+      >
+        <ChevronLeft size={16} />
+        <span>Назад к списку проектов</span>
+      </button>
+
       {/* Compact Header */}
       <div className="bg-white rounded-xl p-4 shadow-md border border-slate-100">
         <div className="flex items-center flex-wrap gap-x-3 gap-y-2 min-w-0">
@@ -645,12 +693,13 @@ export default function ProjectDetail() {
               onClick={() => {
                 navigator.clipboard.writeText(project.key);
                 setCopiedKey(true);
-                setTimeout(() => setCopiedKey(false), 2000);
+                setTimeout(() => setCopiedKey(false), 1500);
               }}
               className="p-1.5 hover:bg-slate-100 rounded transition-colors"
               title="Копировать ключ"
+              aria-label="Копировать ключ проекта"
             >
-              <Copy size={16} className={copiedKey ? "text-green-600" : "text-slate-600"} />
+              {copiedKey ? <Check size={16} className="text-green-600" /> : <Copy size={16} className="text-slate-600" />}
             </button>
           </div>
           <h1 className="text-xl md:text-2xl font-bold break-words min-w-0 flex-1 basis-full md:basis-auto">{project.name}</h1>
@@ -833,7 +882,7 @@ export default function ProjectDetail() {
                   </div>
                   <h1 className="text-2xl md:text-4xl font-bold mb-2 break-words">{project.name}</h1>
                   {project.description && (
-                    <p className="text-blue-100 break-words">{project.description}</p>
+                    <p className="text-blue-100 break-words whitespace-pre-wrap">{project.description}</p>
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-blue-100 text-sm md:text-base">
@@ -889,6 +938,7 @@ export default function ProjectDetail() {
                         }}
                         onDelete={handleDeleteBoard}
                         canEditBoard={canEdit("project.boards")}
+                        canDelete={boardTabs.length > 1}
                       />
                     ))}
                   </ScrollableTabs>
@@ -1010,7 +1060,7 @@ export default function ProjectDetail() {
                   projectCreatedAt={project.createdAt}
                   members={members.map(m => {
                     const u = memberUsers.get(m.userId);
-                    return { userId: m.userId, fullName: u?.fullName || m.userId, email: u?.email, avatarUrl: u?.avatarUrl ?? undefined };
+                    return { userId: m.userId, fullName: u?.fullName || m.userId, username: u?.username, avatarUrl: u?.avatarUrl ?? undefined };
                   })}
                   refs={refs}
                   params={projectParams}
@@ -1074,7 +1124,35 @@ export default function ProjectDetail() {
                 </div>
 
                 <div className="space-y-3">
-                  {members.map((member) => {
+                  {(() => {
+                    // Project admins (role.isAdmin === true) stay pinned to the top. Within
+                    // the non-admin bucket members are sorted alphabetically by their role
+                    // name (using the member's alphabetically-first role as the sort key so
+                    // multi-role members still have a deterministic position). Russian
+                    // collation handles cyrillic correctly. "Без роли" members, if any,
+                    // fall to the very bottom.
+                    const adminRoleIds = new Set(
+                      projectRoles.filter((r) => r.isAdmin).map((r) => r.id),
+                    );
+                    const primaryRoleName = (m: typeof members[0]) => {
+                      const names = (m.roles ?? [])
+                        .filter((r) => !adminRoleIds.has(r.id))
+                        .map((r) => r.name)
+                        .sort((x, y) => x.localeCompare(y, "ru"));
+                      return names[0] ?? "";
+                    };
+                    return [...members].sort((a, b) => {
+                      const aAdmin = (a.roles ?? []).some((r) => adminRoleIds.has(r.id));
+                      const bAdmin = (b.roles ?? []).some((r) => adminRoleIds.has(r.id));
+                      if (aAdmin !== bAdmin) return aAdmin ? -1 : 1;
+                      const aRole = primaryRoleName(a);
+                      const bRole = primaryRoleName(b);
+                      // Members without a non-admin role (empty string) go last.
+                      if (!aRole && bRole) return 1;
+                      if (aRole && !bRole) return -1;
+                      return aRole.localeCompare(bRole, "ru");
+                    });
+                  })().map((member) => {
                     const user = memberUsers.get(member.userId);
                     if (!user) return null;
 
@@ -1087,24 +1165,33 @@ export default function ProjectDetail() {
                           <UserAvatar user={toAvatarUser(user)} size="md" />
                           <div className="min-w-0 flex-1">
                             <p className="font-medium truncate">{user.fullName}</p>
-                            <p className="text-sm text-slate-600 truncate">{user.email}</p>
+                            <p className="text-sm text-slate-600 truncate">{user.username}</p>
                           </div>
                         </div>
                         <div className="flex items-center justify-between md:justify-end gap-3 md:gap-4">
                           <div className="min-w-0 md:text-right">
                             {(member.roles || []).length > 0 ? (
                               <div className="flex flex-wrap gap-1 md:justify-end">
-                                {(member.roles || []).map((roleId) => {
-                                  const roleDef = projectRoles.find(r => r.id === roleId);
-                                  return (
+                                {(() => {
+                                  // Pin admin-role badges first so the most privileged role
+                                  // is the first thing the user reads when scanning the row.
+                                  // The relative order of non-admin roles is preserved from
+                                  // the backend (`project_role.order`).
+                                  const adminRoleIds = new Set(
+                                    projectRoles.filter((r) => r.isAdmin).map((r) => r.id),
+                                  );
+                                  const list = member.roles ?? [];
+                                  const admins = list.filter((r) => adminRoleIds.has(r.id));
+                                  const others = list.filter((r) => !adminRoleIds.has(r.id));
+                                  return [...admins, ...others].map((role) => (
                                     <span
-                                      key={roleId}
+                                      key={role.id}
                                       className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded"
                                     >
-                                      {roleDef?.name || roleId}
+                                      {role.name}
                                     </span>
-                                  );
-                                })}
+                                  ));
+                                })()}
                               </div>
                             ) : (
                               <p className="text-sm text-slate-500">Без роли</p>
@@ -1115,7 +1202,7 @@ export default function ProjectDetail() {
                               <button
                                 onClick={() => {
                                   setSelectedMember(member);
-                                  setSelectedRoles([...(member.roles || [])]);
+                                  setSelectedRoles((member.roles || []).map((r) => r.id));
                                   setShowEditMemberModal(true);
                                 }}
                                 className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
@@ -1150,6 +1237,7 @@ export default function ProjectDetail() {
           setShowAddMemberModal(next);
           if (!next) {
             setSelectedUserId(null);
+            setSelectedUserProfile(null);
             setNewMemberRoles([]);
             setUserSearchQuery("");
             setSearchResults([]);
@@ -1170,7 +1258,7 @@ export default function ProjectDetail() {
                   type="text"
                   value={userSearchQuery}
                   onChange={(e) => handleSearchUsers(e.target.value)}
-                  placeholder="Введите имя или email..."
+                  placeholder="Введите имя или логин..."
                   className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -1181,6 +1269,7 @@ export default function ProjectDetail() {
                       key={user.id}
                       onClick={() => {
                         setSelectedUserId(user.id);
+                        setSelectedUserProfile(user);
                         setUserSearchQuery(user.fullName);
                         setSearchResults([]);
                       }}
@@ -1189,26 +1278,41 @@ export default function ProjectDetail() {
                       <UserAvatar user={toAvatarUser(user)} size="sm" />
                       <div>
                         <p className="text-sm font-medium">{user.fullName}</p>
-                        <p className="text-xs text-slate-500">{user.email}</p>
+                        <p className="text-xs text-slate-500">{user.username}</p>
                       </div>
                     </button>
                   ))}
                 </div>
               )}
-              {selectedUserId && (
-                <div className="mt-2 flex items-center gap-2 p-2 bg-blue-50 rounded-lg">
-                  <span className="text-sm text-blue-700 flex-1">{userSearchQuery}</span>
-                  <button
-                    onClick={() => {
-                      setSelectedUserId(null);
-                      setUserSearchQuery("");
-                    }}
-                    className="text-blue-500 hover:text-blue-700"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              )}
+              {selectedUserId && (() => {
+                // Show fullName + login of the picked user in the blue chip so the admin
+                // can verify identity before saving (two people can share a fullName).
+                const picked = selectedUserProfile
+                  ?? memberUsers.get(selectedUserId)
+                  ?? searchResults.find((u) => u.id === selectedUserId);
+                return (
+                  <div className="mt-2 flex items-start gap-2 p-2 bg-blue-50 rounded-lg">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-blue-700 truncate">
+                        {picked?.fullName ?? userSearchQuery}
+                      </p>
+                      {picked?.username && (
+                        <p className="text-xs text-blue-600 truncate">{picked.username}</p>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => {
+                        setSelectedUserId(null);
+                        setSelectedUserProfile(null);
+                        setUserSearchQuery("");
+                      }}
+                      className="text-blue-500 hover:text-blue-700 shrink-0 mt-0.5"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
 
             {selectedUserId && projectRoles.length > 0 && (
@@ -1245,6 +1349,7 @@ export default function ProjectDetail() {
             onClick={() => {
               setShowAddMemberModal(false);
               setSelectedUserId(null);
+              setSelectedUserProfile(null);
               setNewMemberRoles([]);
               setUserSearchQuery("");
               setSearchResults([]);
@@ -1285,17 +1390,18 @@ export default function ProjectDetail() {
                 <div>
                   <label className="block text-sm font-medium mb-2">Участник</label>
                   <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
-                    {memberUsers.get(selectedMember.userId) && (
-                      <>
-                        <UserAvatar
-                          user={toAvatarUser(memberUsers.get(selectedMember.userId)!)}
-                          size="sm"
-                        />
-                        <span className="font-medium">
-                          {memberUsers.get(selectedMember.userId)!.fullName}
-                        </span>
-                      </>
-                    )}
+                    {memberUsers.get(selectedMember.userId) && (() => {
+                      const u = memberUsers.get(selectedMember.userId)!;
+                      return (
+                        <>
+                          <UserAvatar user={toAvatarUser(u)} size="sm" />
+                          <div className="min-w-0">
+                            <p className="font-medium truncate">{u.fullName}</p>
+                            {u.username && <p className="text-xs text-slate-500 truncate">{u.username}</p>}
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
 

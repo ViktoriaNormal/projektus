@@ -18,6 +18,8 @@ import {
 } from "../api/meetings";
 import { formatDate } from "../lib/format";
 import { EmptyState } from "../components/ui/EmptyState";
+import { MeetingCard } from "../components/meetings/MeetingCard";
+import { CopyInviteButton } from "../components/meetings/CopyInviteButton";
 
 function getTodayStart(): Date {
   const today = new Date();
@@ -55,147 +57,8 @@ const meetingTypeLabelMap: Record<string, string> = {
   custom: "Пользовательское событие",
 };
 
-function formatInvitation(meeting: MeetingResponse, organizerName?: string): string {
-  const start = new Date(meeting.startTime);
-  const end = new Date(meeting.endTime);
-  const typeName = meetingTypeLabelMap[meeting.meetingType] || meeting.meetingType;
-  const date = formatDate(start, "weekday");
-  const timeStart = start.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-  const timeEnd = end.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-
-  let text = "";
-  if (organizerName) {
-    text += `${organizerName} приглашает вас на встречу:\n\n`;
-  }
-  text += `📅 ${meeting.name}\n`;
-  text += `🏷 ${typeName}\n`;
-  text += `🕐 ${date}, ${timeStart} — ${timeEnd}\n`;
-  if (meeting.location) text += `📍 ${meeting.location}\n`;
-  if (meeting.description) text += `\n${meeting.description}`;
-  return text.trim();
-}
-
-function CopyInviteButton({ meeting, organizerName, size = "sm" }: { meeting: MeetingResponse; organizerName?: string; size?: "sm" | "md" }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    navigator.clipboard.writeText(formatInvitation(meeting, organizerName)).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  };
-
-  if (size === "sm") {
-    return (
-      <button
-        onClick={handleCopy}
-        className="p-0.5 rounded hover:bg-white/30 text-white/70 hover:text-white transition-colors"
-        title="Скопировать приглашение"
-      >
-        {copied ? <Check size={12} /> : <Copy size={12} />}
-      </button>
-    );
-  }
-
-  return (
-    <button
-      onClick={handleCopy}
-      className={`shrink-0 p-1.5 rounded-lg transition-colors ${
-        copied
-          ? "bg-green-100 text-green-600"
-          : "text-slate-400 hover:text-blue-600 hover:bg-blue-50"
-      }`}
-      title="Скопировать приглашение"
-    >
-      {copied ? <Check size={16} /> : <Copy size={16} />}
-    </button>
-  );
-}
-
-function WeekMeetingCard({
-  meeting, meetingTypeColors, meetingTypeLabels, dayNames, organizerName, onClick, cancelled, badge, badgeClass, projects,
-}: {
-  meeting: MeetingResponse;
-  meetingTypeColors: Record<string, string>;
-  meetingTypeLabels: Record<string, string>;
-  dayNames: string[];
-  organizerName?: string;
-  onClick: () => void;
-  cancelled?: boolean;
-  badge?: string;
-  badgeClass?: string;
-  projects: ProjectResponse[];
-}) {
-  const project = meeting.projectId
-    ? projects.find((p) => String(p.id) === meeting.projectId)
-    : null;
-  const start = new Date(meeting.startTime);
-  const end = new Date(meeting.endTime);
-
-  return (
-    <div
-      onClick={onClick}
-      className={`p-3 border rounded-lg transition-colors cursor-pointer ${
-        cancelled
-          ? "border-slate-200 bg-slate-50 opacity-60"
-          : "border-slate-200 hover:border-blue-300"
-      }`}
-    >
-      <div className="flex items-start gap-3">
-        <div
-          className={`w-1 self-stretch rounded-full shrink-0 ${
-            cancelled ? "bg-slate-300" : meetingTypeColors[meeting.meetingType] || "bg-slate-500"
-          }`}
-        />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-2 mb-1">
-            <h3 className={`font-semibold text-sm truncate ${cancelled ? "line-through text-slate-400" : ""}`}>
-              {meeting.name}
-            </h3>
-            {!cancelled && <CopyInviteButton meeting={meeting} organizerName={organizerName} size="md" />}
-          </div>
-          <p className="text-xs text-slate-600 mb-2">
-            {meetingTypeLabels[meeting.meetingType] || meeting.meetingType}
-          </p>
-          {cancelled && (
-            <span className="inline-block text-xs font-medium text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full mb-2">
-              Отменена
-            </span>
-          )}
-          {!cancelled && badge && (
-            <span className={`inline-block text-xs font-medium border px-2 py-0.5 rounded-full mb-2 ${badgeClass || ""}`}>
-              {badge}
-            </span>
-          )}
-          {project && (
-            <p className="text-xs text-slate-500 mb-1 truncate">
-              📁 {project.name}
-            </p>
-          )}
-          <div className="space-y-1 text-xs text-slate-500">
-            <div className="flex items-center gap-1">
-              <Clock size={12} className="shrink-0" />
-              <span>
-                {dayNames[start.getDay()]},{" "}
-                {formatDate(start, "monthDay")}{" "}
-                {start.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
-                {" — "}
-                {end.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
-              </span>
-            </div>
-            {meeting.location && (
-              <div className="flex items-center gap-1">
-                <MapPin size={12} className="shrink-0" />
-                <span className="truncate">{meeting.location}</span>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+// formatInvitation, CopyInviteButton — extracted to components/meetings/CopyInviteButton.tsx
+// WeekMeetingCard — extracted to components/meetings/MeetingCard.tsx
 
 function LegendItem({ color, label, tooltip }: { color: string; label: string; tooltip: string }) {
   return (
@@ -731,18 +594,15 @@ export default function Calendar() {
                     <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{section.label}</p>
                     <div className="space-y-2">
                       {section.meetings.map((meeting) => (
-                        <WeekMeetingCard
+                        <MeetingCard
                           key={meeting.id}
                           meeting={meeting}
-                          meetingTypeColors={meetingTypeColors}
-                          meetingTypeLabels={meetingTypeLabels}
-                          dayNames={dayNames}
+                          projects={projects}
                           organizerName={authUser?.fullName}
                           onClick={() => handleMeetingClick(meeting)}
                           cancelled={section.cancelled}
                           badge={section.badge}
                           badgeClass={section.badgeClass}
-                          projects={projects}
                         />
                       ))}
                     </div>

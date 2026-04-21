@@ -19,6 +19,8 @@ import {
   ChevronRight,
   Calendar,
   AlarmClock,
+  Ban,
+  Copy,
 } from "lucide-react";
 import { FilterDropdown } from "../components/FilterDropdown";
 import { toast } from "sonner";
@@ -29,13 +31,16 @@ import {
   type BoardResponse, type BoardField, type ColumnResponse, type SwimlaneResponse, type NoteResponse,
 } from "../api/boards";
 import { searchTasks, updateTask, type TaskResponse } from "../api/tasks";
+import { getTaskDependencies, deleteDependency } from "../api/dependencies";
 import { getTaskFieldValues, setTaskFieldValue, type TaskFieldValue } from "../api/field-values";
 import { getProjectSprints, getSprintTasks, type SprintResponse } from "../api/sprints";
 import { getUser, type UserProfileResponse } from "../api/users";
 import { formatDate } from "../lib/format";
+import { priorityColor } from "../lib/status-colors";
 import { toastError } from "../lib/errors";
 import { getTaskWatchers } from "../api/watchers";
 import { getProjectMembers, type ProjectMemberResponse } from "../api/projects";
+import { getBoardTags, type TagResponse } from "../api/tags";
 
 const ItemType = {
   TASK: "TASK",
@@ -124,6 +129,12 @@ function computeSwimlanesFromTasks(
   };
   const sortByOrder = (lanes: ComputedSwimlane[]) =>
     lanes.sort((a, b) => {
+      // "Значение не задано" always goes last, regardless of the stored backend order —
+      // lanes with real values come first, the catch-all empty lane anchors the bottom.
+      const aUnset = a.name === "Значение не задано";
+      const bUnset = b.name === "Значение не задано";
+      if (aUnset && !bUnset) return 1;
+      if (bUnset && !aUnset) return -1;
       if (a.order != null && b.order != null) return a.order - b.order;
       if (a.order != null) return -1;
       if (b.order != null) return 1;
@@ -251,12 +262,35 @@ function validateColumnOrder(cols: ColumnResponse[]): string | null {
 
 // ── Task Card ───────────────────────────────────────────────
 
-function TaskCard({ task, userCache, moveTask, returnUrl, canDrag = true }: {
+function CopyKeyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        navigator.clipboard.writeText(text).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+      className="p-0.5 rounded hover:bg-slate-200 text-slate-400 hover:text-blue-600 transition-colors"
+      title="Скопировать ключ задачи"
+      aria-label="Скопировать ключ задачи"
+    >
+      {copied ? <Check size={12} className="text-green-600" /> : <Copy size={12} />}
+    </button>
+  );
+}
+
+function TaskCard({ task, userCache, moveTask, returnUrl, canDrag = true, isBlocked = false }: {
   task: TaskResponse;
   userCache: Map<string, UserProfileResponse>;
   moveTask: (taskId: string, columnId: string, swimlaneId: string | null) => void;
   returnUrl?: string;
   canDrag?: boolean;
+  isBlocked?: boolean;
 }) {
   const [{ isDragging }, drag] = useDrag({
     type: ItemType.TASK,
@@ -271,15 +305,27 @@ function TaskCard({ task, userCache, moveTask, returnUrl, canDrag = true }: {
     <Link
       to={`/tasks/${task.id}${returnUrl ? `?returnUrl=${returnUrl}` : ""}`}
       ref={drag}
-      className={`bg-white p-3 rounded-lg shadow-md border border-slate-200 hover:shadow-xl hover:border-blue-400 transition-all ${canDrag ? "cursor-move" : "cursor-pointer"} block ${
+      className={`flex flex-col h-full p-3 rounded-lg shadow-md border transition-all ${canDrag ? "cursor-move" : "cursor-pointer"} ${
         isDragging ? "opacity-50 scale-95" : ""
+      } ${
+        isBlocked
+          ? "bg-red-50 border-red-300 hover:shadow-xl hover:border-red-500"
+          : "bg-white border-slate-200 hover:shadow-xl hover:border-blue-400"
       }`}
     >
+      {isBlocked && (
+        <div className="flex items-center gap-1 mb-2 px-1.5 py-0.5 bg-red-100 text-red-700 text-[10px] font-semibold rounded w-fit uppercase tracking-wide">
+          <Ban size={10} /> Заблокирована
+        </div>
+      )}
       <div className="flex items-start gap-2 mb-2">
         <div className="flex flex-col items-start gap-1 min-w-0">
-          <span className="text-xs font-mono text-slate-500 font-semibold">{task.key}</span>
+          <span className="inline-flex items-center gap-0.5 text-xs font-mono text-slate-500 font-semibold">
+            {task.key}
+            <CopyKeyButton text={task.key} />
+          </span>
           {task.priority && (
-            <span className="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">{task.priority}</span>
+            <span className={`text-xs px-1.5 py-0.5 rounded border ${priorityColor(task.priority)}`}>{task.priority}</span>
           )}
         </div>
         <div className="ml-auto shrink-0">
@@ -292,7 +338,7 @@ function TaskCard({ task, userCache, moveTask, returnUrl, canDrag = true }: {
           )}
         </div>
       </div>
-      <p className="text-sm font-medium hover:text-blue-600 break-words">{task.name}</p>
+      <p className="text-sm font-medium hover:text-blue-600 break-words flex-1">{task.name}</p>
       {(task.createdAt || task.deadline) && (
         <div className="flex items-center gap-2 flex-wrap mt-2 pt-2 border-t border-slate-100 text-xs">
           {task.createdAt && (
@@ -345,12 +391,11 @@ function DropZone({
       ref={drop}
       className={`min-h-[200px] p-2 rounded-lg transition-colors ${isOver ? "bg-blue-50 ring-2 ring-blue-300" : ""}`}
     >
-      <div className="grid grid-cols-2 gap-3 items-start">{children}</div>
       {canAddTask && (
-        <div>
+        <div className="mb-3">
           <button
             onClick={onAddTask}
-            className="mt-3 w-full py-2.5 border-2 border-dashed border-slate-300 rounded-lg hover:border-blue-400 hover:bg-blue-50 hover:text-blue-600 transition-all text-slate-600 flex items-center justify-center gap-2"
+            className="w-full py-2.5 border-2 border-dashed border-slate-300 rounded-lg hover:border-blue-400 hover:bg-blue-50 hover:text-blue-600 transition-all text-slate-600 flex items-center justify-center gap-2"
           >
             <Plus size={16} /> Добавить задачу
           </button>
@@ -359,6 +404,7 @@ function DropZone({
           )}
         </div>
       )}
+      <div className="grid grid-cols-2 gap-3">{children}</div>
     </div>
   );
 }
@@ -373,7 +419,7 @@ function ColumnHeader({
   column: ColumnResponse;
   index: number;
   columns: ColumnResponse[];
-  moveColumn: (dragIndex: number, hoverIndex: number) => void;
+  moveColumn: (dragIndex: number, hoverIndex: number) => boolean;
   taskCount: number;
   isScrum: boolean;
   onUpdate: (colId: string, field: string, value: any) => void;
@@ -396,7 +442,12 @@ function ColumnHeader({
     accept: ItemType.COLUMN,
     hover: (item: { index: number }) => {
       if (readOnly) return;
-      if (item.index !== index) { moveColumn(item.index, index); item.index = index; }
+      if (item.index !== index) {
+        // Only advance the drag item's logical index when the reorder actually happened —
+        // otherwise a crossing through an invalid position would leave item.index stale
+        // and cause subsequent valid hovers to pick the wrong source column.
+        if (moveColumn(item.index, index)) item.index = index;
+      }
     },
   });
 
@@ -429,6 +480,7 @@ function ColumnHeader({
     return (
       <th
         ref={(node) => drag(drop(node))}
+        id={`column-${column.id}`}
         className={`p-2 text-center font-semibold w-14 min-w-[56px] border-b-2 border-slate-300 border-r border-r-slate-200 last:border-r-0 bg-slate-100 align-top ${isDragging ? "opacity-50" : ""}`}
       >
         <div className="flex flex-col items-center gap-2">
@@ -454,6 +506,7 @@ function ColumnHeader({
   return (
     <th
       ref={(node) => drag(drop(node))}
+      id={`column-${column.id}`}
       className={`p-4 text-left font-semibold min-w-[520px] border-b-2 border-slate-300 border-r border-r-slate-200 last:border-r-0 bg-slate-100 ${isDragging ? "opacity-50" : ""}`}
     >
       <div className="flex items-center gap-2">
@@ -552,7 +605,7 @@ function ColumnHeader({
 
 function SwimlaneRow({
   swimlane, index, columns, tasks, userCache, moveTask, onAddTask, canAddTaskInColumn, getAddTaskHint, returnUrl, moveSwimlane, canDrag, note, onSaveNote, isScrum, onUpdateWip, canEditTasks = true,
-  collapsed = false, onToggleCollapse, collapsedCols,
+  collapsed = false, onToggleCollapse, collapsedCols, blockedTaskIds,
 }: {
   swimlane: ComputedSwimlane;
   index: number;
@@ -574,6 +627,7 @@ function SwimlaneRow({
   collapsed?: boolean;
   onToggleCollapse?: () => void;
   collapsedCols?: Set<string>;
+  blockedTaskIds?: Set<string>;
 }) {
   const [{ isDragging }, drag] = useDrag({
     type: ItemType.SWIMLANE,
@@ -657,7 +711,7 @@ function SwimlaneRow({
               canAddTask={canAddTaskInColumn ? canAddTaskInColumn(column) : true}
               addTaskHint={getAddTaskHint?.(column)}>
               {cellTasks.map((task) => (
-                <TaskCard key={task.id} task={task} userCache={userCache} moveTask={moveTask} returnUrl={returnUrl} canDrag={canEditTasks} />
+                <TaskCard key={task.id} task={task} userCache={userCache} moveTask={moveTask} returnUrl={returnUrl} canDrag={canEditTasks} isBlocked={blockedTaskIds?.has(task.id) ?? false} />
               ))}
             </DropZone>
           </td>
@@ -743,8 +797,16 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
   const [dateFilters, setDateFilters] = useState<{ createdFrom: string; createdTo: string; deadlineFrom: string; deadlineTo: string }>({ createdFrom: "", createdTo: "", deadlineFrom: "", deadlineTo: "" });
   const [filterFields, setFilterFields] = useState<BoardField[]>([]);
   const [fieldValuesMap, setFieldValuesMap] = useState<Map<string, TaskFieldValue[]>>(new Map());
+  // blockedByMap: taskId → list of blocker task IDs (from is_blocked_by deps)
+  const [blockedByMap, setBlockedByMap] = useState<Map<string, string[]>>(new Map());
+  // projectTaskStatus: taskId → columnSystemType, for blocker lookup across boards/sprints
+  const [projectTaskStatus, setProjectTaskStatus] = useState<Map<string, string | null>>(new Map());
   const [watcherMap, setWatcherMap] = useState<Map<string, string[]>>(new Map());
   const [allSprints, setAllSprints] = useState<SprintResponse[]>([]);
+  // Reference data for filters — loaded up-front so the filter panel reflects the task
+  // template of the board even when there are no tasks yet.
+  const [projectMembers, setProjectMembers] = useState<ProjectMemberResponse[]>([]);
+  const [boardTags, setBoardTags] = useState<TagResponse[]>([]);
   const [swimlaneField, setSwimlaneField] = useState<BoardField | null>(null);
   const [notes, setNotes] = useState<NoteResponse[]>([]);
   const [columnError, setColumnError] = useState<{ message: string; dismissible: boolean } | null>(null);
@@ -863,6 +925,26 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
       }
       setTasks(boardTasks);
 
+      // Load dependencies (is_blocked_by) + project-wide task status for blocker lookup
+      const blockedMap = new Map<string, string[]>();
+      await Promise.allSettled(
+        boardTasks.map(async (t) => {
+          try {
+            const deps = await getTaskDependencies(t.id);
+            const blockerIds = deps.filter(d => d.type === "is_blocked_by").map(d => d.dependsOnTaskId);
+            if (blockerIds.length > 0) blockedMap.set(t.id, blockerIds);
+          } catch { /**/ }
+        })
+      );
+      setBlockedByMap(blockedMap);
+      // Fetch project-wide tasks to resolve blocker column status (blockers may live on other boards/sprints)
+      try {
+        const allProj = await searchTasks({ projectId });
+        const statusMap = new Map<string, string | null>();
+        allProj.forEach(t => statusMap.set(t.id, t.columnSystemType ?? null));
+        setProjectTaskStatus(statusMap);
+      } catch { /**/ }
+
       // Load user cache
       const userIds = new Set<string>();
       boardTasks.forEach((task) => {
@@ -884,6 +966,20 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
         filterable.push({ id: "__tags__", name: "Теги", fieldType: "tags", isSystem: true, isRequired: false, options: null });
       }
       setFilterFields(filterable);
+
+      // Reference data for filter panels so the filter dropdowns are complete from the
+      // moment the board loads, not populated task-by-task as users create records.
+      try {
+        const pm = projectId ? await getProjectMembers(projectId) : [];
+        setProjectMembers(pm);
+        // Seed userCache with every project member so user / user_list filter labels and
+        // avatars resolve even before any task has that member assigned.
+        const missing = pm.map(m => m.userId).filter(uid => !cache.has(uid));
+        await Promise.allSettled(missing.map(async (uid) => {
+          try { const u = await getUser(uid); cache.set(uid, u); } catch { /**/ }
+        }));
+      } catch { /**/ }
+      try { setBoardTags(await getBoardTags(boardId)); } catch { /**/ }
 
       // Load custom field values for all tasks (needed for filters + swimlanes)
       let fvMap = new Map<string, TaskFieldValue[]>();
@@ -918,32 +1014,36 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
         );
       }
 
-      // Load watchers if swimlane groups by system user_list field (watchers)
+      // Load watchers whenever the board has a system user_list field (e.g. "Наблюдатели")
+      // in its filterable set or is grouped by it — otherwise filters/swimlanes by watchers
+      // silently return empty results.
       const groupByFieldId = boardMeta.swimlaneGroupBy;
+      const watcherFieldInUse =
+        filterable.find(f => f.fieldType === "user_list" && f.isSystem)
+        ?? (groupByFieldId
+          ? (boardFields.find(f => f.id === groupByFieldId && f.fieldType === "user_list" && f.isSystem)
+            || filterable.find(f => f.id === groupByFieldId && f.fieldType === "user_list" && f.isSystem))
+          : undefined);
       let wMap = new Map<string, string[]>();
-      if (groupByFieldId && projectId && boardTasks.length > 0) {
-        const watcherField = boardFields.find(f => f.id === groupByFieldId && f.fieldType === "user_list" && f.isSystem)
-          || filterable.find(f => f.id === groupByFieldId && f.fieldType === "user_list" && f.isSystem);
-        if (watcherField) {
-          const members = await getProjectMembers(projectId).catch(() => [] as ProjectMemberResponse[]);
-          const memberToUser = new Map(members.map(m => [m.id, m.userId]));
-          await Promise.allSettled(
-            boardTasks.map(async (t) => {
-              try {
-                const watchers = await getTaskWatchers(t.id);
-                const uIds = watchers.map(w => memberToUser.get(w.memberId)).filter((id): id is string => !!id);
-                if (uIds.length > 0) wMap.set(t.id, uIds);
-              } catch { /**/ }
-            })
-          );
-          const watcherUserIds = new Set<string>();
-          for (const ids of wMap.values()) ids.forEach(id => watcherUserIds.add(id));
-          await Promise.allSettled(
-            [...watcherUserIds].filter(id => !cache.has(id)).map(async (uid) => {
-              try { const u = await getUser(uid); cache.set(uid, u); } catch { /**/ }
-            })
-          );
-        }
+      if (watcherFieldInUse && projectId && boardTasks.length > 0) {
+        const members = await getProjectMembers(projectId).catch(() => [] as ProjectMemberResponse[]);
+        const memberToUser = new Map(members.map(m => [m.id, m.userId]));
+        await Promise.allSettled(
+          boardTasks.map(async (t) => {
+            try {
+              const watchers = await getTaskWatchers(t.id);
+              const uIds = watchers.map(w => memberToUser.get(w.memberId)).filter((id): id is string => !!id);
+              if (uIds.length > 0) wMap.set(t.id, uIds);
+            } catch { /**/ }
+          })
+        );
+        const watcherUserIds = new Set<string>();
+        for (const ids of wMap.values()) ids.forEach(id => watcherUserIds.add(id));
+        await Promise.allSettled(
+          [...watcherUserIds].filter(id => !cache.has(id)).map(async (uid) => {
+            try { const u = await getUser(uid); cache.set(uid, u); } catch { /**/ }
+          })
+        );
       }
       setWatcherMap(wMap);
 
@@ -1071,9 +1171,16 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
       : "initial";
     const order = afterIndex + 2;
     try {
-      await createColumn(boardId, { name: "Новая колонка", systemType, order });
+      const newCol = await createColumn(boardId, { name: "Новая колонка", systemType, order });
       setColumnError(null);
       await reloadColumns();
+      toast.success("Колонка создана");
+      // Scroll the newly created column into view after the next paint so the user sees it
+      // land on the board (minimum horizontal scroll; no smoothing to avoid a jarring jump).
+      requestAnimationFrame(() => {
+        const el = document.getElementById(`column-${newCol.id}`);
+        if (el) el.scrollIntoView({ block: "nearest", inline: "nearest" });
+      });
     } catch (e: any) {
       setColumnError({ message: e.message || "Ошибка создания колонки", dismissible: true });
     }
@@ -1125,7 +1232,14 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
 
   const moveTask = async (taskId: string, columnId: string, swimlaneId: string | null) => {
     if (!canEditTasks) return;
-    setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, columnId } : t));
+    const targetCol = columns.find(c => c.id === columnId);
+    const targetSystemType = targetCol?.systemType ?? null;
+    setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, columnId, columnSystemType: targetSystemType } : t));
+    setProjectTaskStatus((prev) => {
+      const next = new Map(prev);
+      next.set(taskId, targetSystemType);
+      return next;
+    });
 
     // Find if task moved to a different swimlane and determine the target field value
     const targetLane = swimlaneId ? computedSwimlanes.find(s => s.backendId === swimlaneId) : null;
@@ -1148,15 +1262,59 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
         const ft = swimlaneField.fieldType;
         const val = targetLane.value;
         if (swimlaneField.isSystem) {
-          if (ft === "priority") await updateTask(taskId, { priority: val });
-          else if (ft === "estimation") await updateTask(taskId, { estimation: val });
+          if (ft === "priority") {
+            setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, priority: val || null } : t));
+            await updateTask(taskId, { priority: val });
+          } else if (ft === "estimation") {
+            setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, estimation: val || null } : t));
+            await updateTask(taskId, { estimation: val });
+          }
         } else {
           const data: { valueText?: string | null; valueNumber?: number | null; valueDatetime?: string | null } = {};
           if (ft === "number") data.valueNumber = val ? Number(val) : null;
           else if (ft === "datetime") data.valueDatetime = val || null;
           else data.valueText = val || null;
+          // Optimistic update of the cached custom-field value so filters/swimlane groupings
+          // on this board reflect the new value without waiting for a full reload.
+          setFieldValuesMap((prev) => {
+            const next = new Map(prev);
+            const fvs = next.get(taskId) ? [...next.get(taskId)!] : [];
+            const idx = fvs.findIndex((f) => f.fieldId === swimlaneField.id);
+            const merged: TaskFieldValue = {
+              fieldId: swimlaneField.id,
+              valueText: data.valueText ?? null,
+              valueNumber: data.valueNumber ?? null,
+              valueDatetime: data.valueDatetime ?? null,
+            };
+            if (idx >= 0) fvs[idx] = { ...fvs[idx], ...merged };
+            else fvs.push(merged);
+            next.set(taskId, fvs);
+            return next;
+          });
           await setTaskFieldValue(taskId, swimlaneField.id, data);
         }
+      }
+
+      // Once the task reaches a "completed" column, any blocks / is_blocked_by links become
+      // meaningless — remove them on both sides via the symmetric DELETE endpoint.
+      if (targetSystemType === "completed") {
+        try {
+          const deps = await getTaskDependencies(taskId);
+          const toDelete = deps.filter(d => d.type === "blocks" || d.type === "is_blocked_by");
+          if (toDelete.length > 0) {
+            await Promise.allSettled(toDelete.map(d => deleteDependency(taskId, d.id)));
+            setBlockedByMap(prev => {
+              const next = new Map(prev);
+              next.delete(taskId);
+              for (const [otherId, blockers] of Array.from(next.entries())) {
+                const filtered = blockers.filter(b => b !== taskId);
+                if (filtered.length === 0) next.delete(otherId);
+                else if (filtered.length !== blockers.length) next.set(otherId, filtered);
+              }
+              return next;
+            });
+          }
+        } catch { /**/ }
       }
     } catch (e: any) {
       toastError(e, "Ошибка перемещения задачи");
@@ -1164,19 +1322,34 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
     }
   };
 
-  const moveColumn = (dragIndex: number, hoverIndex: number) => {
-    if (isScrum && (dragIndex === 0 || hoverIndex === 0)) return;
+  const moveColumn = (dragIndex: number, hoverIndex: number): boolean => {
+    // Scrum: the first "Бэклог спринта" column is pinned and can't participate in reordering.
+    if (isScrum && (dragIndex === 0 || hoverIndex === 0)) {
+      toast.error(
+        "Первая колонка Scrum-доски («Бэклог спринта») закреплена — её нельзя перемещать и другие колонки нельзя ставить перед ней.",
+        { id: "column-reorder-invalid" },
+      );
+      return false;
+    }
     const newCols = [...columns];
     const [dragged] = newCols.splice(dragIndex, 1);
     newCols.splice(hoverIndex, 0, dragged);
     const err = validateColumnOrder(newCols);
-    if (err) return; // silently reject invalid drag
+    if (err) {
+      // Explain why the hovered position is forbidden so the user doesn't wonder why the
+      // column refuses to settle there. Stable toast id replaces previous messages so
+      // repeated hovers don't stack up notifications.
+      toast.error(err, { id: "column-reorder-invalid" });
+      return false;
+    }
+    toast.dismiss("column-reorder-invalid");
     newCols.forEach((c, i) => (c.order = i + 1));
     setColumns(newCols);
     if (boardId) {
       const orders = newCols.map((c, i) => ({ columnId: c.id, order: i + 1 }));
       reorderColumns(boardId, orders).then(() => onBoardChanged?.()).catch(() => reloadColumns());
     }
+    return true;
   };
 
   const moveSwimlane = (dragIndex: number, hoverIndex: number) => {
@@ -1197,23 +1370,33 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
     return filteredTasks.filter((t) => t.columnId === columnId);
   };
 
-  const boardReturnUrl = encodeURIComponent(`/projects/${projectId}?tab=boards`);
+  // Include boardId so "Back" from the task detail returns to the exact same board tab,
+  // not just the "Boards" section with whatever default board is picked.
+  const boardReturnUrl = encodeURIComponent(`/projects/${projectId}?tab=boards&boardId=${boardId}`);
 
   const handleAddTask = (columnId: string, swimlaneId: string | null) => {
     if (!boardId || !projectId) return;
+    // The column the user clicked "+" in becomes the task's initial column — this is the
+    // new task's status on creation. TaskDetail locks the Column select while it's in
+    // create mode so the user can't accidentally switch it before save.
+    const colParam = `&columnId=${encodeURIComponent(columnId)}`;
     if (isScrum && activeSprintId) {
-      navigate(`/tasks/new?projectId=${projectId}&boardId=${boardId}&sprintId=${activeSprintId}&returnUrl=${boardReturnUrl}`);
+      navigate(`/tasks/new?projectId=${projectId}&boardId=${boardId}&sprintId=${activeSprintId}${colParam}&returnUrl=${boardReturnUrl}`);
     } else {
-      navigate(`/tasks/new?projectId=${projectId}&boardId=${boardId}&backlog=1&returnUrl=${boardReturnUrl}`);
+      navigate(`/tasks/new?projectId=${projectId}&boardId=${boardId}&backlog=1${colParam}&returnUrl=${boardReturnUrl}`);
     }
   };
 
-  // Determine which columns can have the "Add task" button
+  // Determine which columns can have the "Add task" button.
+  // Rule (Scrum & Kanban): tasks can only be created from columns with systemType
+  // "initial" — otherwise the task bypasses the earlier workflow stages and distorts
+  // analytics (cycle time / lead time / burndown counts it as entering mid-stream).
   const canAddTaskInColumn = (col: ColumnResponse): boolean => {
     if (!canEditTasks) return false;
+    if (col.systemType !== "initial") return false;
     if (isScrum) {
       if (!activeSprintName) return false;
-      return col.systemType === "initial" && columns.indexOf(col) === 0;
+      return columns.indexOf(col) === 0;
     }
     return true;
   };
@@ -1242,9 +1425,28 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
   const hasActiveDateFilters = !!(dateFilters.createdFrom || dateFilters.createdTo || dateFilters.deadlineFrom || dateFilters.deadlineTo);
   const hasActiveFilters = Object.values(filters).some((f) => f.length > 0) || hasActiveDateFilters;
 
-  // Build filter options for each filterable field
+  // Build filter options for each filterable field. The panel is derived from the board's
+  // task template, so the option set is seeded from the field's reference data (field.options,
+  // project members, board tags, checkbox constants) — not built up from task values task by
+  // task. Any stale / legacy values found on existing tasks are added on top so that
+  // already-tagged values remain filterable.
   const getFilterOptions = (field: BoardField): { value: string; label: string }[] => {
     const seen = new Map<string, string>(); // value → label
+    // 1) Seed from the field's source of truth (so filters are complete even without tasks).
+    if (field.fieldType === "select" || field.fieldType === "priority" || field.fieldType === "multiselect") {
+      for (const opt of field.options || []) if (!seen.has(opt)) seen.set(opt, opt);
+    } else if (field.fieldType === "checkbox") {
+      seen.set("true", "Да");
+      seen.set("false", "Нет");
+    } else if (field.fieldType === "user" || field.fieldType === "user_list") {
+      for (const m of projectMembers) {
+        if (!seen.has(m.userId)) seen.set(m.userId, userCache.get(m.userId)?.fullName || m.userId);
+      }
+    } else if (field.fieldType === "tags") {
+      for (const tag of boardTags) if (!seen.has(tag.name)) seen.set(tag.name, tag.name);
+    }
+    // 2) Enrich with values found on existing tasks that aren't in the source of truth yet
+    //    (tags created ad-hoc, legacy select values, sprint-typed fields still in the data, etc.).
     for (const task of tasks) {
       const raw = getTaskValueForField(task, field, fieldValuesMap, watcherMap);
       if (raw == null) continue;
@@ -1252,7 +1454,7 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
         for (const part of raw.split(",").map(s => s.trim()).filter(Boolean)) {
           if (!seen.has(part)) {
             let label = part;
-            if (field.fieldType === "user_list" || (field.fieldType === "user" && field.isSystem)) label = userCache.get(part)?.fullName || part;
+            if (field.fieldType === "user_list") label = userCache.get(part)?.fullName || part;
             else if (field.fieldType === "sprint_list") label = allSprints.find(s => s.id === part)?.name || part;
             seen.set(part, label);
           }
@@ -1267,12 +1469,6 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
         }
       }
     }
-    // For select/priority with predefined options, include all options even if unused
-    if ((field.fieldType === "select" || field.fieldType === "priority") && field.options) {
-      for (const opt of field.options) {
-        if (!seen.has(opt)) seen.set(opt, opt);
-      }
-    }
     return [...seen.entries()].map(([value, label]) => ({ value, label }));
   };
 
@@ -1283,7 +1479,12 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
       const field = filterFields.find(f => f.id === fieldId);
       if (!field) continue;
       const raw = getTaskValueForField(task, field, fieldValuesMap, watcherMap);
-      if (field.fieldType === "multiselect" || field.fieldType === "user_list" || field.fieldType === "sprint_list" || field.fieldType === "tags") {
+      if (field.fieldType === "checkbox") {
+        // Unset checkbox values are stored as NULL in the DB (the flag is optional), so
+        // tasks that were never touched must still match the "Нет" filter.
+        const normalized = raw === "true" ? "true" : "false";
+        if (!selectedValues.includes(normalized)) return false;
+      } else if (field.fieldType === "multiselect" || field.fieldType === "user_list" || field.fieldType === "sprint_list" || field.fieldType === "tags") {
         const parts = raw ? raw.split(",").map(s => s.trim()).filter(Boolean) : [];
         if (!parts.some(p => selectedValues.includes(p))) return false;
       } else {
@@ -1310,10 +1511,30 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
 
   const filteredTasks = hasActiveFilters ? tasks.filter(taskPassesFilters) : tasks;
 
+  // Resolve blocker column status: prefer current board's `tasks` (fresh after moves), fall back to project-wide snapshot
+  const isTaskCompleted = (taskId: string): boolean => {
+    const local = tasks.find(t => t.id === taskId);
+    if (local) {
+      const col = columns.find(c => c.id === local.columnId);
+      if (col) return col.systemType === "completed";
+    }
+    return projectTaskStatus.get(taskId) === "completed";
+  };
+  const taskExists = (taskId: string): boolean => {
+    return tasks.some(t => t.id === taskId) || projectTaskStatus.has(taskId);
+  };
+  // A task is blocked if at least one of its blockers is still active (exists AND not completed).
+  // Deleted / completed blockers don't count.
+  const blockedTaskIds = new Set<string>();
+  blockedByMap.forEach((blockerIds, taskId) => {
+    if (isTaskCompleted(taskId)) return;
+    if (blockerIds.some(bid => taskExists(bid) && !isTaskCompleted(bid))) blockedTaskIds.add(taskId);
+  });
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 size={32} className="animate-spin text-blue-600" />
+      <div className="flex items-center justify-center h-96">
+        <Loader2 size={40} className="animate-spin text-blue-600" />
       </div>
     );
   }
@@ -1343,9 +1564,9 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
             </div>
           </div>
         )}
-        {/* Filters */}
-        {tasks.length > 0 && (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 px-5 py-4">
+        {/* Filters — always shown; the filter set is derived from the board's task template,
+            not from which tasks happen to exist right now. */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-100 px-5 py-4">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wide">Фильтры</h3>
               {hasActiveFilters && (
@@ -1358,7 +1579,6 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
               <div className="flex flex-wrap gap-2">
                 {filterFields.map((field) => {
                   const opts = getFilterOptions(field);
-                  if (opts.length === 0) return null;
                   return (
                     <FilterDropdown
                       key={field.id}
@@ -1433,7 +1653,6 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
               </div>
             </div>
           </div>
-        )}
 
         {/* Collapse toolbar */}
         {columns.length > 0 && (() => {
@@ -1534,6 +1753,7 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
                           collapsed={collapsedSwimlanes.has(swimKey)}
                           onToggleCollapse={() => toggleSwimlaneCollapse(swimKey)}
                           collapsedCols={collapsedCols}
+                          blockedTaskIds={blockedTaskIds}
                         />
                       );
                     });
@@ -1556,7 +1776,7 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
                             addTaskHint={getAddTaskHint(column)}
                           >
                             {cellTasks.map((task) => (
-                              <TaskCard key={task.id} task={task} userCache={userCache} moveTask={moveTask} returnUrl={boardReturnUrl} canDrag={canEditTasks} />
+                              <TaskCard key={task.id} task={task} userCache={userCache} moveTask={moveTask} returnUrl={boardReturnUrl} canDrag={canEditTasks} isBlocked={blockedTaskIds.has(task.id)} />
                             ))}
                           </DropZone>
                         </td>

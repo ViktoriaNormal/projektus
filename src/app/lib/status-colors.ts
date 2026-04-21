@@ -1,16 +1,38 @@
 export type PriorityKey = "Критический" | "Критичный" | "Высокий" | "Средний" | "Низкий" | string;
 
+/**
+ * Нейтральный серый — для пустых значений и кастомных (не входящих в дефолтные шаблоны).
+ * Тот же тон используется для «Нематериального» класса обслуживания.
+ */
+const NEUTRAL_COLOR = "bg-slate-100 text-slate-700 border-slate-200";
+
+/**
+ * Цвета для значений полей «Приоритет» и «Класс обслуживания».
+ * Оба типа приходят с бэкенда в одно и то же поле `task.priority` — различает их
+ * `board.priorityType` (priority | service_class). Значения не пересекаются, поэтому
+ * хранятся в одной таблице. Все кастомные значения, которых нет в таблице, отображаются
+ * нейтральным серым цветом (как «Нематериальный»).
+ */
 const PRIORITY_MAP: Record<string, string> = {
+  // Приоритет (priority) — дефолтные значения шаблона.
   "Критический": "bg-red-100 text-red-700 border-red-200",
   "Критичный": "bg-red-100 text-red-700 border-red-200",
+  "Блокер": "bg-red-100 text-red-700 border-red-200",
   "Высокий": "bg-orange-100 text-orange-700 border-orange-200",
   "Средний": "bg-yellow-100 text-yellow-700 border-yellow-200",
   "Низкий": "bg-green-100 text-green-700 border-green-200",
+  // Класс обслуживания (service_class) — дефолтные значения шаблона:
+  // Ускоренный → С фиксированной датой → Стандартный → Нематериальный (по убыванию срочности).
+  "Ускоренный": "bg-red-100 text-red-700 border-red-200",
+  "С фиксированной датой": "bg-purple-100 text-purple-700 border-purple-200",
+  "Фиксированная дата": "bg-purple-100 text-purple-700 border-purple-200",
+  "Стандартный": "bg-blue-100 text-blue-700 border-blue-200",
+  "Нематериальный": NEUTRAL_COLOR,
 };
 
 export function priorityColor(priority: string | null | undefined): string {
-  if (!priority) return "bg-slate-100 text-slate-700 border-slate-200";
-  return PRIORITY_MAP[priority] || "bg-slate-100 text-slate-700 border-slate-200";
+  if (!priority) return NEUTRAL_COLOR;
+  return PRIORITY_MAP[priority] || NEUTRAL_COLOR;
 }
 
 export type ProjectStatusKey = "active" | "archived" | "paused" | string;

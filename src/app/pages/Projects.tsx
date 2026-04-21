@@ -1,9 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import { Link } from "react-router";
-import { Plus, Search, Loader2, Save, Copy, Check } from "lucide-react";
+import { Plus, Search, Loader2, Save } from "lucide-react";
 import { PageSpinner } from "../components/ui/Spinner";
 import { EmptyState } from "../components/ui/EmptyState";
-import { formatDate } from "../lib/format";
 import { toastError } from "../lib/errors";
 import { toast } from "sonner";
 import { UserAvatar } from "../components/UserAvatar";
@@ -11,29 +9,9 @@ import { Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle } from "../compo
 import { getProjects, createProject, type ProjectResponse } from "../api/projects";
 import { getUser, searchUsers, type UserProfileResponse } from "../api/users";
 import { useAuth } from "../contexts/AuthContext";
-import { projectStatusColor, projectStatusLabel } from "../lib/status-colors";
 import { Select, SelectOption } from "../components/ui/Select";
-
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  };
-  return (
-    <button
-      onClick={handleCopy}
-      className="text-slate-400 hover:text-blue-600 transition-colors shrink-0 p-1 rounded hover:bg-blue-50"
-      title="Скопировать"
-    >
-      {copied ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
-    </button>
-  );
-}
+import { ProjectCard } from "../components/projects/ProjectCard";
+import { normalizeSearchText } from "../lib/search";
 
 
 export default function Projects() {
@@ -109,15 +87,15 @@ export default function Projects() {
     return () => clearTimeout(timeout);
   }, [ownerSearch, createOwner]);
 
+  const query = normalizeSearchText(searchQuery).toLowerCase();
   const filteredProjects = projects.filter((project) => {
     const owner = owners[project.ownerId];
     const ownerName = owner?.fullName?.toLowerCase() || "";
-    const query = searchQuery.toLowerCase();
     const matchesSearch =
-      !searchQuery ||
-      project.name.toLowerCase().includes(query) ||
-      project.key.toLowerCase().includes(query) ||
-      project.description.toLowerCase().includes(query) ||
+      !query ||
+      (project.name ?? "").toLowerCase().includes(query) ||
+      (project.key ?? "").toLowerCase().includes(query) ||
+      (project.description ?? "").toLowerCase().includes(query) ||
       ownerName.includes(query);
     const matchesType = filterType === "all" || project.projectType === filterType;
     const matchesStatus = filterStatus === "all" || project.status === filterStatus;
@@ -197,72 +175,9 @@ export default function Projects() {
       {/* Projects Grid */}
       {!loading && (
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-          {filteredProjects.map((project) => {
-            const owner = owners[project.ownerId];
-
-            return (
-              <div
-                key={project.id}
-                className="bg-white rounded-xl p-6 shadow-md border border-slate-100 hover:shadow-lg transition-all flex flex-col h-full"
-              >
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="px-3 py-1 bg-slate-100 text-slate-700 text-sm font-mono font-bold rounded flex items-center gap-1">
-                    {project.key}
-                    <CopyButton text={project.key} />
-                  </span>
-                  <span
-                    className={`px-2 py-0.5 text-xs font-semibold rounded ${
-                      project.projectType === "scrum"
-                        ? "bg-blue-100 text-blue-700"
-                        : "bg-green-100 text-green-700"
-                    }`}
-                  >
-                    {project.projectType === "scrum" ? "Scrum" : "Kanban"}
-                  </span>
-                  <span
-                    className={`ml-auto px-3 py-1 text-xs font-semibold rounded border ${projectStatusColor(project.status)}`}
-                  >
-                    {projectStatusLabel(project.status)}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-1 mb-2">
-                  <h3 className="text-xl font-bold">{project.name}</h3>
-                  <CopyButton text={project.name} />
-                </div>
-
-                <p className="text-slate-600 text-sm mb-4 line-clamp-2">
-                  {project.description}
-                </p>
-
-                <div className="flex items-center gap-2 mb-3">
-                  {owner && (
-                    <UserAvatar
-                      user={{ fullName: owner.fullName, avatarUrl: owner.avatarUrl }}
-                      size="sm"
-                    />
-                  )}
-                  <div className="flex-1">
-                    <p className="text-xs text-slate-500">Ответственный</p>
-                    <p className="text-sm font-medium">{owner?.fullName || "—"}</p>
-                  </div>
-                </div>
-
-                <p className="text-xs text-slate-400">
-                  Дата создания: {formatDate(project.createdAt, "long")}
-                </p>
-
-                <div className="mt-auto pt-4">
-                  <Link
-                    to={`/projects/${project.id}`}
-                    className="block w-full px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-center rounded-lg transition-all shadow-sm font-medium"
-                  >
-                    Перейти к проекту
-                  </Link>
-                </div>
-              </div>
-            );
-          })}
+          {filteredProjects.map((project) => (
+            <ProjectCard key={project.id} project={project} owner={owners[project.ownerId]} />
+          ))}
         </div>
       )}
 

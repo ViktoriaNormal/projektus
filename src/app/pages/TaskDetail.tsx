@@ -12,7 +12,7 @@ import { toastError } from "../lib/errors";
 import { DependenciesSection } from "../components/task-detail/DependenciesSection";
 import { AttachmentsSection } from "../components/task-detail/AttachmentsSection";
 import { useProjectPermissions } from "../hooks/useProjectPermissions";
-import { useParams, Link, useNavigate, useSearchParams } from "react-router";
+import { useParams, Link, useNavigate, useSearchParams, useBlocker } from "react-router";
 import { toast } from "sonner";
 import { UserAvatar } from "../components/UserAvatar";
 import { UserSelect, UserMultiSelect, type UserOption } from "../components/UserSelect";
@@ -25,7 +25,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { getProjectBoards, getBoard, getBoardColumns, getBoardFields, type BoardResponse, type BoardField, type ColumnResponse } from "../api/boards";
 import { getTaskChecklists, createChecklist, addChecklistItem, setChecklistItemStatus, updateChecklist, deleteChecklist, updateChecklistItem, deleteChecklistItem, type ChecklistResponse } from "../api/checklists";
 import { getTaskTags, addTagToTask, removeTagFromTask, getBoardTags, type TagResponse } from "../api/tags";
-import { getTaskDependencies, addDependency, type TaskDependency, type DependencyType } from "../api/dependencies";
+import { getTaskDependencies, addDependency, deleteDependency, type TaskDependency, type DependencyType } from "../api/dependencies";
 import { getTaskComments, createComment, deleteComment, type CommentResponse } from "../api/comments";
 import { getTaskAttachments, uploadAttachment, deleteAttachment, type AttachmentResponse } from "../api/attachments";
 import { getTaskWatchers, addWatcher, removeWatcher, type TaskWatcher } from "../api/watchers";
@@ -55,6 +55,7 @@ export default function TaskDetail() {
   const [checklists, setChecklists] = useState<ChecklistResponse[]>([]);
   const [tags, setTags] = useState<TagResponse[]>([]);
   const [dependencies, setDependencies] = useState<TaskDependency[]>([]);
+  const [deletingDepIds, setDeletingDepIds] = useState<Set<string>>(new Set());
   const [comments, setComments] = useState<CommentResponse[]>([]);
   const [attachments, setAttachments] = useState<AttachmentResponse[]>([]);
   const [watchers, setWatchers] = useState<TaskWatcher[]>([]);
@@ -84,6 +85,7 @@ export default function TaskDetail() {
   const [selectedTaskId, setSelectedTaskId] = useState<string>("");
   const [commentText, setCommentText] = useState("");
   const [replyTo, setReplyTo] = useState<{ id: string; authorName: string; content: string } | null>(null);
+  const [highlightedCommentId, setHighlightedCommentId] = useState<string | null>(null);
   const [showMentionDropdown, setShowMentionDropdown] = useState(false);
   const [mentionFilter, setMentionFilter] = useState("");
   const [mentionCursorPos, setMentionCursorPos] = useState(0);
@@ -206,11 +208,31 @@ export default function TaskDetail() {
       if (board) setBoardData(board);
 
       if (proj) { setProject(proj); setProjectIdForPerms(proj.id); }
-      try { setProjectSprints(await getProjectSprints(pId)); } catch { /**/ }
+      let sprints: SprintResponse[] = [];
+      try { sprints = await getProjectSprints(pId); setProjectSprints(sprints); } catch { /**/ }
       setColumns(cols.sort((a, b) => a.order - b.order));
       setBoardFields(fields);
       setMembers(mems);
       setProjectTasks(tasks.filter(pt => pt.projectId === pId));
+
+      // Resolve the initial column of the synthetic create-mode task. Priority:
+      // 1. Explicit `columnId` from the URL — e.g. user clicked "+" in a specific column
+      //    on the board; the new task inherits that column as its starting status.
+      // 2. Otherwise, for an ACTIVE sprint, fall back to the board's initial column so
+      //    the user doesn't see the "column will be assigned on sprint start" notice
+      //    for an already-running sprint.
+      const urlColumnId = searchParams.get("columnId");
+      const urlSprintId = searchParams.get("sprintId");
+      let initialColumnId: string | null = null;
+      if (urlColumnId && cols.some((c) => c.id === urlColumnId)) {
+        initialColumnId = urlColumnId;
+      } else if (urlSprintId) {
+        const sprint = sprints.find(s => s.id === urlSprintId);
+        if (sprint?.status === "active") {
+          const initCol = cols.find(c => c.systemType === "initial");
+          if (initCol) initialColumnId = initCol.id;
+        }
+      }
 
       const uMap = new Map<string, UserProfileResponse>();
       await Promise.allSettled(mems.map(async (m) => {
@@ -243,7 +265,7 @@ export default function TaskDetail() {
         name: "",
         description: null,
         deadline: null,
-        columnId: null,
+        columnId: initialColumnId,
         swimlaneId: null,
         progress: null,
         priority: null,
@@ -261,6 +283,28 @@ export default function TaskDetail() {
     if (isCreateMode) loadCreateMode();
     else loadTask();
   }, [isCreateMode, loadCreateMode, loadTask]);
+
+  // Always open the task detail at the top of the page, regardless of where the user was
+  // scrolled on the previous page. Instant scroll (no smoothing) to avoid a visible jump.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [taskId]);
+
+  // When the user clicks the reply-quote inside a comment we highlight its parent comment
+  // (Telegram-style jump to original). Any subsequent click anywhere else on the page
+  // should dismiss the highlight. The setTimeout(0) defers attaching the listener so the
+  // click that *triggered* the highlight doesn't immediately clear it.
+  useEffect(() => {
+    if (!highlightedCommentId) return;
+    const handler = () => setHighlightedCommentId(null);
+    const timer = setTimeout(() => {
+      document.addEventListener("click", handler);
+    }, 0);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("click", handler);
+    };
+  }, [highlightedCommentId]);
 
   // ── Create task handler ─────────────────────────────────────
 
@@ -290,6 +334,7 @@ export default function TaskDetail() {
         boardId: bId,
         description: task.description || undefined,
         executorMemberId: executorMember?.id,
+        columnId: task.columnId || undefined,
         priority: task.priority || undefined,
         deadline: task.deadline || undefined,
         estimation: task.estimation || undefined,
@@ -339,6 +384,18 @@ export default function TaskDetail() {
     if (isCreateMode) return;
     try {
       await updateTask(task.id, { [field]: value });
+      // When the task is moved into a "completed" column, blocks / is_blocked_by links
+      // no longer make sense — remove them symmetrically via the API.
+      if (field === "columnId") {
+        const targetCol = columns.find(c => c.id === value);
+        if (targetCol?.systemType === "completed") {
+          const toDelete = dependencies.filter(d => d.type === "blocks" || d.type === "is_blocked_by");
+          if (toDelete.length > 0) {
+            await Promise.allSettled(toDelete.map(d => deleteDependency(task.id, d.id)));
+            setDependencies(prev => prev.filter(d => d.type !== "blocks" && d.type !== "is_blocked_by"));
+          }
+        }
+      }
     } catch (e: any) {
       toastError(e, "Ошибка обновления");
       loadTask(); // rollback to server state
@@ -350,7 +407,12 @@ export default function TaskDetail() {
       setTask(prev => prev ? { ...prev, name: editName.trim() } : prev);
       return;
     }
-    if (editName.trim() && editName !== task?.name) handleUpdateField("name", editName.trim());
+    const trimmed = editName.trim();
+    // Don't persist an empty title — the validation summary at the top of the page shows
+    // the "Название задачи не заполнено" error and the navigation blocker keeps the user
+    // on the page until the field is filled, so no additional UI feedback is needed here.
+    if (!trimmed) return;
+    if (trimmed !== task?.name) handleUpdateField("name", trimmed);
   };
 
   const handleSaveDescription = () => {
@@ -365,10 +427,33 @@ export default function TaskDetail() {
   const handleDeleteTask = async () => {
     if (!task) return;
     try {
+      // Clean up dependencies on both sides before soft-deleting the task, so stale blocks /
+      // is_blocked_by / parent / subtask / relates_to rows don't linger on the counterparts.
+      if (dependencies.length > 0) {
+        await Promise.allSettled(dependencies.map((d) => deleteDependency(task.id, d.id)));
+      }
       await deleteTask(task.id);
       toast.success("Задача удалена");
-      navigate("/tasks");
+      const ret = searchParams.get("returnUrl");
+      ret ? navigate(ret) : navigate(-1);
     } catch (e: any) { toastError(e, "Ошибка удаления"); }
+  };
+
+  const handleDeleteDependency = async (dep: TaskDependency) => {
+    if (!task) return;
+    setDeletingDepIds((prev) => new Set(prev).add(dep.id));
+    try {
+      await deleteDependency(task.id, dep.id);
+      setDependencies((prev) => prev.filter((d) => d.id !== dep.id));
+    } catch (e: any) {
+      toastError(e, "Ошибка удаления связи");
+    } finally {
+      setDeletingDepIds((prev) => {
+        const next = new Set(prev);
+        next.delete(dep.id);
+        return next;
+      });
+    }
   };
 
   const handleCopyKey = () => {
@@ -538,6 +623,17 @@ export default function TaskDetail() {
       toast.error("Связь с этой задачей уже существует");
       return;
     }
+    if (linkType === "blocks" || linkType === "is_blocked_by") {
+      if (task.columnSystemType === "completed") {
+        toast.error("Нельзя добавить блокирующую связь для завершённой задачи");
+        return;
+      }
+      const target = projectTasks.find(t => t.id === selectedTaskId);
+      if (target?.columnSystemType === "completed") {
+        toast.error("Нельзя добавить блокирующую связь с завершённой задачей");
+        return;
+      }
+    }
     if (isCreateMode) {
       setDependencies(prev => [...prev, { id: nextLocalId(), taskId: "", dependsOnTaskId: selectedTaskId, type: linkType }]);
       setSelectedTaskId("");
@@ -594,7 +690,11 @@ export default function TaskDetail() {
     const atIdx = textBeforeCursor.lastIndexOf("@");
     const before = commentText.slice(0, atIdx);
     const after = commentText.slice(mentionCursorPos);
-    const mention = `@${user.fullName} `;
+    // Insert the user's login (`@username`) — NOT the full name. This mirrors the
+    // Telegram/Slack-style handle and keeps mentions unambiguous when two members share
+    // the same full name. Fall back to fullName only for users without a login set.
+    const handle = user.username || user.fullName;
+    const mention = `@${handle} `;
     setCommentText(before + mention + after);
     setShowMentionDropdown(false);
     commentTextareaRef.current?.focus();
@@ -711,14 +811,25 @@ export default function TaskDetail() {
     } else {
       data.valueText = rawValue || null;
     }
-    if (isCreateMode) {
-      setFieldValues(prev => {
-        const existing = prev.findIndex(v => v.fieldId === fieldId);
-        const entry = { fieldId, valueText: data.valueText ?? null, valueNumber: data.valueNumber ?? null, valueDatetime: data.valueDatetime ?? null };
-        if (existing >= 0) { const next = [...prev]; next[existing] = entry; return next; }
-        return [...prev, entry];
-      });
-      return;
+    // Keep local state in sync regardless of mode so the input stays responsive while
+    // the user is editing. The validation summary at the top of the page and the red
+    // per-field outlines reflect the current (possibly invalid) state the same way as
+    // in create mode.
+    setFieldValues(prev => {
+      const existing = prev.findIndex(v => v.fieldId === fieldId);
+      const entry = { fieldId, valueText: data.valueText ?? null, valueNumber: data.valueNumber ?? null, valueDatetime: data.valueDatetime ?? null };
+      if (existing >= 0) { const next = [...prev]; next[existing] = entry; return next; }
+      return [...prev, entry];
+    });
+    if (isCreateMode) return;
+    // Skip the server round-trip while the new value would leave a required parameter
+    // empty — the navigation blocker keeps the user on the page until the input is
+    // fixed, and once it is the next keystroke/blur will persist through this same
+    // function with a valid payload.
+    if (field.isRequired) {
+      const implicitlyFilled = (field.fieldType === "select" && field.options && field.options.length > 0)
+        || field.fieldType === "checkbox";
+      if (!implicitlyFilled && !rawValue.trim()) return;
     }
     try {
       await setTaskFieldValue(task.id, fieldId, data);
@@ -730,7 +841,16 @@ export default function TaskDetail() {
     const fv = fieldValues.find(v => v.fieldId === fieldId);
     if (!fv) return "";
     if (field.fieldType === "number") return fv.valueNumber != null ? String(fv.valueNumber) : "";
-    if (field.fieldType === "datetime") return fv.valueDatetime ? fv.valueDatetime.slice(0, 16) : "";
+    if (field.fieldType === "datetime") {
+      // Backend stores datetime in UTC ISO. Convert back to the user's local time zone and
+      // format as "YYYY-MM-DDTHH:MM" so <input type="date"> / <input type="time"> show
+      // exactly what the user entered, not a TZ-shifted representation.
+      if (!fv.valueDatetime) return "";
+      const d = new Date(fv.valueDatetime);
+      if (isNaN(d.getTime())) return "";
+      const pad = (n: number) => n.toString().padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
     return fv.valueText || "";
   };
 
@@ -757,8 +877,12 @@ export default function TaskDetail() {
   // ── Validation for all fields ──────────────────────────────
   const allErrors: { fieldId: string; message: string }[] = [];
 
-  // System field validation
-  if (!task?.name?.trim()) allErrors.push({ fieldId: "_name", message: "Название задачи не заполнено" });
+  // System field validation.
+  // `editName` holds the current textarea contents in both create and edit mode — we
+  // validate against it (not against `task.name`) so that clearing the title immediately
+  // triggers the error, even though we intentionally don't persist an empty value to
+  // the backend. Same approach lets create-mode feedback appear on the very first keystroke.
+  if (!editName.trim()) allErrors.push({ fieldId: "_name", message: "Название задачи не заполнено" });
   if (task?.estimation && boardData?.estimationUnit) {
     const estVal = task.estimation.trim();
     if (estVal && isNaN(Number(estVal))) allErrors.push({ fieldId: "_estimation", message: "Оценка трудозатрат должна быть числом" });
@@ -786,14 +910,33 @@ export default function TaskDetail() {
   const fieldErrorIds = new Set(allErrors.map(e => e.fieldId));
   const getError = (id: string) => allErrors.find(e => e.fieldId === id)?.message;
 
+  // Navigation blocker (edit mode only): keeps the user on this page while required
+  // parameters are invalid. The big red notice below the "Назад" button explains why
+  // the click didn't do anything — same UX as the project-params tab block.
+  const shouldBlockNav = !isCreateMode && hasFieldErrors;
+  const blocker = useBlocker(({ currentLocation, nextLocation }) =>
+    shouldBlockNav && currentLocation.pathname !== nextLocation.pathname,
+  );
+  const [showNavBlockWarning, setShowNavBlockWarning] = useState(false);
+  useEffect(() => {
+    if (blocker.state === "blocked") {
+      setShowNavBlockWarning(true);
+      blocker.reset();
+    }
+  }, [blocker]);
+  // Hide the notice as soon as the user fixes the validation errors.
+  useEffect(() => {
+    if (!hasFieldErrors && showNavBlockWarning) setShowNavBlockWarning(false);
+  }, [hasFieldErrors, showNavBlockWarning]);
+
   // ── User options for selects ────────────────────────────────
   const memberUserOptions: UserOption[] = members.map(m => {
     const u = memberUsers.get(m.userId);
-    return { id: m.userId, fullName: u?.fullName || m.userId, email: u?.email, avatarUrl: u?.avatarUrl ?? undefined };
+    return { id: m.userId, fullName: u?.fullName || m.userId, username: u?.username, avatarUrl: u?.avatarUrl ?? undefined };
   });
   const memberUserOptionsById: UserOption[] = members.map(m => {
     const u = memberUsers.get(m.userId);
-    return { id: m.id, fullName: u?.fullName || m.userId, email: u?.email, avatarUrl: u?.avatarUrl ?? undefined };
+    return { id: m.id, fullName: u?.fullName || m.userId, username: u?.username, avatarUrl: u?.avatarUrl ?? undefined };
   });
 
   // Sprint options for selects
@@ -808,13 +951,7 @@ export default function TaskDetail() {
         <UserAvatar user={{ fullName: user.fullName, avatarUrl: user.avatarUrl ?? undefined }} size="sm" />
         <div className="min-w-0">
           <p className="text-sm font-medium">{user.fullName}</p>
-          {user.email && (
-            <div className="flex items-center gap-1">
-              <span className="text-xs text-slate-500 truncate">{user.email}</span>
-              <button onClick={() => { navigator.clipboard.writeText(user.email); toast.success("Email скопирован"); }}
-                className="p-0.5 text-slate-400 hover:text-blue-600 transition-colors shrink-0"><Copy size={12} /></button>
-            </div>
-          )}
+          {user.username && <p className="text-xs text-slate-500 truncate">{user.username}</p>}
         </div>
       </div>
       {onRemove && (
@@ -863,6 +1000,7 @@ export default function TaskDetail() {
       {/* Back button (view mode only) */}
       {!isCreateMode && (
         <button onClick={() => {
+          if (shouldBlockNav) { setShowNavBlockWarning(true); return; }
           const ret = searchParams.get("returnUrl");
           ret ? navigate(ret) : navigate(-1);
         }}
@@ -870,6 +1008,18 @@ export default function TaskDetail() {
           <ChevronRight size={16} className="rotate-180" />
           <span>Назад</span>
         </button>
+      )}
+
+      {/* Nav block notice — same pattern as the project-params tab block. Shown only
+          once the user actually tries to leave, not preemptively. */}
+      {showNavBlockWarning && shouldBlockNav && (
+        <div className="p-4 bg-red-50 border border-red-300 rounded-xl flex items-start gap-3" style={{ overflowAnchor: "none" }}>
+          <AlertTriangle size={20} className="text-red-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-medium text-red-800">Невозможно покинуть страницу задачи</p>
+            <p className="text-xs text-red-700 mt-0.5">Заполните все обязательные параметры задачи корректно перед переходом на другую страницу.</p>
+          </div>
+        </div>
       )}
 
       {/* Create mode action bar */}
@@ -1030,7 +1180,7 @@ export default function TaskDetail() {
             {!isCreateMode && (
             <button onClick={() => setActiveTab("comments")}
               className={`flex-1 px-4 py-3 rounded-lg font-medium transition-all flex items-center justify-center gap-2 ${activeTab === "comments" ? "bg-blue-100 text-blue-700" : "text-slate-600 hover:bg-slate-50"}`}>
-              <MessageSquare size={18} /> Комментарии
+              <MessageSquare size={18} /> Комментарии ({comments.length})
             </button>
             )}
           </div>
@@ -1074,11 +1224,7 @@ export default function TaskDetail() {
                         <UserAvatar user={{ fullName: owner.fullName, avatarUrl: owner.avatarUrl ?? undefined }} size="sm" />
                         <div className="min-w-0">
                           <p className="text-sm font-medium">{owner.fullName}</p>
-                          <div className="flex items-center gap-1">
-                            <span className="text-xs text-slate-500 truncate">{owner.email}</span>
-                            <button onClick={() => { navigator.clipboard.writeText(owner.email); toast.success("Email скопирован"); }}
-                              className="p-0.5 text-slate-400 hover:text-blue-600 transition-colors shrink-0"><Copy size={12} /></button>
-                          </div>
+                          {owner.username && <p className="text-xs text-slate-500 truncate">{owner.username}</p>}
                         </div>
                       </div>
                     ) : (
@@ -1119,6 +1265,11 @@ export default function TaskDetail() {
                       <Select
                         value={task.columnId}
                         onValueChange={(v) => handleUpdateField("columnId", v)}
+                        // While creating a task, the starting column is pinned to the one
+                        // the user clicked "+" in (or the sprint's initial column for
+                        // active-sprint boards). After the task is saved the Select
+                        // becomes editable and acts as a normal status switcher.
+                        disabled={isCreateMode}
                       >
                         {columns.map(col => (
                           <SelectOption key={col.id} value={col.id}>{col.name}</SelectOption>
@@ -1268,12 +1419,14 @@ export default function TaskDetail() {
                             <div className="flex gap-2">
                               <input type="date" defaultValue={dtDate} onBlur={e => {
                                 const d = e.target.value;
-                                const t = (e.target.parentElement?.querySelector('input[type="time"]') as HTMLInputElement)?.value || dtTime || "00:00";
+                                const tEl = e.target.parentElement?.querySelector('input[type="time"]') as HTMLInputElement | null;
+                                const t = tEl?.value || dtTime || "00:00";
                                 handleSetFieldValue(field.id, field, d ? `${d}T${t}` : "");
                               }} className={inputCls} />
                               <input type="time" defaultValue={dtTime} onBlur={e => {
                                 const t = e.target.value;
-                                const d = (e.target.parentElement?.querySelector('input[type="date"]') as HTMLInputElement)?.value || dtDate;
+                                const dEl = e.target.parentElement?.querySelector('input[type="date"]') as HTMLInputElement | null;
+                                const d = dEl?.value || dtDate;
                                 if (d) handleSetFieldValue(field.id, field, `${d}T${t || "00:00"}`);
                               }} className={inputCls} />
                             </div>
@@ -1449,39 +1602,62 @@ export default function TaskDetail() {
                 <DependenciesSection
                   dependencies={dependencies}
                   getDepTask={getDepTask}
+                  buildTaskHref={(t) => {
+                    const ret = searchParams.get("returnUrl");
+                    return ret
+                      ? `/tasks/${t.id}?returnUrl=${encodeURIComponent(ret)}`
+                      : `/tasks/${t.id}`;
+                  }}
                   canEditTask={canEditTask}
                   onAddDependency={() => setShowLinkModal(true)}
+                  onDeleteDependency={handleDeleteDependency}
+                  deletingIds={deletingDepIds}
                 />
               </div>
             </div>
           )}
 
           {activeTab === "comments" && (() => {
-            // Build tree: root comments + replies grouped by parent
-            const rootComments = comments.filter(c => !c.parentCommentId);
-            const repliesByParent = new Map<string, typeof comments>();
-            comments.filter(c => c.parentCommentId).forEach(c => {
-              const list = repliesByParent.get(c.parentCommentId!) ?? [];
-              list.push(c);
-              repliesByParent.set(c.parentCommentId!, list);
-            });
+            // Render comments as a flat, chronologically-ordered list (Telegram-style) —
+            // replies stay in order with everything else, and the parent message is shown
+            // as an inline quote inside the reply for visual context.
+            const sortedComments = [...comments].sort(
+              (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+            );
 
-            const renderComment = (c: typeof comments[0], isReply = false) => {
-              const author = memberUsers.get(c.authorId);
-              const replies = repliesByParent.get(c.id) ?? [];
-              // Find parent comment for reply context
+            // Resolve the comment author robustly: the backend's `author_id` may be a
+            // user id (memberUsers is keyed by user id) or a project member id — try both.
+            const resolveAuthor = (id: string): UserProfileResponse | null => {
+              if (memberUsers.has(id)) return memberUsers.get(id)!;
+              const mem = members.find((m) => m.id === id);
+              return mem ? memberUsers.get(mem.userId) ?? null : null;
+            };
+
+            const renderComment = (c: typeof comments[0]) => {
+              const author = resolveAuthor(c.authorId);
               const parentComment = c.parentCommentId ? comments.find(p => p.id === c.parentCommentId) : null;
-              const parentAuthor = parentComment ? memberUsers.get(parentComment.authorId) : null;
+              const parentAuthor = parentComment ? resolveAuthor(parentComment.authorId) : null;
+              const isHighlighted = highlightedCommentId === c.id;
 
               return (
                 <div key={c.id}>
                   <div className="flex gap-3">
                     {author ? <UserAvatar user={{ fullName: author.fullName, avatarUrl: author.avatarUrl ?? undefined }} size="sm" /> : <div className="w-8 h-8 rounded-full bg-slate-200 shrink-0" />}
                     <div className="flex-1">
-                      <div className="bg-slate-50 rounded-lg p-3">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-semibold text-sm">{author?.fullName || "Пользователь"}</span>
-                          <div className="flex items-center gap-2">
+                      <div
+                        id={`comment-${c.id}`}
+                        className={`rounded-lg p-3 transition-colors ${
+                          isHighlighted ? "bg-blue-50 ring-2 ring-blue-400" : "bg-slate-50"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between mb-1 gap-3">
+                          <div className="min-w-0">
+                            <div className="font-semibold text-sm truncate">{author?.fullName || "Пользователь"}</div>
+                            {author?.username && (
+                              <div className="text-xs text-slate-500 truncate">{author.username}</div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
                             <span className="text-xs text-slate-500">{new Date(c.createdAt).toLocaleString("ru-RU")}</span>
                             {canEditTask && (<>
                               <button onClick={() => handleReply(c)} className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors text-xs">Ответить</button>
@@ -1490,21 +1666,28 @@ export default function TaskDetail() {
                           </div>
                         </div>
                         {parentComment && (
-                          <div className="border-l-2 border-blue-300 pl-2 mb-2 text-xs text-slate-500 italic truncate">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              // Telegram-style jump-to-source: scroll the original comment
+                              // into view and keep it highlighted until the user clicks
+                              // anywhere else (handled by a top-level effect).
+                              e.stopPropagation();
+                              setHighlightedCommentId(parentComment.id);
+                              const el = document.getElementById(`comment-${parentComment.id}`);
+                              if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+                            }}
+                            className="block w-full text-left border-l-2 border-blue-300 pl-2 mb-2 text-xs text-slate-500 italic truncate cursor-pointer hover:text-blue-600 transition-colors"
+                          >
                             {parentAuthor?.fullName || "Пользователь"}: {parentComment.content.slice(0, 100)}{parentComment.content.length > 100 ? "..." : ""}
-                          </div>
+                          </button>
                         )}
-                        <p className="text-sm whitespace-pre-wrap">{c.content.split(/(@[^\s@]+(?:\s[^\s@]+){0,2})/g).map((part, i) =>
+                        <p className="text-sm whitespace-pre-wrap">{c.content.split(/(@[^\s@]+)/g).map((part, i) =>
                           part.startsWith("@") ? <span key={i} className="text-blue-600 font-medium">{part}</span> : part
                         )}</p>
                       </div>
                     </div>
                   </div>
-                  {replies.length > 0 && (
-                    <div className="space-y-3 mt-3">
-                      {replies.map(r => renderComment(r, true))}
-                    </div>
-                  )}
                 </div>
               );
             };
@@ -1512,7 +1695,7 @@ export default function TaskDetail() {
             return (
             <div>
               <div className="space-y-4 mb-6">
-                {rootComments.length > 0 ? rootComments.map(c => renderComment(c)) : (
+                {sortedComments.length > 0 ? sortedComments.map(c => renderComment(c)) : (
                   <p className="text-center py-8 text-slate-400">Нет комментариев</p>
                 )}
               </div>
@@ -1537,7 +1720,7 @@ export default function TaskDetail() {
                 {showMentionDropdown && (
                   <div className="absolute bottom-full left-0 mb-1 w-72 bg-white border border-slate-200 rounded-lg shadow-lg z-30 max-h-48 overflow-y-auto">
                     {[...memberUsers.values()]
-                      .filter(u => u.fullName.toLowerCase().includes(mentionFilter))
+                      .filter(u => u.fullName.toLowerCase().includes(mentionFilter) || (u.username ?? "").toLowerCase().includes(mentionFilter))
                       .slice(0, 6)
                       .map(u => (
                         <button key={u.id} onMouseDown={e => { e.preventDefault(); insertMention(u); }}
@@ -1549,7 +1732,7 @@ export default function TaskDetail() {
                           </div>
                         </button>
                       ))}
-                    {[...memberUsers.values()].filter(u => u.fullName.toLowerCase().includes(mentionFilter)).length === 0 && (
+                    {[...memberUsers.values()].filter(u => u.fullName.toLowerCase().includes(mentionFilter) || (u.username ?? "").toLowerCase().includes(mentionFilter)).length === 0 && (
                       <p className="text-sm text-slate-400 text-center py-3">Не найдено</p>
                     )}
                   </div>
@@ -1616,26 +1799,57 @@ export default function TaskDetail() {
           <ModalTitle>Добавить связь</ModalTitle>
         </ModalHeader>
         <ModalBody>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-2">Тип связи</label>
-              <Select value={linkType} onValueChange={(v) => setLinkType(v as DependencyType)}>
-                <SelectOption value="blocks">Блокирует</SelectOption>
-                <SelectOption value="is_blocked_by">Блокируется</SelectOption>
-                <SelectOption value="parent">Родительская</SelectOption>
-                <SelectOption value="subtask">Подзадача</SelectOption>
-                <SelectOption value="relates_to">Связана с</SelectOption>
-              </Select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">Задача *</label>
-              <Select value={selectedTaskId} onValueChange={setSelectedTaskId} placeholder="Выберите задачу">
-                {projectTasks.filter(t => !dependencies.some(d => d.dependsOnTaskId === t.id)).map(t => (
-                  <SelectOption key={t.id} value={t.id}>{t.key}: {t.name}</SelectOption>
-                ))}
-              </Select>
-            </div>
-          </div>
+          {(() => {
+            const currentIsCompleted = task?.columnSystemType === "completed";
+            const isBlockingType = linkType === "blocks" || linkType === "is_blocked_by";
+            const candidates = projectTasks
+              .filter(t => !dependencies.some(d => d.dependsOnTaskId === t.id))
+              .filter(t => !(isBlockingType && t.columnSystemType === "completed"));
+            return (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">Тип связи</label>
+                  <Select
+                    value={linkType}
+                    onValueChange={(v) => {
+                      const next = v as DependencyType;
+                      setLinkType(next);
+                      // If switching to a blocking type and the currently selected target is
+                      // completed, clear the selection so the user has to pick a valid task.
+                      if ((next === "blocks" || next === "is_blocked_by") && selectedTaskId) {
+                        const sel = projectTasks.find(t => t.id === selectedTaskId);
+                        if (sel?.columnSystemType === "completed") setSelectedTaskId("");
+                      }
+                    }}
+                  >
+                    <SelectOption value="blocks" disabled={currentIsCompleted}>Блокирует</SelectOption>
+                    <SelectOption value="is_blocked_by" disabled={currentIsCompleted}>Блокируется</SelectOption>
+                    <SelectOption value="parent">Родительская</SelectOption>
+                    <SelectOption value="subtask">Подзадача</SelectOption>
+                    <SelectOption value="relates_to">Связана с</SelectOption>
+                  </Select>
+                  {currentIsCompleted && (
+                    <p className="text-xs text-slate-500 mt-1">
+                      Для завершённой задачи нельзя добавить связь «Блокирует» или «Блокируется».
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Задача *</label>
+                  <Select value={selectedTaskId} onValueChange={setSelectedTaskId} placeholder="Выберите задачу">
+                    {candidates.map(t => (
+                      <SelectOption key={t.id} value={t.id}>{t.key}: {t.name}</SelectOption>
+                    ))}
+                  </Select>
+                  {isBlockingType && (
+                    <p className="text-xs text-slate-500 mt-1">
+                      Завершённые задачи скрыты — блокирующие связи с ними не создаются.
+                    </p>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
         </ModalBody>
         <ModalFooter>
           <button onClick={() => { setShowLinkModal(false); setSelectedTaskId(""); }}
