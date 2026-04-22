@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router";
 import {
   FolderKanban,
@@ -45,6 +45,7 @@ export default function Dashboard() {
 
   const handleCreateMeeting = async (data: CreateMeetingData) => {
     await createMeeting(data);
+    window.dispatchEvent(new Event("meeting-response-changed"));
   };
 
   const handleUpdateMeeting = async (meetingId: string, data: UpdateMeetingData, newParticipantIds?: string[]) => {
@@ -52,11 +53,33 @@ export default function Dashboard() {
     if (newParticipantIds && newParticipantIds.length > 0) {
       await addParticipants(meetingId, newParticipantIds);
     }
+    window.dispatchEvent(new Event("meeting-response-changed"));
   };
 
   const handleCancelMeeting = async (meetingId: string) => {
     await cancelMeeting(meetingId);
+    window.dispatchEvent(new Event("meeting-response-changed"));
   };
+
+  const loadTodayMeetings = useCallback(async () => {
+    const today = new Date();
+    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
+    try {
+      const m = await getMeetings(todayStart.toISOString(), todayEnd.toISOString());
+      const active = m.filter(mt => mt.status !== "cancelled");
+      setMeetings(active.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()));
+    } catch {
+      setMeetings([]);
+    }
+  }, []);
+
+  // Reload today's meetings when user accepts/declines/edits one from a notification
+  useEffect(() => {
+    const handler = () => loadTodayMeetings();
+    window.addEventListener("meeting-response-changed", handler);
+    return () => window.removeEventListener("meeting-response-changed", handler);
+  }, [loadTodayMeetings]);
 
   useEffect(() => {
     if (!user) return;
@@ -125,19 +148,11 @@ export default function Dashboard() {
       .then(setCurrentUserProfile)
       .catch(() => { /**/ });
 
-    const today = new Date();
-    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
-    const loadMeetings = getMeetings(todayStart.toISOString(), todayEnd.toISOString())
-      .then(m => {
-        const active = m.filter(mt => mt.status !== "cancelled");
-        setMeetings(active.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()));
-      })
-      .catch(() => setMeetings([]));
+    const loadMeetings = loadTodayMeetings();
 
     Promise.allSettled([loadTasks, loadProjects, loadMeetings, loadRefs, loadCurrentUser])
       .finally(() => setLoading(false));
-  }, [user]);
+  }, [user, loadTodayMeetings]);
 
   if (loading) {
     return <PageSpinner />;

@@ -26,7 +26,16 @@ import {
   getNotifications, markAsRead, markAllAsRead, deleteAllNotifications,
   type NotificationResponse,
 } from "../api/notifications";
-import { respondToMeeting } from "../api/meetings";
+import {
+  respondToMeeting,
+  getMeeting,
+  updateMeeting,
+  cancelMeeting,
+  addParticipants,
+  type MeetingDetailsResponse,
+  type UpdateMeetingData,
+} from "../api/meetings";
+import { MeetingModal } from "../components/modals/MeetingModal";
 
 export default function Root() {
   const location = useLocation();
@@ -37,6 +46,8 @@ export default function Root() {
   const [notifications, setNotifications] = useState<NotificationResponse[]>([]);
   const [respondingIds, setRespondingIds] = useState<Set<string>>(new Set());
   const [respondedMap, setRespondedMap] = useState<Map<string, 'accepted' | 'declined'>>(new Map());
+  const [selectedMeeting, setSelectedMeeting] = useState<MeetingDetailsResponse | undefined>(undefined);
+  const [meetingModalOpen, setMeetingModalOpen] = useState(false);
   useBodyScrollLock(sidebarOpen);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const knownIdsRef = useRef<Set<string>>(new Set());
@@ -95,20 +106,48 @@ export default function Root() {
       setRespondedMap(prev => new Map(prev).set(notif.id, status));
       await handleMarkAsRead(notif.id);
       window.dispatchEvent(new Event("meeting-response-changed"));
+      loadNotifications();
     } catch { /* silent */ }
     setRespondingIds(prev => { const s = new Set(prev); s.delete(notif.id); return s; });
   };
 
-  const handleNotificationClick = (notif: NotificationResponse) => {
-    if (notif.type === 'meeting_invite') return; // has its own buttons
+  const openMeetingModalFromNotification = async (meetingId: string) => {
+    try {
+      const details = await getMeeting(meetingId);
+      setSelectedMeeting(details);
+      setMeetingModalOpen(true);
+    } catch { /* meeting not found or no access */ }
+  };
+
+  const isTaskNotif = (t: string) => t.startsWith('task_') || t === 'comment_mention';
+
+  const handleTaskLinkClick = (notif: NotificationResponse) => {
+    if (!notif.taskId) return;
     handleMarkAsRead(notif.id);
     setNotificationsOpen(false);
+    const tab = notif.type === 'comment_mention' ? '?tab=comments' : '';
+    navigate(`/tasks/${notif.taskId}${tab}`);
+  };
 
-    if (notif.taskId && notif.type.startsWith('task_')) {
-      navigate(`/tasks/${notif.taskId}`);
-    } else if (notif.meetingId && (notif.type === 'meeting_change' || notif.type === 'meeting_reminder')) {
-      navigate(`/calendar?meeting=${notif.meetingId}`);
+  const handleMeetingLinkClick = (notif: NotificationResponse) => {
+    if (!notif.meetingId) return;
+    const meetingId = notif.meetingId;
+    handleMarkAsRead(notif.id);
+    setNotificationsOpen(false);
+    openMeetingModalFromNotification(meetingId);
+  };
+
+  const handleMeetingUpdate = async (id: string, data: UpdateMeetingData, newParticipantIds?: string[]) => {
+    await updateMeeting(id, data);
+    if (newParticipantIds && newParticipantIds.length > 0) {
+      await addParticipants(id, newParticipantIds);
     }
+    window.dispatchEvent(new Event("meeting-response-changed"));
+  };
+
+  const handleMeetingCancel = async (id: string) => {
+    await cancelMeeting(id);
+    window.dispatchEvent(new Event("meeting-response-changed"));
   };
 
   if (isLoading) {
@@ -227,24 +266,21 @@ export default function Root() {
                         notifications.map((notif) => (
                           <div
                             key={notif.id}
-                            className={`p-3 border-b border-slate-100 hover:bg-slate-50 transition-colors ${
+                            className={`p-3 border-b border-slate-100 transition-colors ${
                               !notif.read ? "bg-blue-50" : ""
-                            } ${notif.type !== 'meeting_invite' && (notif.taskId || notif.meetingId) ? "cursor-pointer" : ""}`}
-                            onClick={() => {
-                              if (notif.type !== 'meeting_invite') handleNotificationClick(notif);
-                            }}
+                            }`}
                           >
                             <p className="text-sm">{notif.message}</p>
                             <p className="text-xs text-slate-500 mt-1">
                               {new Date(notif.createdAt).toLocaleString("ru-RU")}
                             </p>
 
-                            {/* Meeting info link */}
+                            {/* Meeting info link — opens modal on the current page */}
                             {notif.meetingId && notif.meetingName && notif.type.startsWith('meeting_') && (
-                              <Link
-                                to={`/calendar?meeting=${notif.meetingId}`}
-                                onClick={(e) => { e.stopPropagation(); handleMarkAsRead(notif.id); setNotificationsOpen(false); }}
-                                className="inline-flex items-center gap-1 mt-1 text-xs text-blue-600 hover:text-blue-700 font-medium"
+                              <button
+                                type="button"
+                                onClick={() => handleMeetingLinkClick(notif)}
+                                className="inline-flex items-center gap-1 mt-1 text-xs text-blue-600 hover:text-blue-700 font-medium text-left cursor-pointer"
                               >
                                 {notif.meetingName}
                                 {notif.meetingStartTime && (
@@ -253,7 +289,7 @@ export default function Root() {
                                   </span>
                                 )}
                                 {" →"}
-                              </Link>
+                              </button>
                             )}
 
                             {/* Meeting invite — accept/decline buttons */}
@@ -265,7 +301,7 @@ export default function Root() {
                               return (
                                 <div className="flex gap-2 mt-2">
                                   <button
-                                    onClick={(e) => { e.stopPropagation(); handleMeetingResponse(notif, 'accepted'); }}
+                                    onClick={() => handleMeetingResponse(notif, 'accepted')}
                                     disabled={isLoading || isAccepted}
                                     className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors disabled:opacity-50 ${
                                       isAccepted
@@ -277,7 +313,7 @@ export default function Root() {
                                     {isAccepted ? 'Принято' : 'Принять'}
                                   </button>
                                   <button
-                                    onClick={(e) => { e.stopPropagation(); handleMeetingResponse(notif, 'declined'); }}
+                                    onClick={() => handleMeetingResponse(notif, 'declined')}
                                     disabled={isLoading || isDeclined}
                                     className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors disabled:opacity-50 ${
                                       isDeclined
@@ -293,11 +329,28 @@ export default function Root() {
                             })()}
 
 
-                            {/* Task notifications — link hint */}
-                            {notif.taskId && notif.taskKey && notif.type.startsWith('task_') && (
-                              <span className="inline-block mt-1 text-xs text-blue-600 font-medium">
+                            {/* Task notifications — clickable link to the task */}
+                            {notif.taskId && notif.taskKey && isTaskNotif(notif.type) && (
+                              <button
+                                type="button"
+                                onClick={() => handleTaskLinkClick(notif)}
+                                className="inline-block mt-1 text-xs text-blue-600 hover:text-blue-700 font-medium cursor-pointer"
+                              >
                                 {notif.taskKey} →
-                              </span>
+                              </button>
+                            )}
+
+                            {/* Mark-as-read action in the bottom-right corner */}
+                            {!notif.read && (
+                              <div className="flex justify-end mt-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleMarkAsRead(notif.id)}
+                                  className="text-xs text-slate-500 hover:text-blue-600 font-medium"
+                                >
+                                  Отметить прочитанным
+                                </button>
+                              </div>
                             )}
                           </div>
                         ))
@@ -402,6 +455,21 @@ export default function Root() {
           <Outlet />
         </main>
       </div>
+
+      {/* Global meeting modal — opens from notifications on any page */}
+      {selectedMeeting && (
+        <MeetingModal
+          meeting={selectedMeeting}
+          isOpen={meetingModalOpen}
+          mode="edit"
+          onClose={() => {
+            setMeetingModalOpen(false);
+            setSelectedMeeting(undefined);
+          }}
+          onUpdate={handleMeetingUpdate}
+          onCancel={handleMeetingCancel}
+        />
+      )}
     </div>
   );
 }

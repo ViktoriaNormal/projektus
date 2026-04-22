@@ -287,6 +287,7 @@ export default function Calendar() {
   const handleCreate = async (data: CreateMeetingData) => {
     await createMeeting(data);
     await reloadAll();
+    window.dispatchEvent(new Event("meeting-response-changed"));
   };
 
   const handleUpdate = async (meetingId: string, data: UpdateMeetingData, newParticipantIds?: string[]) => {
@@ -295,11 +296,13 @@ export default function Calendar() {
       await addParticipants(meetingId, newParticipantIds);
     }
     await reloadAll();
+    window.dispatchEvent(new Event("meeting-response-changed"));
   };
 
   const handleCancel = async (meetingId: string) => {
     await cancelMeeting(meetingId);
     await reloadAll();
+    window.dispatchEvent(new Event("meeting-response-changed"));
   };
 
   const meetingTypeColors: Record<string, string> = {

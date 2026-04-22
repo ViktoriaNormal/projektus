@@ -67,7 +67,9 @@ export default function TaskDetail() {
   const [projectSprints, setProjectSprints] = useState<SprintResponse[]>([]);
 
   // UI state
-  const [activeTab, setActiveTab] = useState<"details" | "comments">("details");
+  const [activeTab, setActiveTab] = useState<"details" | "comments">(
+    searchParams.get("tab") === "comments" ? "comments" : "details"
+  );
   const [copied, setCopied] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showChecklistModal, setShowChecklistModal] = useState(false);
