@@ -45,6 +45,7 @@ import { Select, SelectOption } from "../components/ui/Select";
 import { formatDate } from "../lib/format";
 import { toastError } from "../lib/errors";
 import { EmptyState } from "../components/ui/EmptyState";
+import { TermTooltip } from "../components/ui/TermTooltip";
 import { getProject, updateProject, deleteProject as deleteProjectApi, type ProjectResponse } from "../api/projects";
 import { getProjectMembers, addProjectMember, updateMemberRoles, removeMember, type ProjectMemberResponse } from "../api/projects";
 import { getProjectBoards, createBoard, updateBoard, deleteBoard as deleteBoardApi, getBoardColumns, getBoardSwimlanes, getBoardFields, getBoard, getProjectReferences, createSwimlane, deleteSwimlane, type BoardResponse, type BoardField, type ColumnResponse, type SwimlaneResponse, type ProjectReferences } from "../api/boards";
@@ -969,7 +970,7 @@ export default function ProjectDetail() {
                           </div>
                         </div>
                       </div>
-                      <div><span className="font-semibold">Дорожек:</span> {computedSwimlaneCount ?? boardSwimlanes.length}</div>
+                      <div className="flex items-center gap-1"><span className="font-semibold">Дорожек:</span> {computedSwimlaneCount ?? boardSwimlanes.length}<TermTooltip term="swimlane" /></div>
                     </div>
                     <div>
                       <label className="block text-sm font-medium mb-2">Группировать задачи по:</label>

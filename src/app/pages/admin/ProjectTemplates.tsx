@@ -77,6 +77,8 @@ import { Select, SelectOption } from "@/app/components/ui/Select";
 import { toastError } from "@/app/lib/errors";
 import { PageSpinner } from "@/app/components/ui/Spinner";
 import { EmptyState } from "@/app/components/ui/EmptyState";
+import { TermTooltip } from "@/app/components/ui/TermTooltip";
+import { InfoCallout } from "@/app/components/ui/InfoCallout";
 
 // ── Types (internal, for UI state) ──────────────────────────
 
@@ -509,7 +511,10 @@ function WipLimitInput({ value, onSave }: { value: number | null; onSave: (val: 
 
   return (
     <div>
-      <label className="block text-xs font-medium mb-1">WIP лимит</label>
+      <label className="block text-xs font-medium mb-1 flex items-center gap-1">
+        <span>WIP лимит</span>
+        <TermTooltip term="wipLimit" />
+      </label>
       <input
         type="text"
         inputMode="numeric"
@@ -1478,8 +1483,12 @@ function BoardColumnsTab({
           К каждой колонке можно добавить заметку — например, чтобы зафиксировать правила работы на этом этапе.
         </p>
         {isScrum && (
-          <p className="text-xs text-purple-600 mt-1">
-            Scrum: колонка «Бэклог спринта» обязательна и всегда первая. В неё переносятся выбранные из бэклога продукта задачи на спринт.
+          <p className="text-xs text-purple-600 mt-1 inline-flex flex-wrap items-center gap-x-1">
+            <span>Scrum: колонка «Бэклог спринта»</span>
+            <TermTooltip term="sprintBacklog" />
+            <span>обязательна и всегда первая. В неё переносятся выбранные из бэклога продукта</span>
+            <TermTooltip term="productBacklog" />
+            <span>задачи на спринт.</span>
           </p>
         )}
       </div>
@@ -1601,9 +1610,13 @@ function BoardColumnsTab({
           ))}
         </div>
         {!isScrum && (
-          <p className="text-xs text-slate-500 mt-2">
-            WIP-лимиты (лимиты незавершённой работы) можно задать только для колонок с типами «{columnSystemTypeLabels["initial"]}» и «{columnSystemTypeLabels["in_progress"]}».
-            Для колонок с типом «{columnSystemTypeLabels["completed"]}» WIP-лимит не устанавливается, так как задачи в них уже завершены.
+          <p className="text-xs text-slate-500 mt-2 inline-flex flex-wrap items-center gap-x-1">
+            <span>WIP-лимиты</span>
+            <TermTooltip term="wipLimit" />
+            <span>
+              (лимиты незавершённой работы) можно задать только для колонок с типами «{columnSystemTypeLabels["initial"]}» и «{columnSystemTypeLabels["in_progress"]}».
+              Для колонок с типом «{columnSystemTypeLabels["completed"]}» WIP-лимит не устанавливается, так как задачи в них уже завершены.
+            </span>
           </p>
         )}
       </div>
@@ -1652,7 +1665,10 @@ function BoardSwimlanesTab({
   return (
     <div className="space-y-4">
       <div className="mb-6">
-        <h3 className="font-semibold text-slate-700 mb-2">Группировка задач в дорожки</h3>
+        <h3 className="font-semibold text-slate-700 mb-2 flex items-center gap-1.5">
+          <span>Группировка задач в дорожки</span>
+          <TermTooltip term="swimlane" />
+        </h3>
         <p className="text-sm text-slate-600 mb-2">
           Дорожки автоматически создаются на основе уникальных значений выбранного параметра задачи.
           К каждой дорожке можно добавить заметку — например, чтобы описать правила приоритизации или обработки задач в этой категории.
@@ -1715,7 +1731,10 @@ function BoardSwimlanesTab({
 
       {swimlaneGroupBy && swimlanes.length > 0 && (
         <div className="space-y-3">
-          <h3 className="font-semibold text-slate-700">Дорожки ({swimlanes.length})</h3>
+          <h3 className="font-semibold text-slate-700 flex items-center gap-1.5">
+            <span>Дорожки ({swimlanes.length})</span>
+            <TermTooltip term="swimlane" />
+          </h3>
           {swimlanes.map((swimlane, index) => (
             <div key={swimlane.id} className="p-4 border border-slate-200 rounded-lg bg-slate-50">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
@@ -1968,11 +1987,14 @@ function BoardTaskTemplateTab({
   );
 
   // Locked system field row
-  const LockedField = ({ name, description, isRequired }: { name: string; description?: string; isRequired?: boolean }) => (
+  const LockedField = ({ name, description, isRequired, termKey }: { name: string; description?: string; isRequired?: boolean; termKey?: Parameters<typeof TermTooltip>[0]["term"] }) => (
     <div className="p-3 border border-slate-200 rounded-lg bg-slate-50 flex items-center gap-3">
       <Lock size={14} className="text-slate-400 shrink-0" />
       <div className="flex-1">
-        <span className="text-sm font-medium">{name}{isRequired && <span className="text-red-500 ml-0.5">*</span>}</span>
+        <span className="text-sm font-medium inline-flex items-center gap-1">
+          {name}{isRequired && <span className="text-red-500 ml-0.5">*</span>}
+          {termKey && <TermTooltip term={termKey} />}
+        </span>
         {description && <p className="text-xs text-slate-500 mt-0.5">{description}</p>}
       </div>
     </div>
@@ -1999,26 +2021,31 @@ function BoardTaskTemplateTab({
           <div className="p-4 border border-purple-200 rounded-lg bg-purple-50/50">
             <div className="flex items-center gap-3 mb-2">
               <Lock size={14} className="text-purple-500 shrink-0" />
-              <span className="text-sm font-medium">{priorityLabel}{priorityField.isRequired && <span className="text-red-500 ml-0.5">*</span>}</span>
+              <span className="text-sm font-medium inline-flex items-center gap-1">
+                {priorityLabel}{priorityField.isRequired && <span className="text-red-500 ml-0.5">*</span>}
+                {board.priorityType === "service_class" && <TermTooltip term="serviceClass" />}
+              </span>
             </div>
 
             {/* Kanban: choose between priority and service class */}
             {availablePriorityTypes.length > 1 && (
               <div className="mb-3">
                 <p className="text-xs text-slate-600 mb-2">Тип параметра:</p>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   {availablePriorityTypes.map(opt => (
-                    <button
-                      key={opt.key}
-                      onClick={() => handlePriorityTypeChange(opt.key as "priority" | "service_class")}
-                      className={`px-3 py-1.5 text-sm rounded-lg border transition-all ${
-                        board.priorityType === opt.key
-                          ? "bg-purple-600 text-white border-purple-600"
-                          : "border-slate-200 hover:bg-slate-50"
-                      }`}
-                    >
-                      {opt.name}
-                    </button>
+                    <div key={opt.key} className="inline-flex items-center gap-1">
+                      <button
+                        onClick={() => handlePriorityTypeChange(opt.key as "priority" | "service_class")}
+                        className={`px-3 py-1.5 text-sm rounded-lg border transition-all ${
+                          board.priorityType === opt.key
+                            ? "bg-purple-600 text-white border-purple-600"
+                            : "border-slate-200 hover:bg-slate-50"
+                        }`}
+                      >
+                        {opt.name}
+                      </button>
+                      {opt.key === "service_class" && <TermTooltip term="serviceClass" />}
+                    </div>
                   ))}
                 </div>
               </div>
@@ -2074,19 +2101,21 @@ function BoardTaskTemplateTab({
             {availableEstimationUnits.length > 0 && (
               <div className="mb-3">
                 <p className="text-xs text-slate-600 mb-2">Единица измерения:</p>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   {availableEstimationUnits.map(unit => (
-                    <button
-                      key={unit.key}
-                      onClick={() => handleEstimationUnitChange(unit.key as "story_points" | "time")}
-                      className={`px-3 py-1.5 text-sm rounded-lg border transition-all ${
-                        board.estimationUnit === unit.key
-                          ? "bg-purple-600 text-white border-purple-600"
-                          : "border-slate-200 hover:bg-slate-50"
-                      }`}
-                    >
-                      {unit.name}
-                    </button>
+                    <div key={unit.key} className="inline-flex items-center gap-1">
+                      <button
+                        onClick={() => handleEstimationUnitChange(unit.key as "story_points" | "time")}
+                        className={`px-3 py-1.5 text-sm rounded-lg border transition-all ${
+                          board.estimationUnit === unit.key
+                            ? "bg-purple-600 text-white border-purple-600"
+                            : "border-slate-200 hover:bg-slate-50"
+                        }`}
+                      >
+                        {unit.name}
+                      </button>
+                      {unit.key === "story_points" && <TermTooltip term="storyPoints" />}
+                    </div>
                   ))}
                 </div>
               </div>
@@ -2109,44 +2138,19 @@ function BoardTaskTemplateTab({
 
           {/* Sprint — Scrum only */}
           {sprintField && (
-            <LockedField name={sprintField.name} description={SYSTEM_FIELD_TYPE_LABELS[sprintField.fieldType] || undefined} isRequired={sprintField.isRequired} />
+            <LockedField name={sprintField.name} description={SYSTEM_FIELD_TYPE_LABELS[sprintField.fieldType] || undefined} isRequired={sprintField.isRequired} termKey="sprintIteration" />
           )}
         </div>
       </div>
 
       {/* Info block: additional built-in features */}
-      <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
-        <div className="flex items-start gap-3">
-          <Info size={18} className="text-blue-600 shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-medium text-blue-900 mb-2">
-              Также в задачах предусмотрено:
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-sm text-blue-800">
-              <div className="flex items-center gap-2">
-                <Paperclip size={14} className="shrink-0" />
-                Прикрепление вложений (файлы, изображения)
-              </div>
-              <div className="flex items-center gap-2">
-                <Tag size={14} className="shrink-0" />
-                Добавление тегов к задачам
-              </div>
-              <div className="flex items-center gap-2">
-                <CheckSquare size={14} className="shrink-0" />
-                Чек-листы
-              </div>
-              <div className="flex items-center gap-2">
-                <Link2 size={14} className="shrink-0" />
-                Связи с другими задачами
-              </div>
-              <div className="flex items-center gap-2">
-                <MessageCircle size={14} className="shrink-0" />
-                Комментирование с призывами пользователей (@упоминания)
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <InfoCallout title="Также в задачах предусмотрено:" columns={2}>
+        <InfoCallout.Item icon={<Paperclip size={14} />}>Прикрепление вложений (файлы, изображения)</InfoCallout.Item>
+        <InfoCallout.Item icon={<Tag size={14} />}>Добавление тегов к задачам</InfoCallout.Item>
+        <InfoCallout.Item icon={<CheckSquare size={14} />}>Чек-листы</InfoCallout.Item>
+        <InfoCallout.Item icon={<Link2 size={14} />}>Связи с другими задачами</InfoCallout.Item>
+        <InfoCallout.Item icon={<MessageCircle size={14} />}>Комментирование с призывами пользователей (@упоминания)</InfoCallout.Item>
+      </InfoCallout>
 
       {/* Custom Fields */}
       <div>
@@ -2486,18 +2490,29 @@ function ProjectParamsSection({ templateId, isScrum, refs, params, onReload }: {
           ))}
         </div>
 
-        <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-          <div className="flex items-start gap-2">
-            <Info size={16} className="text-blue-600 shrink-0 mt-0.5" />
-            <p className="text-xs text-blue-800">
-              Тип проекта ({isScrum ? "Scrum" : "Kanban"}) фиксируется при создании шаблона и определяет доступные функции:
-              {isScrum
-                ? " спринты, бэклог продукта, Story Points, Burndown-диаграмма."
-                : " WIP-лимиты, классы обслуживания, специфичная для Kanban аналитика, прогнозирование сроков завершения работ методом Монте-Карло."
-              }
-            </p>
-          </div>
-        </div>
+        <InfoCallout className="mt-4" title={`Тип проекта (${isScrum ? "Scrum" : "Kanban"}) фиксируется при создании шаблона и определяет доступные функции:`}>
+          {isScrum ? (
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm text-blue-800">
+              <span className="inline-flex items-center gap-1">спринты <TermTooltip term="sprint" /></span>
+              <span>·</span>
+              <span className="inline-flex items-center gap-1">бэклог продукта <TermTooltip term="productBacklog" /></span>
+              <span>·</span>
+              <span className="inline-flex items-center gap-1">Story Points <TermTooltip term="storyPoints" /></span>
+              <span>·</span>
+              <span className="inline-flex items-center gap-1">Burndown-диаграмма <TermTooltip term="burndown" /></span>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm text-blue-800">
+              <span className="inline-flex items-center gap-1">WIP-лимиты <TermTooltip term="wipLimit" /></span>
+              <span>·</span>
+              <span className="inline-flex items-center gap-1">классы обслуживания <TermTooltip term="serviceClass" /></span>
+              <span>·</span>
+              <span className="inline-flex items-center gap-1">Throughput и Cycle Time <TermTooltip term="throughput" /> <TermTooltip term="cycleTime" /></span>
+              <span>·</span>
+              <span className="inline-flex items-center gap-1">прогнозирование Монте-Карло <TermTooltip term="monteCarlo" /></span>
+            </div>
+          )}
+        </InfoCallout>
 
         {/* Custom params */}
         <div className="mt-6">

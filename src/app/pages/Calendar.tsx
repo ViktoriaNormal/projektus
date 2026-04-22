@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams } from "react-router";
-import { ChevronLeft, ChevronRight, Plus, Clock, MapPin, Loader2, Copy, Check, Info } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Clock, MapPin, Loader2, Copy, Check } from "lucide-react";
 import { getProjects, type ProjectResponse } from "../api/projects";
 import { MeetingModal } from "../components/modals/MeetingModal";
 import { useAuth } from "../contexts/AuthContext";
+import { TermTooltip } from "../components/ui/TermTooltip";
+import type { MethodologyTermKey } from "../data/methodologyTerms";
 import {
   getMeetings,
   getMeeting,
@@ -60,25 +62,11 @@ const meetingTypeLabelMap: Record<string, string> = {
 // formatInvitation, CopyInviteButton — extracted to components/meetings/CopyInviteButton.tsx
 // WeekMeetingCard — extracted to components/meetings/MeetingCard.tsx
 
-function LegendItem({ color, label, tooltip }: { color: string; label: string; tooltip: string }) {
+function LegendItem({ color, term }: { color: string; term: MethodologyTermKey }) {
   return (
-    <div className="flex items-start gap-2">
-      <div className={`w-4 h-4 ${color} rounded shrink-0 mt-0.5`}></div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1">
-          <span className="text-sm font-medium">{label}</span>
-          {/* Hover tooltip for desktop only */}
-          <div className="relative group hidden md:inline-flex">
-            <Info size={14} className="text-slate-400 hover:text-blue-500 cursor-help transition-colors" />
-            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-slate-800 text-white text-xs rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 pointer-events-none">
-              {tooltip}
-              <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800"></div>
-            </div>
-          </div>
-        </div>
-        {/* Inline description on mobile where hover doesn't work */}
-        <p className="md:hidden text-xs text-slate-500 mt-0.5 leading-snug">{tooltip}</p>
-      </div>
+    <div className="flex items-center gap-2">
+      <div className={`w-4 h-4 ${color} rounded shrink-0`}></div>
+      <TermTooltip term={term} inline labelClassName="text-sm font-medium" />
     </div>
   );
 }
@@ -627,30 +615,30 @@ export default function Calendar() {
           <div>
             <h4 className="text-sm font-semibold text-slate-700 mb-2">Scrum-события</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-              <LegendItem color="bg-blue-500" label="Планирование спринта" tooltip="Встреча в начале спринта, на которой команда определяет цель и отбирает задачи из бэклога продукта в бэклог спринта." />
-              <LegendItem color="bg-green-500" label="Daily Scrum" tooltip="Короткая ежедневная синхронизация команды (до 15 минут): что сделано, что планируется, есть ли препятствия." />
-              <LegendItem color="bg-indigo-500" label="Обзор спринта" tooltip="Встреча в конце спринта для демонстрации заинтересованным лицам выполненной работы и сбора обратной связи." />
-              <LegendItem color="bg-purple-500" label="Ретроспектива" tooltip="Внутренняя встреча команды для анализа рабочих процессов в завершённом спринте и их улучшения в следующем." />
+              <LegendItem color="bg-blue-500" term="sprintPlanning" />
+              <LegendItem color="bg-green-500" term="dailyScrum" />
+              <LegendItem color="bg-indigo-500" term="sprintReview" />
+              <LegendItem color="bg-purple-500" term="retrospective" />
             </div>
           </div>
 
           <div>
             <h4 className="text-sm font-semibold text-slate-700 mb-2">Kanban-каденции</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-              <LegendItem color="bg-emerald-500" label="Ежедневная встреча" tooltip="Обсуждение внутри команды: кто над чем работает, есть ли проблемы и нужна ли помощь." />
-              <LegendItem color="bg-orange-500" label="Обзор рисков" tooltip="Ежемесячное обсуждение допущенных ошибок и способов их предотвращения в будущем." />
-              <LegendItem color="bg-yellow-500" label="Обзор стратегии" tooltip="Ежеквартальное обсуждение глобальных вопросов развития продукта и команды." />
-              <LegendItem color="bg-cyan-500" label="Обзор предоставления услуг" tooltip="Совещание с заказчиками раз в две недели для оценки результатов работы и удовлетворённости." />
-              <LegendItem color="bg-teal-500" label="Обзор операций" tooltip="Ежемесячное совещание менеджеров по улучшению системы управления задачами в целом." />
-              <LegendItem color="bg-lime-500" label="Пополнение запасов" tooltip="Еженедельная оценка незавершённой работы и перенос новых задач, если WIP-лимиты позволяют." />
-              <LegendItem color="bg-amber-500" label="Планирование поставок" tooltip="Совещание для контроля и планирования поставок заказчикам, проводится с частотой поставки." />
+              <LegendItem color="bg-emerald-500" term="kanbanDaily" />
+              <LegendItem color="bg-orange-500" term="risksReview" />
+              <LegendItem color="bg-yellow-500" term="strategyReview" />
+              <LegendItem color="bg-cyan-500" term="deliveryReview" />
+              <LegendItem color="bg-teal-500" term="opsReview" />
+              <LegendItem color="bg-lime-500" term="replenishment" />
+              <LegendItem color="bg-amber-500" term="deliveryPlanning" />
             </div>
           </div>
 
           <div>
             <h4 className="text-sm font-semibold text-slate-700 mb-2">Другое</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-              <LegendItem color="bg-slate-500" label="Пользовательское событие" tooltip="Встреча, не привязанная к конкретной методологии. Подходит для любых совещаний и обсуждений." />
+              <LegendItem color="bg-slate-500" term="customEvent" />
             </div>
           </div>
         </div>

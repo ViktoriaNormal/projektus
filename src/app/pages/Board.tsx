@@ -41,6 +41,7 @@ import { toastError } from "../lib/errors";
 import { getTaskWatchers } from "../api/watchers";
 import { getProjectMembers, type ProjectMemberResponse } from "../api/projects";
 import { getBoardTags, type TagResponse } from "../api/tags";
+import { TermTooltip } from "../components/ui/TermTooltip";
 
 const ItemType = {
   TASK: "TASK",
@@ -536,9 +537,12 @@ function ColumnHeader({
           </div>
           {/* WIP */}
           {showWip && column.wipLimit != null && !editingWip && (
-            <div className={`text-xs text-slate-500 font-normal mt-1 ${!readOnly ? "cursor-pointer hover:text-blue-600" : ""}`}
-              onClick={() => { if (!readOnly) { setWipVal(column.wipLimit != null ? String(column.wipLimit) : ""); setEditingWip(true); } }}>
-              WIP: {taskCount} / {column.wipLimit}
+            <div className="flex items-center gap-1 mt-1">
+              <div className={`text-xs text-slate-500 font-normal ${!readOnly ? "cursor-pointer hover:text-blue-600" : ""}`}
+                onClick={() => { if (!readOnly) { setWipVal(column.wipLimit != null ? String(column.wipLimit) : ""); setEditingWip(true); } }}>
+                WIP: {taskCount} / {column.wipLimit}
+              </div>
+              <TermTooltip term="wipLimit" />
             </div>
           )}
           {showWip && editingWip && !readOnly && (
@@ -548,6 +552,7 @@ function ColumnHeader({
                 onBlur={saveWip} onKeyDown={e => { if (e.key === "Enter") saveWip(); if (e.key === "Escape") { setWipVal(column.wipLimit != null ? String(column.wipLimit) : ""); setEditingWip(false); } }}
                 className="w-12 text-xs bg-white border border-blue-400 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 placeholder="∞" />
+              <TermTooltip term="wipLimit" />
             </div>
           )}
         </div>
@@ -578,7 +583,10 @@ function ColumnHeader({
                     </div>
                     {showWip && (
                       <div className="px-3 py-2 border-b border-slate-100">
-                        <label className="text-xs font-medium text-slate-500">WIP-лимит</label>
+                        <label className="text-xs font-medium text-slate-500 inline-flex items-center gap-1">
+                          WIP-лимит
+                          <TermTooltip term="wipLimit" />
+                        </label>
                         <input type="number" min="0" value={wipVal} onChange={e => setWipVal(e.target.value)}
                           onBlur={() => { saveWip(); }}
                           className="w-full mt-1 px-2 py-1 text-sm border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -681,9 +689,12 @@ function SwimlaneRow({
               {onSaveNote && !collapsed && <NotePopover note={note} onSave={onSaveNote} align="left" />}
             </div>
             {showWip && swimlane.wipLimit != null && !editingWip && (
-              <div className={`text-xs text-slate-500 font-normal mt-1 ${canEditWip ? "cursor-pointer hover:text-blue-600" : ""}`}
-                onClick={() => { if (canEditWip) { setWipVal(swimlane.wipLimit != null ? String(swimlane.wipLimit) : ""); setEditingWip(true); } }}>
-                WIP: {swimlaneTasks.length} / {swimlane.wipLimit}
+              <div className="flex items-center gap-1 mt-1">
+                <div className={`text-xs text-slate-500 font-normal ${canEditWip ? "cursor-pointer hover:text-blue-600" : ""}`}
+                  onClick={() => { if (canEditWip) { setWipVal(swimlane.wipLimit != null ? String(swimlane.wipLimit) : ""); setEditingWip(true); } }}>
+                  WIP: {swimlaneTasks.length} / {swimlane.wipLimit}
+                </div>
+                <TermTooltip term="wipLimit" />
               </div>
             )}
             {showWip && editingWip && (
@@ -693,6 +704,7 @@ function SwimlaneRow({
                   onBlur={saveWip} onKeyDown={e => { if (e.key === "Enter") saveWip(); if (e.key === "Escape") { setWipVal(swimlane.wipLimit != null ? String(swimlane.wipLimit) : ""); setEditingWip(false); } }}
                   className="w-12 text-xs bg-white border border-blue-400 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   placeholder="∞" />
+                <TermTooltip term="wipLimit" />
               </div>
             )}
           </div>

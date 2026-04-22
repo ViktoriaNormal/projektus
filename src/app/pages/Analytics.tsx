@@ -37,6 +37,7 @@ import { getBoardTags, type TagResponse } from "../api/tags";
 import { getProjectMembers } from "../api/projects";
 import { getUser } from "../api/users";
 import { FilterDropdown } from "../components/FilterDropdown";
+import { TermTooltip } from "../components/ui/TermTooltip";
 
 const METRIC_OPTIONS = [
   { value: "task_count", label: "По количеству задач" },
@@ -330,6 +331,7 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
               ))}
             </Select>
           </div>
+          {metricType === "story_points" && <TermTooltip term="storyPoints" />}
         </div>
       )}
 
@@ -407,10 +409,10 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
       {projectType === "kanban" && kanbanSummary && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {[
-            { label: "Средняя скорость", value: `${kanbanSummary.data.averageVelocity} ${kanbanSummary.data.averageVelocityUnit}`, change: kanbanSummary.data.velocityTrend > 0 ? `+${kanbanSummary.data.velocityTrend}%` : `${kanbanSummary.data.velocityTrend}%`, icon: TrendingUp, bgColor: "bg-blue-50", textColor: "text-blue-600" },
-            { label: "Время цикла", value: `${kanbanSummary.data.cycleTime} дней`, change: kanbanSummary.data.cycleTimeTrend > 0 ? `+${kanbanSummary.data.cycleTimeTrend}%` : `${kanbanSummary.data.cycleTimeTrend}%`, icon: Clock, bgColor: "bg-green-50", textColor: "text-green-600" },
-            { label: "Пропускная способность", value: `${kanbanSummary.data.throughput} задач/нед`, change: kanbanSummary.data.throughputTrend > 0 ? `+${kanbanSummary.data.throughputTrend}%` : `${kanbanSummary.data.throughputTrend}%`, icon: Activity, bgColor: "bg-purple-50", textColor: "text-purple-600" },
-            { label: "Незавершённая работа", value: `${kanbanSummary.data.wip} задач`, change: kanbanSummary.data.wipChange > 0 ? `+${kanbanSummary.data.wipChange}` : `${kanbanSummary.data.wipChange}`, icon: Zap, bgColor: "bg-orange-50", textColor: "text-orange-600" },
+            { label: "Средняя скорость", term: "throughput" as const, value: `${kanbanSummary.data.averageVelocity} ${kanbanSummary.data.averageVelocityUnit}`, change: kanbanSummary.data.velocityTrend > 0 ? `+${kanbanSummary.data.velocityTrend}%` : `${kanbanSummary.data.velocityTrend}%`, icon: TrendingUp, bgColor: "bg-blue-50", textColor: "text-blue-600" },
+            { label: "Время цикла", term: "cycleTime" as const, value: `${kanbanSummary.data.cycleTime} дней`, change: kanbanSummary.data.cycleTimeTrend > 0 ? `+${kanbanSummary.data.cycleTimeTrend}%` : `${kanbanSummary.data.cycleTimeTrend}%`, icon: Clock, bgColor: "bg-green-50", textColor: "text-green-600" },
+            { label: "Пропускная способность", term: "throughput" as const, value: `${kanbanSummary.data.throughput} задач/нед`, change: kanbanSummary.data.throughputTrend > 0 ? `+${kanbanSummary.data.throughputTrend}%` : `${kanbanSummary.data.throughputTrend}%`, icon: Activity, bgColor: "bg-purple-50", textColor: "text-purple-600" },
+            { label: "Незавершённая работа", term: "wipLimit" as const, value: `${kanbanSummary.data.wip} задач`, change: kanbanSummary.data.wipChange > 0 ? `+${kanbanSummary.data.wipChange}` : `${kanbanSummary.data.wipChange}`, icon: Zap, bgColor: "bg-orange-50", textColor: "text-orange-600" },
           ].map((metric, index) => (
             <div key={index} className="bg-white rounded-xl p-6 shadow-md border border-slate-100">
               <div className="flex items-center justify-between mb-4">
@@ -423,7 +425,10 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
                   {metric.change}
                 </span>
               </div>
-              <p className="text-slate-600 text-sm">{metric.label}</p>
+              <p className="text-slate-600 text-sm inline-flex items-center gap-1">
+                {metric.label}
+                <TermTooltip term={metric.term} />
+              </p>
               <p className="text-2xl font-bold mt-1">{metric.value}</p>
             </div>
           ))}
@@ -438,7 +443,10 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
             <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
               <h2 className="text-xl font-bold flex items-center gap-2">
                 <TrendingUp className="text-blue-600" size={24} />
-                График скорости команды (Velocity)
+                <span className="inline-flex items-center gap-1.5">
+                  График скорости команды (Velocity)
+                  <TermTooltip term="velocity" iconSize={16} />
+                </span>
               </h2>
               <div className="min-w-[180px]">
                 <Select
@@ -490,7 +498,10 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
             <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
               <h2 className="text-xl font-bold flex items-center gap-2">
                 <Activity className="text-green-600" size={24} />
-                Диаграмма сгорания задач (Burndown)
+                <span className="inline-flex items-center gap-1.5">
+                  Диаграмма сгорания задач (Burndown)
+                  <TermTooltip term="burndown" iconSize={16} />
+                </span>
               </h2>
               <div className="min-w-[200px]">
                 <Select value={burndownSprintId} onValueChange={setBurndownSprintId} ariaLabel="Спринт для burndown">
@@ -571,7 +582,7 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
             </div>
           )}
           {[
-            { title: "Накопительная диаграмма потока", icon: Activity, iconColor: "text-purple-600", bgColor: "bg-purple-50", textColor: "text-purple-800", titleColor: "text-purple-900", data: cumulativeFlow, render: (d: CumulativeFlowResponse) => (
+            { title: "Накопительная диаграмма потока", term: "cfd" as const, icon: Activity, iconColor: "text-purple-600", bgColor: "bg-purple-50", textColor: "text-purple-800", titleColor: "text-purple-900", data: cumulativeFlow, render: (d: CumulativeFlowResponse) => (
               <AreaChart data={d.data}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="date" {...xAxisDefaults({ count: d.data.length })} />
@@ -584,7 +595,7 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
                 })}
               </AreaChart>
             )},
-            { title: "Диаграмма рассеяния времени производства", icon: Clock, iconColor: "text-blue-600", bgColor: "bg-blue-50", textColor: "text-blue-800", titleColor: "text-blue-900", data: cycleTimeScatter, scrollableOnMobile: true, render: (d: CycleTimeScatterResponse) => (
+            { title: "Диаграмма рассеяния времени производства", term: "cycleTime" as const, icon: Clock, iconColor: "text-blue-600", bgColor: "bg-blue-50", textColor: "text-blue-800", titleColor: "text-blue-900", data: cycleTimeScatter, scrollableOnMobile: true, render: (d: CycleTimeScatterResponse) => (
               <ScatterChart>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="task" {...xAxisDefaults({ count: d.data.length, angleAfter: 6, height: 80 })} />
@@ -593,7 +604,7 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
                 <Scatter data={d.data} fill="#3b82f6" />
               </ScatterChart>
             )},
-            { title: "Скорость поставки (Throughput)", icon: Zap, iconColor: "text-orange-600", bgColor: "bg-orange-50", textColor: "text-orange-800", titleColor: "text-orange-900", data: throughputData, render: (d: ThroughputResponse) => (
+            { title: "Скорость поставки (Throughput)", term: "throughput" as const, icon: Zap, iconColor: "text-orange-600", bgColor: "bg-orange-50", textColor: "text-orange-800", titleColor: "text-orange-900", data: throughputData, render: (d: ThroughputResponse) => (
               <BarChart data={d.data}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="week" {...xAxisDefaults({ count: d.data.length })} />
@@ -602,7 +613,7 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
                 <Bar dataKey="count" fill="#f59e0b" name="Задач завершено" radius={[8, 8, 0, 0]} />
               </BarChart>
             )},
-            { title: "Среднее время производства (Cycle Time)", icon: Clock, iconColor: "text-indigo-600", bgColor: "bg-indigo-50", textColor: "text-indigo-800", titleColor: "text-indigo-900", data: avgCycleTime, render: (d: AvgCycleTimeResponse) => (
+            { title: "Среднее время производства (Cycle Time)", term: "cycleTime" as const, icon: Clock, iconColor: "text-indigo-600", bgColor: "bg-indigo-50", textColor: "text-indigo-800", titleColor: "text-indigo-900", data: avgCycleTime, render: (d: AvgCycleTimeResponse) => (
               <LineChart data={d.data}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="week" {...xAxisDefaults({ count: d.data.length })} />
@@ -614,7 +625,7 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
                 <Line type="monotone" dataKey="p85" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" name="85-й процентиль" />
               </LineChart>
             )},
-            { title: "Тренд скорости поставки", icon: TrendingUp, iconColor: "text-emerald-600", bgColor: "bg-emerald-50", textColor: "text-emerald-800", titleColor: "text-emerald-900", data: throughputTrend, render: (d: ThroughputTrendResponse) => (
+            { title: "Тренд скорости поставки", term: "throughput" as const, icon: TrendingUp, iconColor: "text-emerald-600", bgColor: "bg-emerald-50", textColor: "text-emerald-800", titleColor: "text-emerald-900", data: throughputTrend, render: (d: ThroughputTrendResponse) => (
               <LineChart data={d.data}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="week" {...xAxisDefaults({ count: d.data.length })} />
@@ -625,7 +636,7 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
                 <Line type="monotone" dataKey="trend" stroke="#94a3b8" strokeWidth={2} strokeDasharray="5 5" name="Линия тренда" />
               </LineChart>
             )},
-            { title: "Незавершённая работа (WIP)", icon: Activity, iconColor: "text-cyan-600", bgColor: "bg-cyan-50", textColor: "text-cyan-800", titleColor: "text-cyan-900", data: wipHistory, render: (d: WipHistoryResponse) => (
+            { title: "Незавершённая работа (WIP)", term: "wipLimit" as const, icon: Activity, iconColor: "text-cyan-600", bgColor: "bg-cyan-50", textColor: "text-cyan-800", titleColor: "text-cyan-900", data: wipHistory, render: (d: WipHistoryResponse) => (
               <ComposedChart data={d.data}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="date" {...xAxisDefaults({ count: d.data.length })} />
@@ -636,7 +647,7 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
                 <Line type="monotone" dataKey="limit" stroke="#ef4444" strokeWidth={2} strokeDasharray="8 4" name="WIP-лимит" dot={false} />
               </ComposedChart>
             )},
-            { title: "Распределение времени производства", icon: Activity, iconColor: "text-violet-600", bgColor: "bg-violet-50", textColor: "text-violet-800", titleColor: "text-violet-900", data: cycleTimeDist, render: (d: DistributionResponse) => (
+            { title: "Распределение времени производства", term: "cycleTime" as const, icon: Activity, iconColor: "text-violet-600", bgColor: "bg-violet-50", textColor: "text-violet-800", titleColor: "text-violet-900", data: cycleTimeDist, render: (d: DistributionResponse) => (
               <BarChart data={d.data}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="range" {...xAxisDefaults({ count: d.data.length })} label={{ value: "Диапазон (дни)", position: "insideBottom", offset: -5 }} />
@@ -645,7 +656,7 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
                 <Bar dataKey="count" fill="#8b5cf6" name="Задач" radius={[8, 8, 0, 0]} />
               </BarChart>
             )},
-            { title: "Распределение скорости поставки", icon: Activity, iconColor: "text-amber-600", bgColor: "bg-amber-50", textColor: "text-amber-800", titleColor: "text-amber-900", data: throughputDist, render: (d: DistributionResponse) => (
+            { title: "Распределение скорости поставки", term: "throughput" as const, icon: Activity, iconColor: "text-amber-600", bgColor: "bg-amber-50", textColor: "text-amber-800", titleColor: "text-amber-900", data: throughputDist, render: (d: DistributionResponse) => (
               <BarChart data={d.data}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="range" {...xAxisDefaults({ count: d.data.length })} label={{ value: "Задач в неделю", position: "insideBottom", offset: -5 }} />
@@ -665,7 +676,12 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
               <div key={idx} className="bg-white rounded-xl p-4 md:p-6 shadow-md border border-slate-100">
                 <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
                   <Icon className={chart.iconColor} size={24} />
-                  {chart.title}
+                  <span className="inline-flex items-center gap-1.5">
+                    {chart.title}
+                    {(chart as { term?: Parameters<typeof TermTooltip>[0]["term"] }).term && (
+                      <TermTooltip term={(chart as { term: Parameters<typeof TermTooltip>[0]["term"] }).term} iconSize={16} />
+                    )}
+                  </span>
                 </h2>
                 {hasData ? (
                   <ChartContainer

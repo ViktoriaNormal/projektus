@@ -28,6 +28,7 @@ import { getTaskDependencies } from "../api/dependencies";
 import { getUser, type UserProfileResponse } from "../api/users";
 import { getProjectBoards, type BoardResponse } from "../api/boards";
 import { getProject, updateProject, type ProjectResponse } from "../api/projects";
+import { TermTooltip } from "../components/ui/TermTooltip";
 
 // ── Helpers ─────────────────────────────────────────────────
 
@@ -592,7 +593,12 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h2 className="text-2xl font-bold">Бэклог и Спринты</h2>
-          <p className="text-sm text-slate-600 mt-1">Управление бэклогом продукта и спринтами</p>
+          <p className="text-sm text-slate-600 mt-1 inline-flex flex-wrap items-center gap-x-1">
+            <span>Управление бэклогом продукта</span>
+            <TermTooltip term="productBacklog" />
+            <span>и спринтами</span>
+            <TermTooltip term="sprint" />
+          </p>
         </div>
         {canEdit && (
           <button onClick={() => openSprintModal(null)}
@@ -606,7 +612,11 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
       <div className={`bg-white border border-slate-200 rounded-lg p-4 flex items-center gap-4 flex-wrap ${!canEdit ? "pointer-events-none opacity-60" : ""}`}>
         <div className="flex items-center gap-2">
           <Calendar size={18} className="text-blue-600" />
-          <span className="text-sm font-medium text-slate-700">Длительность спринтов на проекте:</span>
+          <span className="text-sm font-medium text-slate-700 inline-flex items-center gap-1">
+            Длительность спринтов
+            <TermTooltip term="sprint" />
+            на проекте:
+          </span>
         </div>
         <div className="relative" ref={durationRef}>
           <button
@@ -686,7 +696,10 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
             <div className="p-4 border-b border-purple-200 bg-gradient-to-r from-purple-50 to-pink-50 rounded-t-xl flex-shrink-0">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-lg font-bold text-purple-900">Бэклог продукта</h3>
+                  <h3 className="text-lg font-bold text-purple-900 inline-flex items-center gap-1.5">
+                    Бэклог продукта
+                    <TermTooltip term="productBacklog" iconSize={16} />
+                  </h3>
                   <p className="text-sm text-purple-700 mt-1">{backlogTasks.length} задач</p>
                 </div>
                 {canEdit && (
@@ -881,7 +894,10 @@ export default function ScrumBacklog({ projectId, canEdit = true }: ScrumBacklog
                 placeholder="Спринт 1" />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-2">Цель спринта</label>
+              <label className="block text-sm font-medium mb-2 inline-flex items-center gap-1">
+                Цель спринта
+                <TermTooltip term="sprintGoal" />
+              </label>
               <textarea value={sprintGoal} onChange={e => setSprintGoal(e.target.value)}
                 className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 rows={3} placeholder="Основная цель спринта..." />

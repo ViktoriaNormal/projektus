@@ -15,6 +15,7 @@ import { getUser } from "../api/users";
 import { FilterDropdown } from "../components/FilterDropdown";
 import { format, parseISO } from "date-fns";
 import { ru } from "date-fns/locale";
+import { TermTooltip } from "../components/ui/TermTooltip";
 
 interface KanbanMetricsProps {
   projectId: string;
@@ -322,7 +323,10 @@ export default function KanbanMetrics({ projectId }: KanbanMetricsProps) {
             <BarChart3 size={24} className="text-white" />
           </div>
           <div>
-            <h3 className="text-lg font-bold">Вероятностное прогнозирование (Монте-Карло)</h3>
+            <h3 className="text-lg font-bold inline-flex items-center gap-1.5">
+              Вероятностное прогнозирование (Монте-Карло)
+              <TermTooltip term="monteCarlo" iconSize={16} />
+            </h3>
             <p className="text-sm text-slate-600">
               Прогноз дат завершения работ на основе исторических данных
             </p>
