@@ -5,6 +5,60 @@ import { formatDate, type DatePreset } from "../../lib/format";
 type XAxisProps = ComponentProps<typeof XAxis>;
 type YAxisProps = ComponentProps<typeof YAxis>;
 
+/** Кегль подписей делений и названий осей (recharts). */
+export const CHART_AXIS_FONT_PX = 14;
+
+/**
+ * Внешние отступы графика Recharts. Без них подписи оси X и легенда часто обрезаются
+ * внутри ResponsiveContainer фиксированной высоты.
+ */
+/** Легенда сверху — запас под строку легенды в margin.top. */
+export const RECHARTS_MARGIN_DEFAULT = {
+  top: 36,
+  right: 18,
+  left: 16,
+  bottom: 56,
+} as const;
+
+/** Нижняя ось с поворотом подписей, без легенды (dense categories). */
+export const RECHARTS_MARGIN_ROTATED_X = {
+  top: 36,
+  right: 18,
+  left: 16,
+  bottom: 76,
+} as const;
+
+/** Гистограммы: подпись Y слева от оси + заголовок оси X снизу. */
+export const RECHARTS_MARGIN_HISTOGRAM = {
+  top: 28,
+  right: 18,
+  left: 64,
+  bottom: 100,
+} as const;
+
+/** Подпись горизонтальной оси под делениями (единый стиль). */
+export function axisTitleXBottom(value: string) {
+  return {
+    value,
+    position: "bottom" as const,
+    offset: 8,
+    fill: "#64748b",
+    style: { fontSize: CHART_AXIS_FONT_PX, textAnchor: "middle" as const },
+  };
+}
+
+/** Подпись вертикальной оси слева от шкалы (единый стиль). */
+export function axisTitleYLeft(value: string, offset: number = 8) {
+  return {
+    value,
+    angle: -90 as const,
+    position: "left" as const,
+    offset,
+    fill: "#64748b",
+    style: { fontSize: CHART_AXIS_FONT_PX, textAnchor: "middle" as const },
+  };
+}
+
 /**
  * Default X-axis props for recharts. Spread on a real recharts `<XAxis />` so recharts'
  * internal identity check still passes.
@@ -28,7 +82,7 @@ export function xAxisDefaults(opts?: {
 
   const base: Partial<XAxisProps> = {
     stroke: "#64748b",
-    tick: { fontSize: 11 },
+    tick: { fontSize: CHART_AXIS_FONT_PX, fill: "#64748b" },
     interval: 0,
     minTickGap: 0,
   };
@@ -36,9 +90,12 @@ export function xAxisDefaults(opts?: {
   if (rotated) {
     base.angle = -35;
     base.textAnchor = "end";
-    base.height = opts?.height ?? 60;
+    base.height = opts?.height ?? 80;
   } else if (opts?.height != null) {
     base.height = opts.height;
+  } else {
+    /* Резерв под подписи делений (тот же кегль, что и у Y). */
+    base.height = 56;
   }
 
   if (opts?.datePreset) {
@@ -56,7 +113,7 @@ export function xAxisDefaults(opts?: {
 export function yAxisDefaults(opts?: { width?: number }): Partial<YAxisProps> {
   return {
     stroke: "#64748b",
-    tick: { fontSize: 11 },
-    width: opts?.width ?? 36,
+    tick: { fontSize: CHART_AXIS_FONT_PX, fill: "#64748b" },
+    width: opts?.width ?? 40,
   };
 }

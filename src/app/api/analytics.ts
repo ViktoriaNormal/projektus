@@ -37,23 +37,6 @@ export interface BurndownResponse {
 
 // ── Kanban Analytics Types ────────────────────────────────
 
-export interface KanbanSummaryData {
-  averageVelocity: number;
-  averageVelocityUnit: string;
-  velocityTrend: number;
-  cycleTime: number;
-  cycleTimeTrend: number;
-  throughput: number;
-  throughputTrend: number;
-  wip: number;
-  wipChange: number;
-}
-
-export interface KanbanSummaryResponse {
-  data: KanbanSummaryData;
-  interpretation: string;
-}
-
 export interface CumulativeFlowPoint {
   date: string;
   [column: string]: string | number; // dynamic columns
@@ -75,36 +58,25 @@ export interface CycleTimeScatterResponse {
   interpretation: string;
 }
 
-export interface ThroughputWeek {
-  week: string;
-  count: number;
-}
-
-export interface ThroughputResponse {
-  data: ThroughputWeek[];
-  interpretation: string;
-}
-
-export interface AvgCycleTimeWeek {
-  week: string;
-  avg: number;
-  p50: number;
-  p85: number;
-}
-
-export interface AvgCycleTimeResponse {
-  data: AvgCycleTimeWeek[];
-  interpretation: string;
-}
-
-export interface ThroughputTrendPoint {
+export interface ThroughputPoint {
   week: string;
   actual: number;
   trend: number;
 }
 
-export interface ThroughputTrendResponse {
-  data: ThroughputTrendPoint[];
+export interface ThroughputResponse {
+  data: ThroughputPoint[];
+  interpretation: string;
+}
+
+export interface WipAgePoint {
+  taskKey: string;
+  ageDays: number;
+  columnName: string;
+}
+
+export interface WipAgeResponse {
+  data: WipAgePoint[];
   interpretation: string;
 }
 
@@ -199,10 +171,6 @@ function kanbanQs(params?: AnalyticsFilters) {
   return str ? `?${str}` : '';
 }
 
-export function getKanbanSummary(projectId: string, params?: AnalyticsFilters) {
-  return apiRequest<KanbanSummaryResponse>(`/projects/${projectId}/analytics/kanban/summary${kanbanQs(params)}`);
-}
-
 export function getCumulativeFlow(projectId: string, params?: AnalyticsFilters) {
   return apiRequest<CumulativeFlowResponse>(`/projects/${projectId}/analytics/kanban/cumulative-flow${kanbanQs(params)}`);
 }
@@ -215,12 +183,8 @@ export function getThroughput(projectId: string, params?: AnalyticsFilters) {
   return apiRequest<ThroughputResponse>(`/projects/${projectId}/analytics/kanban/throughput${kanbanQs(params)}`);
 }
 
-export function getAvgCycleTime(projectId: string, params?: AnalyticsFilters) {
-  return apiRequest<AvgCycleTimeResponse>(`/projects/${projectId}/analytics/kanban/avg-cycle-time${kanbanQs(params)}`);
-}
-
-export function getThroughputTrend(projectId: string, params?: AnalyticsFilters) {
-  return apiRequest<ThroughputTrendResponse>(`/projects/${projectId}/analytics/kanban/throughput-trend${kanbanQs(params)}`);
+export function getWipAge(projectId: string, params?: AnalyticsFilters) {
+  return apiRequest<WipAgeResponse>(`/projects/${projectId}/analytics/kanban/wip-age${kanbanQs(params)}`);
 }
 
 export function getWipHistory(projectId: string, params?: AnalyticsFilters) {

@@ -2,7 +2,13 @@ import { useState, useCallback, useEffect, useMemo } from "react";
 import { BarChart3, Loader2, AlertCircle, Info, X, Filter } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from "recharts";
 import { ChartContainer, CHART_TOOLTIP_STYLE } from "../components/ui/ChartContainer";
-import { xAxisDefaults, yAxisDefaults } from "../components/ui/chart-axis";
+import {
+  xAxisDefaults,
+  yAxisDefaults,
+  axisTitleXBottom,
+  axisTitleYLeft,
+  RECHARTS_MARGIN_DEFAULT,
+} from "../components/ui/chart-axis";
 import { Select, SelectOption } from "../components/ui/Select";
 import {
   getMonteCarloForecast,
@@ -450,19 +456,19 @@ export default function KanbanMetrics({ projectId }: KanbanMetricsProps) {
 
             {/* Chart */}
             <ChartContainer
-              height={320}
+              height={400}
               scrollableOnMobile
               minWidthOnMobile={Math.max(560, data.chart.length * 45)}
             >
-              <BarChart data={data.chart}>
+              <BarChart data={data.chart} margin={{ ...RECHARTS_MARGIN_DEFAULT, left: 40, bottom: 76 }}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" {...xAxisDefaults({ count: data.chart.length })} />
-                <YAxis {...yAxisDefaults({ width: 56 })} label={{ value: "Вероятность (%)", angle: -90, position: "insideLeft" }} />
+                <XAxis dataKey="date" {...xAxisDefaults({ count: data.chart.length })} label={axisTitleXBottom("Дата")} />
+                <YAxis {...yAxisDefaults({ width: 48 })} label={axisTitleYLeft("Вероятность (%)")} />
                 <Tooltip
                   formatter={(value: number) => [`${value}%`, "Вероятность"]}
                   contentStyle={CHART_TOOLTIP_STYLE}
                 />
-                <Legend />
+                <Legend verticalAlign="top" align="center" wrapperStyle={{ paddingBottom: 8 }} />
                 <Bar
                   dataKey="probability"
                   fill="#3b82f6"

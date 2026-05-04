@@ -14,21 +14,30 @@ import {
   Tooltip,
   Legend,
   ComposedChart,
+  Cell,
 } from "recharts";
-import { TrendingUp, Activity, Clock, Zap, Loader2, X, Filter } from "lucide-react";
+import { TrendingUp, Activity, Clock, Zap, Loader2, X, Filter, Hourglass } from "lucide-react";
 import { ChartContainer, CHART_TOOLTIP_STYLE } from "../components/ui/ChartContainer";
-import { xAxisDefaults, yAxisDefaults } from "../components/ui/chart-axis";
+import {
+  xAxisDefaults,
+  yAxisDefaults,
+  axisTitleXBottom,
+  axisTitleYLeft,
+  RECHARTS_MARGIN_DEFAULT,
+  RECHARTS_MARGIN_ROTATED_X,
+  RECHARTS_MARGIN_HISTOGRAM,
+} from "../components/ui/chart-axis";
 import { Select, SelectOption } from "../components/ui/Select";
 import { getProjectSprints, type SprintResponse } from "../api/sprints";
 import {
   getVelocityChart, getBurndownChart,
-  getKanbanSummary, getCumulativeFlow, getCycleTimeScatter,
-  getThroughput, getAvgCycleTime, getThroughputTrend,
+  getCumulativeFlow, getCycleTimeScatter,
+  getThroughput, getWipAge,
   getWipHistory, getCycleTimeDistribution, getThroughputDistribution,
   type VelocityResponse, type BurndownResponse,
-  type KanbanSummaryResponse, type CumulativeFlowResponse,
+  type CumulativeFlowResponse,
   type CycleTimeScatterResponse, type ThroughputResponse,
-  type AvgCycleTimeResponse, type ThroughputTrendResponse,
+  type WipAgeResponse,
   type WipHistoryResponse, type DistributionResponse,
   type AnalyticsFilters,
 } from "../api/analytics";
@@ -55,6 +64,10 @@ const VELOCITY_LIMIT_OPTIONS = [
 const FILTERABLE_TYPES = new Set(["priority", "select", "checkbox", "multiselect", "user", "user_list", "tags"]);
 
 const tooltipStyle = CHART_TOOLTIP_STYLE;
+
+/** Единый вид подсказок Recharts (как на CFD): заголовок + строки метрик с отступами. */
+const chartTooltipLabelStyle = { color: "#0f172a", fontWeight: 600 as const, marginBottom: 6 };
+const chartTooltipItemStyle = { padding: "3px 0" as const };
 
 interface AnalyticsProps {
   projectId: string;
@@ -231,12 +244,10 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
   const metrics = velocityData?.metrics;
 
   // Kanban data
-  const [kanbanSummary, setKanbanSummary] = useState<KanbanSummaryResponse | null>(null);
   const [cumulativeFlow, setCumulativeFlow] = useState<CumulativeFlowResponse | null>(null);
   const [cycleTimeScatter, setCycleTimeScatter] = useState<CycleTimeScatterResponse | null>(null);
   const [throughputData, setThroughputData] = useState<ThroughputResponse | null>(null);
-  const [avgCycleTime, setAvgCycleTime] = useState<AvgCycleTimeResponse | null>(null);
-  const [throughputTrend, setThroughputTrend] = useState<ThroughputTrendResponse | null>(null);
+  const [wipAge, setWipAge] = useState<WipAgeResponse | null>(null);
   const [wipHistory, setWipHistory] = useState<WipHistoryResponse | null>(null);
   const [cycleTimeDist, setCycleTimeDist] = useState<DistributionResponse | null>(null);
   const [throughputDist, setThroughputDist] = useState<DistributionResponse | null>(null);
@@ -249,12 +260,10 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
     setKanbanErrors([]);
 
     const calls: [string, Promise<void>][] = [
-      ["summary", getKanbanSummary(projectId, analyticsFilters).then(setKanbanSummary)],
       ["cumulative-flow", getCumulativeFlow(projectId, analyticsFilters).then(setCumulativeFlow)],
       ["cycle-time-scatter", getCycleTimeScatter(projectId, analyticsFilters).then(setCycleTimeScatter)],
       ["throughput", getThroughput(projectId, analyticsFilters).then(setThroughputData)],
-      ["avg-cycle-time", getAvgCycleTime(projectId, analyticsFilters).then(setAvgCycleTime)],
-      ["throughput-trend", getThroughputTrend(projectId, analyticsFilters).then(setThroughputTrend)],
+      ["wip-age", getWipAge(projectId, analyticsFilters).then(setWipAge)],
       ["wip", getWipHistory(projectId, analyticsFilters).then(setWipHistory)],
       ["cycle-time-distribution", getCycleTimeDistribution(projectId, analyticsFilters).then(setCycleTimeDist)],
       ["throughput-distribution", getThroughputDistribution(projectId, analyticsFilters).then(setThroughputDist)],
@@ -405,36 +414,6 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
         </div>
       )}
 
-      {/* Kanban Metrics Summary */}
-      {projectType === "kanban" && kanbanSummary && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {[
-            { label: "Средняя скорость", term: "throughput" as const, value: `${kanbanSummary.data.averageVelocity} ${kanbanSummary.data.averageVelocityUnit}`, change: kanbanSummary.data.velocityTrend > 0 ? `+${kanbanSummary.data.velocityTrend}%` : `${kanbanSummary.data.velocityTrend}%`, icon: TrendingUp, bgColor: "bg-blue-50", textColor: "text-blue-600" },
-            { label: "Время цикла", term: "cycleTime" as const, value: `${kanbanSummary.data.cycleTime} дней`, change: kanbanSummary.data.cycleTimeTrend > 0 ? `+${kanbanSummary.data.cycleTimeTrend}%` : `${kanbanSummary.data.cycleTimeTrend}%`, icon: Clock, bgColor: "bg-green-50", textColor: "text-green-600" },
-            { label: "Пропускная способность", term: "throughput" as const, value: `${kanbanSummary.data.throughput} задач/нед`, change: kanbanSummary.data.throughputTrend > 0 ? `+${kanbanSummary.data.throughputTrend}%` : `${kanbanSummary.data.throughputTrend}%`, icon: Activity, bgColor: "bg-purple-50", textColor: "text-purple-600" },
-            { label: "Незавершённая работа", term: "wipLimit" as const, value: `${kanbanSummary.data.wip} задач`, change: kanbanSummary.data.wipChange > 0 ? `+${kanbanSummary.data.wipChange}` : `${kanbanSummary.data.wipChange}`, icon: Zap, bgColor: "bg-orange-50", textColor: "text-orange-600" },
-          ].map((metric, index) => (
-            <div key={index} className="bg-white rounded-xl p-6 shadow-md border border-slate-100">
-              <div className="flex items-center justify-between mb-4">
-                <div className={`${metric.bgColor} p-3 rounded-lg`}>
-                  <metric.icon className={metric.textColor} size={24} />
-                </div>
-                <span className={`text-sm font-semibold ${
-                  metric.change.startsWith("+") ? "text-green-600" : metric.change.startsWith("-") ? "text-red-600" : "text-slate-600"
-                }`}>
-                  {metric.change}
-                </span>
-              </div>
-              <p className="text-slate-600 text-sm inline-flex items-center gap-1">
-                {metric.label}
-                <TermTooltip term={metric.term} />
-              </p>
-              <p className="text-2xl font-bold mt-1">{metric.value}</p>
-            </div>
-          ))}
-        </div>
-      )}
-
       {/* ── SCRUM Charts ────────────────────────────────────────── */}
       {projectType === "scrum" && (
         <>
@@ -466,16 +445,24 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
               </div>
             ) : velocityData && velocityData.data.length > 0 ? (
               <ChartContainer
-                height={300}
+                height={400}
                 scrollableOnMobile
                 minWidthOnMobile={Math.max(560, velocityData.data.length * 60)}
               >
-                <BarChart data={velocityData.data}>
+                <BarChart data={velocityData.data} margin={{ ...RECHARTS_MARGIN_DEFAULT, left: 44, bottom: 76 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="sprint" {...xAxisDefaults({ count: velocityData.data.length })} />
-                  <YAxis {...yAxisDefaults()} />
-                  <Tooltip contentStyle={tooltipStyle} />
-                  <Legend />
+                  <XAxis
+                    dataKey="sprint"
+                    {...xAxisDefaults({ count: velocityData.data.length })}
+                    label={axisTitleXBottom("Спринт")}
+                  />
+                  <YAxis {...yAxisDefaults()} label={axisTitleYLeft(`Значение (${metricUnit})`)} />
+                  <Tooltip
+                    contentStyle={tooltipStyle}
+                    labelStyle={chartTooltipLabelStyle}
+                    itemStyle={chartTooltipItemStyle}
+                  />
+                  <Legend verticalAlign="top" align="center" wrapperStyle={{ paddingBottom: 8 }} />
                   <Bar dataKey="planned" fill="#3b82f6" name="Запланировано" radius={[8, 8, 0, 0]} />
                   <Bar dataKey="completed" fill="#10b981" name="Выполнено" radius={[8, 8, 0, 0]} />
                 </BarChart>
@@ -523,16 +510,24 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
                   <p className="text-sm text-slate-500 mb-3">Спринт: <strong>{burndownData.sprintName}</strong> ({metricLabel})</p>
                 )}
                 <ChartContainer
-                  height={300}
+                  height={400}
                   scrollableOnMobile
                   minWidthOnMobile={Math.max(560, burndownData.data.length * 45)}
                 >
-                  <LineChart data={burndownData.data}>
+                  <LineChart data={burndownData.data} margin={{ ...RECHARTS_MARGIN_DEFAULT, left: 44, bottom: 76 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="day" {...xAxisDefaults({ count: burndownData.data.length })} />
-                    <YAxis {...yAxisDefaults()} />
-                    <Tooltip contentStyle={tooltipStyle} />
-                    <Legend />
+                    <XAxis
+                      dataKey="day"
+                      {...xAxisDefaults({ count: burndownData.data.length })}
+                      label={axisTitleXBottom("День спринта")}
+                    />
+                    <YAxis {...yAxisDefaults()} label={axisTitleYLeft(`Остаток (${metricUnit})`)} />
+                    <Tooltip
+                      contentStyle={tooltipStyle}
+                      labelStyle={chartTooltipLabelStyle}
+                      itemStyle={chartTooltipItemStyle}
+                    />
+                    <Legend verticalAlign="top" align="center" wrapperStyle={{ paddingBottom: 8 }} />
                     <Line
                       type="monotone"
                       dataKey="ideal"
@@ -583,87 +578,174 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
           )}
           {[
             { title: "Накопительная диаграмма потока", term: "cfd" as const, icon: Activity, iconColor: "text-purple-600", bgColor: "bg-purple-50", textColor: "text-purple-800", titleColor: "text-purple-900", data: cumulativeFlow, render: (d: CumulativeFlowResponse) => (
-              <AreaChart data={d.data}>
+              <AreaChart data={d.data} margin={{ ...RECHARTS_MARGIN_DEFAULT, left: 44, bottom: 76 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="date" {...xAxisDefaults({ count: d.data.length })} />
-                <YAxis {...yAxisDefaults()} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Legend />
+                <XAxis dataKey="date" {...xAxisDefaults({ count: d.data.length })} label={axisTitleXBottom("Дата")} />
+                <YAxis {...yAxisDefaults()} label={axisTitleYLeft("Количество задач")} />
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  labelStyle={chartTooltipLabelStyle}
+                  itemStyle={chartTooltipItemStyle}
+                />
+                <Legend verticalAlign="top" align="center" wrapperStyle={{ paddingBottom: 8 }} />
                 {(d.columns || Object.keys(d.data[0] || {}).filter(k => k !== "date")).map((col, i) => {
                   const colors = ["#10b981", "#8b5cf6", "#3b82f6", "#f59e0b", "#64748b", "#ef4444", "#06b6d4", "#f97316"];
                   return <Area key={col} type="monotone" dataKey={col} stackId="1" stroke={colors[i % colors.length]} fill={colors[i % colors.length]} name={col} />;
                 })}
               </AreaChart>
             )},
-            { title: "Диаграмма рассеяния времени производства", term: "cycleTime" as const, icon: Clock, iconColor: "text-blue-600", bgColor: "bg-blue-50", textColor: "text-blue-800", titleColor: "text-blue-900", data: cycleTimeScatter, scrollableOnMobile: true, render: (d: CycleTimeScatterResponse) => (
-              <ScatterChart>
+            { title: "Скорость поставки (с линией тренда)", term: "throughput" as const, icon: Zap, iconColor: "text-orange-600", bgColor: "bg-orange-50", textColor: "text-orange-800", titleColor: "text-orange-900", data: throughputData, render: (d: ThroughputResponse) => (
+              <ComposedChart data={d.data} margin={{ ...RECHARTS_MARGIN_DEFAULT, left: 40, bottom: 76 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="task" {...xAxisDefaults({ count: d.data.length, angleAfter: 6, height: 80 })} />
-                <YAxis dataKey="time" {...yAxisDefaults({ width: 48 })} label={{ value: "Дни", angle: -90 }} />
-                <Tooltip contentStyle={tooltipStyle} cursor={{ strokeDasharray: "3 3" }} />
+                <XAxis dataKey="week" {...xAxisDefaults({ count: d.data.length })} label={axisTitleXBottom("Неделя")} />
+                <YAxis
+                  {...yAxisDefaults()}
+                  label={axisTitleYLeft("Задач за неделю")}
+                  domain={[0, "auto"]}
+                  allowDataOverflow
+                />
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  labelStyle={chartTooltipLabelStyle}
+                  itemStyle={chartTooltipItemStyle}
+                  cursor={{ fill: "rgba(148, 163, 184, 0.12)" }}
+                  formatter={(value: number, name) => {
+                    const isTrend = name === "Тренд";
+                    const num = typeof value === "number" ? value : Number(value);
+                    const display = isTrend && !Number.isNaN(num) ? Math.max(0, num) : num;
+                    const v =
+                      typeof display === "number" && !Number.isInteger(display) ? display.toFixed(1) : display;
+                    return [v, name];
+                  }}
+                />
+                <Legend verticalAlign="top" align="center" wrapperStyle={{ paddingBottom: 8 }} />
+                <Bar dataKey="actual" fill="#f59e0b" name="Факт (завершено)" radius={[6, 6, 0, 0]} />
+                <Line
+                  type="natural"
+                  dataKey="trend"
+                  stroke="#94a3b8"
+                  strokeWidth={2}
+                  strokeDasharray="6 5"
+                  dot={false}
+                  name="Тренд"
+                />
+              </ComposedChart>
+            )},
+            { title: "Распределение скорости поставки", term: "throughput" as const, icon: Activity, iconColor: "text-amber-600", bgColor: "bg-amber-50", textColor: "text-amber-800", titleColor: "text-amber-900", data: throughputDist, render: (d: DistributionResponse) => (
+              <BarChart data={d.data} margin={{ ...RECHARTS_MARGIN_HISTOGRAM }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="range" {...xAxisDefaults({ count: d.data.length })} label={axisTitleXBottom("Диапазон (задач/нед.)")} />
+                <YAxis {...yAxisDefaults({ width: 48 })} label={axisTitleYLeft("Количество недель", 10)} />
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  labelStyle={chartTooltipLabelStyle}
+                  itemStyle={chartTooltipItemStyle}
+                />
+                <Bar dataKey="count" fill="#f59e0b" name="Частота" radius={[8, 8, 0, 0]} />
+              </BarChart>
+            )},
+            { title: "Диаграмма рассеяния времени производства", term: "cycleTime" as const, icon: Clock, iconColor: "text-blue-600", bgColor: "bg-blue-50", textColor: "text-blue-800", titleColor: "text-blue-900", data: cycleTimeScatter, scrollableOnMobile: true, render: (d: CycleTimeScatterResponse) => (
+              <ScatterChart margin={{ ...RECHARTS_MARGIN_ROTATED_X, bottom: 100, left: 44 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis
+                  dataKey="task"
+                  {...xAxisDefaults({ count: d.data.length, angleAfter: 6, height: 86 })}
+                  label={axisTitleXBottom("Задача")}
+                />
+                <YAxis
+                  dataKey="time"
+                  {...yAxisDefaults({ width: 52 })}
+                  label={axisTitleYLeft("Время цикла (дни)")}
+                />
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  labelStyle={chartTooltipLabelStyle}
+                  itemStyle={chartTooltipItemStyle}
+                  cursor={{ strokeDasharray: "3 3" }}
+                />
                 <Scatter data={d.data} fill="#3b82f6" />
               </ScatterChart>
             )},
-            { title: "Скорость поставки (Throughput)", term: "throughput" as const, icon: Zap, iconColor: "text-orange-600", bgColor: "bg-orange-50", textColor: "text-orange-800", titleColor: "text-orange-900", data: throughputData, render: (d: ThroughputResponse) => (
-              <BarChart data={d.data}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="week" {...xAxisDefaults({ count: d.data.length })} />
-                <YAxis {...yAxisDefaults()} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Bar dataKey="count" fill="#f59e0b" name="Задач завершено" radius={[8, 8, 0, 0]} />
-              </BarChart>
-            )},
-            { title: "Среднее время производства (Cycle Time)", term: "cycleTime" as const, icon: Clock, iconColor: "text-indigo-600", bgColor: "bg-indigo-50", textColor: "text-indigo-800", titleColor: "text-indigo-900", data: avgCycleTime, render: (d: AvgCycleTimeResponse) => (
-              <LineChart data={d.data}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="week" {...xAxisDefaults({ count: d.data.length })} />
-                <YAxis {...yAxisDefaults({ width: 48 })} label={{ value: "Дни", angle: -90, position: "insideLeft" }} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Legend />
-                <Line type="monotone" dataKey="avg" stroke="#6366f1" strokeWidth={3} name="Среднее время" dot={{ fill: "#6366f1", r: 5 }} />
-                <Line type="monotone" dataKey="p50" stroke="#94a3b8" strokeWidth={2} strokeDasharray="5 5" name="Медиана (50%)" />
-                <Line type="monotone" dataKey="p85" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" name="85-й процентиль" />
-              </LineChart>
-            )},
-            { title: "Тренд скорости поставки", term: "throughput" as const, icon: TrendingUp, iconColor: "text-emerald-600", bgColor: "bg-emerald-50", textColor: "text-emerald-800", titleColor: "text-emerald-900", data: throughputTrend, render: (d: ThroughputTrendResponse) => (
-              <LineChart data={d.data}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="week" {...xAxisDefaults({ count: d.data.length })} />
-                <YAxis {...yAxisDefaults({ width: 56 })} label={{ value: "Задач/неделя", angle: -90, position: "insideLeft" }} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Legend />
-                <Line type="monotone" dataKey="actual" stroke="#10b981" strokeWidth={3} name="Фактическая скорость" dot={{ fill: "#10b981", r: 5 }} />
-                <Line type="monotone" dataKey="trend" stroke="#94a3b8" strokeWidth={2} strokeDasharray="5 5" name="Линия тренда" />
-              </LineChart>
-            )},
-            { title: "Незавершённая работа (WIP)", term: "wipLimit" as const, icon: Activity, iconColor: "text-cyan-600", bgColor: "bg-cyan-50", textColor: "text-cyan-800", titleColor: "text-cyan-900", data: wipHistory, render: (d: WipHistoryResponse) => (
-              <ComposedChart data={d.data}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="date" {...xAxisDefaults({ count: d.data.length })} />
-                <YAxis {...yAxisDefaults()} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Legend />
-                <Line type="monotone" dataKey="wip" stroke="#06b6d4" strokeWidth={3} name="Текущий WIP" dot={{ fill: "#06b6d4", r: 5 }} />
-                <Line type="monotone" dataKey="limit" stroke="#ef4444" strokeWidth={2} strokeDasharray="8 4" name="WIP-лимит" dot={false} />
-              </ComposedChart>
-            )},
             { title: "Распределение времени производства", term: "cycleTime" as const, icon: Activity, iconColor: "text-violet-600", bgColor: "bg-violet-50", textColor: "text-violet-800", titleColor: "text-violet-900", data: cycleTimeDist, render: (d: DistributionResponse) => (
-              <BarChart data={d.data}>
+              <BarChart data={d.data} margin={{ ...RECHARTS_MARGIN_HISTOGRAM }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="range" {...xAxisDefaults({ count: d.data.length })} label={{ value: "Диапазон (дни)", position: "insideBottom", offset: -5 }} />
-                <YAxis {...yAxisDefaults({ width: 56 })} label={{ value: "Количество задач", angle: -90, position: "insideLeft" }} />
-                <Tooltip contentStyle={tooltipStyle} />
+                <XAxis dataKey="range" {...xAxisDefaults({ count: d.data.length })} label={axisTitleXBottom("Диапазон (дни)")} />
+                <YAxis {...yAxisDefaults({ width: 48 })} label={axisTitleYLeft("Количество задач", 10)} />
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  labelStyle={chartTooltipLabelStyle}
+                  itemStyle={chartTooltipItemStyle}
+                />
                 <Bar dataKey="count" fill="#8b5cf6" name="Задач" radius={[8, 8, 0, 0]} />
               </BarChart>
             )},
-            { title: "Распределение скорости поставки", term: "throughput" as const, icon: Activity, iconColor: "text-amber-600", bgColor: "bg-amber-50", textColor: "text-amber-800", titleColor: "text-amber-900", data: throughputDist, render: (d: DistributionResponse) => (
-              <BarChart data={d.data}>
+            { title: "Возраст задач в работе (WIP Age)", term: "wipLimit" as const, icon: Hourglass, iconColor: "text-rose-600", bgColor: "bg-rose-50", textColor: "text-rose-800", titleColor: "text-rose-900", data: wipAge, scrollableOnMobile: true, render: (d: WipAgeResponse) => {
+              const sorted = [...d.data].sort((a, b) => b.ageDays - a.ageDays);
+              const oldestAccent = ["#dc2626", "#ea580c", "#f97316"] as const;
+              const fillByKey = new Map<string, string>();
+              sorted.slice(0, Math.min(3, sorted.length)).forEach((p, i) => {
+                fillByKey.set(p.taskKey, oldestAccent[i]);
+              });
+              const barFill = (taskKey: string) => fillByKey.get(taskKey) ?? "#06b6d4";
+              return (
+                <BarChart data={d.data} margin={{ ...RECHARTS_MARGIN_ROTATED_X, bottom: 100, left: 44 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis
+                    dataKey="taskKey"
+                    {...xAxisDefaults({ count: d.data.length, angleAfter: 6, height: 86 })}
+                    label={axisTitleXBottom("Задача")}
+                  />
+                  <YAxis {...yAxisDefaults({ width: 52 })} label={axisTitleYLeft("Возраст (дни)")} />
+                  <Tooltip
+                    cursor={{ fill: "rgba(148, 163, 184, 0.12)" }}
+                    content={({ active, payload }) => {
+                      if (!active || !payload?.length) return null;
+                      const row = payload[0].payload as WipAgeResponse["data"][number];
+                      const ageLabel =
+                        typeof row.ageDays === "number" && !Number.isInteger(row.ageDays)
+                          ? row.ageDays.toFixed(2)
+                          : String(row.ageDays);
+                      return (
+                        <div style={tooltipStyle}>
+                          <p className="m-0 mb-2 text-[13px] font-semibold leading-tight text-slate-900">
+                            {row.taskKey}
+                          </p>
+                          <div className="flex flex-col gap-1.5 text-[12px] leading-snug text-slate-600">
+                            <p className="m-0">
+                              <span className="text-slate-500">Возраст:</span>{" "}
+                              <span className="font-medium text-slate-800">{ageLabel} дн.</span>
+                            </p>
+                            <p className="m-0">
+                              <span className="text-slate-500">Колонка:</span>{" "}
+                              <span className="font-medium text-slate-800">{row.columnName}</span>
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    }}
+                  />
+                  <Bar dataKey="ageDays" name="Дней в колонке" radius={[4, 4, 0, 0]}>
+                    {d.data.map((entry) => (
+                      <Cell key={entry.taskKey} fill={barFill(entry.taskKey)} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              );
+            }},
+            { title: "Незавершённая работа (WIP)", term: "wipLimit" as const, icon: Activity, iconColor: "text-cyan-600", bgColor: "bg-cyan-50", textColor: "text-cyan-800", titleColor: "text-cyan-900", data: wipHistory, render: (d: WipHistoryResponse) => (
+              <ComposedChart data={d.data} margin={{ ...RECHARTS_MARGIN_DEFAULT, left: 44, bottom: 76 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="range" {...xAxisDefaults({ count: d.data.length })} label={{ value: "Задач в неделю", position: "insideBottom", offset: -5 }} />
-                <YAxis {...yAxisDefaults({ width: 56 })} label={{ value: "Недель", angle: -90, position: "insideLeft" }} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Bar dataKey="count" fill="#f59e0b" name="Частота" radius={[8, 8, 0, 0]} />
-              </BarChart>
+                <XAxis dataKey="date" {...xAxisDefaults({ count: d.data.length })} label={axisTitleXBottom("Дата")} />
+                <YAxis {...yAxisDefaults()} label={axisTitleYLeft("Количество задач (WIP)")} />
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  labelStyle={chartTooltipLabelStyle}
+                  itemStyle={chartTooltipItemStyle}
+                />
+                <Legend verticalAlign="top" align="center" wrapperStyle={{ paddingBottom: 8 }} />
+                <Line type="monotone" dataKey="wip" stroke="#06b6d4" strokeWidth={3} name="Текущий WIP" dot={{ fill: "#06b6d4", r: 5 }} />
+                <Line type="monotone" dataKey="limit" stroke="#ef4444" strokeWidth={2} strokeDasharray="8 4" name="WIP-лимит" dot={false} />
+              </ComposedChart>
             )},
           ].map((chart, idx) => {
             const Icon = chart.icon;
@@ -685,14 +767,14 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
                 </h2>
                 {hasData ? (
                   <ChartContainer
-                    height={300}
+                    height={440}
                     scrollableOnMobile
                     minWidthOnMobile={minWidth}
                   >
                     {chart.render(chart.data as any)}
                   </ChartContainer>
                 ) : (
-                  <div className="flex items-center justify-center h-[300px] text-slate-400">
+                  <div className="flex min-h-[440px] items-center justify-center text-slate-400">
                     <p>Нет данных для отображения. Завершите несколько задач для построения графика.</p>
                   </div>
                 )}
