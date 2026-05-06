@@ -1,7 +1,7 @@
 import {
   Calendar, User, Tag, FileText, CheckSquare, Link as LinkIcon, AlertTriangle,
   X, Plus, Send, Paperclip, MessageSquare, BarChart3, Trash2, Eye,
-  Copy, Check, ChevronRight, Loader2, Upload, Download,
+  Copy, Check, ChevronRight, Loader2, Upload, Download, Pencil,
 } from "lucide-react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle } from "../components/ui/Modal";
@@ -26,8 +26,8 @@ import { getProjectBoards, getBoard, getBoardColumns, getBoardFields, type Board
 import { getTaskChecklists, createChecklist, addChecklistItem, setChecklistItemStatus, updateChecklist, deleteChecklist, updateChecklistItem, deleteChecklistItem, type ChecklistResponse } from "../api/checklists";
 import { getTaskTags, addTagToTask, removeTagFromTask, getBoardTags, type TagResponse } from "../api/tags";
 import { getTaskDependencies, addDependency, deleteDependency, type TaskDependency, type DependencyType } from "../api/dependencies";
-import { getTaskComments, createComment, deleteComment, type CommentResponse } from "../api/comments";
-import { getTaskAttachments, uploadAttachment, deleteAttachment, type AttachmentResponse } from "../api/attachments";
+import { getTaskComments, createComment, updateComment, deleteComment, type CommentResponse } from "../api/comments";
+import { getTaskAttachments, getCommentAttachments, uploadAttachment, uploadCommentAttachment, deleteAttachment, type AttachmentResponse } from "../api/attachments";
 import { getTaskWatchers, addWatcher, removeWatcher, type TaskWatcher } from "../api/watchers";
 import { getTaskFieldValues, setTaskFieldValue, type TaskFieldValue } from "../api/field-values";
 import { moveTasksToSprint, getProjectSprints, type SprintResponse } from "../api/sprints";
@@ -86,12 +86,18 @@ export default function TaskDetail() {
   const [linkType, setLinkType] = useState<DependencyType>("relates_to");
   const [selectedTaskId, setSelectedTaskId] = useState<string>("");
   const [commentText, setCommentText] = useState("");
+  const [commentDraftFiles, setCommentDraftFiles] = useState<File[]>([]);
   const [replyTo, setReplyTo] = useState<{ id: string; authorName: string; content: string } | null>(null);
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [editingCommentText, setEditingCommentText] = useState("");
+  const [commentAttachmentsById, setCommentAttachmentsById] = useState<Record<string, AttachmentResponse[]>>({});
   const [highlightedCommentId, setHighlightedCommentId] = useState<string | null>(null);
   const [showMentionDropdown, setShowMentionDropdown] = useState(false);
   const [mentionFilter, setMentionFilter] = useState("");
   const [mentionCursorPos, setMentionCursorPos] = useState(0);
   const commentTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const commentFileInputRef = useRef<HTMLInputElement>(null);
+  const editCommentFileInputRef = useRef<HTMLInputElement>(null);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [deadlineFocused, setDeadlineFocused] = useState(false);
   const [deadlineLocal, setDeadlineLocal] = useState<string | null>(null);
@@ -307,6 +313,23 @@ export default function TaskDetail() {
       document.removeEventListener("click", handler);
     };
   }, [highlightedCommentId]);
+
+  useEffect(() => {
+    let active = true;
+    const loadCommentAttachments = async () => {
+      if (comments.length === 0) {
+        setCommentAttachmentsById({});
+        return;
+      }
+      const entries = await Promise.all(
+        comments.map(async (comment) => [comment.id, await getCommentAttachments(comment.id).catch(() => [])] as const),
+      );
+      if (!active) return;
+      setCommentAttachmentsById(Object.fromEntries(entries));
+    };
+    loadCommentAttachments();
+    return () => { active = false; };
+  }, [comments]);
 
   // ── Create task handler ─────────────────────────────────────
 
@@ -655,14 +678,47 @@ export default function TaskDetail() {
     if (!canEditTask) return;
     if (!task || !commentText.trim()) return;
     try {
-      await createComment(task.id, {
+      const created = await createComment(task.id, {
         content: commentText.trim(),
         parentCommentId: replyTo?.id || undefined,
       });
+      if (commentDraftFiles.length > 0) {
+        await Promise.allSettled(commentDraftFiles.map((file) => uploadCommentAttachment(created.id, file)));
+      }
       setCommentText("");
+      setCommentDraftFiles([]);
       setReplyTo(null);
       setComments(await getTaskComments(task.id));
     } catch (e: any) { toastError(e, "Ошибка"); }
+  };
+
+  const handleStartEditComment = (comment: CommentResponse) => {
+    setEditingCommentId(comment.id);
+    setEditingCommentText(comment.content);
+  };
+
+  const handleAttachToExistingComment = (comment: CommentResponse) => {
+    setEditingCommentId(comment.id);
+    setEditingCommentText(comment.content);
+    setEditingCommentUploadTargetId(comment.id);
+    editCommentFileInputRef.current?.click();
+  };
+
+  const handleCancelEditComment = () => {
+    setEditingCommentId(null);
+    setEditingCommentText("");
+  };
+
+  const handleSaveEditComment = async (commentId: string) => {
+    if (!task || !editingCommentText.trim()) return;
+    try {
+      await updateComment(commentId, { content: editingCommentText.trim() });
+      setEditingCommentId(null);
+      setEditingCommentText("");
+      setComments(await getTaskComments(task.id));
+    } catch (e: any) {
+      toastError(e, "Ошибка редактирования комментария");
+    }
   };
 
   const handleReply = (comment: CommentResponse) => {
@@ -710,8 +766,29 @@ export default function TaskDetail() {
     } catch (e: any) { toastError(e, "Ошибка"); }
   };
 
+  const handleUploadCommentAttachment = async (commentId: string, file: File) => {
+    try {
+      await uploadCommentAttachment(commentId, file);
+      const nextAttachments = await getCommentAttachments(commentId).catch(() => []);
+      setCommentAttachmentsById((prev) => ({ ...prev, [commentId]: nextAttachments }));
+    } catch (e: any) {
+      toastError(e, "Ошибка загрузки вложения комментария");
+    }
+  };
+
+  const handleDeleteCommentAttachment = async (commentId: string, attachmentId: string) => {
+    try {
+      await deleteAttachment(attachmentId);
+      const nextAttachments = await getCommentAttachments(commentId).catch(() => []);
+      setCommentAttachmentsById((prev) => ({ ...prev, [commentId]: nextAttachments }));
+    } catch (e: any) {
+      toastError(e, "Ошибка удаления вложения");
+    }
+  };
+
   // Attachments
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [editingCommentUploadTargetId, setEditingCommentUploadTargetId] = useState<string | null>(null);
 
   const handleFileUpload = async (file: File) => {
     if (!task) return;
@@ -1640,6 +1717,8 @@ export default function TaskDetail() {
               const parentComment = c.parentCommentId ? comments.find(p => p.id === c.parentCommentId) : null;
               const parentAuthor = parentComment ? resolveAuthor(parentComment.authorId) : null;
               const isHighlighted = highlightedCommentId === c.id;
+              const commentAttachments = commentAttachmentsById[c.id] || [];
+              const isEditing = editingCommentId === c.id;
 
               return (
                 <div key={c.id}>
@@ -1652,19 +1731,55 @@ export default function TaskDetail() {
                           isHighlighted ? "bg-blue-50 ring-2 ring-blue-400" : "bg-slate-50"
                         }`}
                       >
-                        <div className="flex items-start justify-between mb-1 gap-3">
-                          <div className="min-w-0">
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                          <div className="min-w-0 flex-1 pr-1">
                             <div className="font-semibold text-sm truncate">{author?.fullName || "Пользователь"}</div>
                             {author?.username && (
                               <div className="text-xs text-slate-500 truncate">{author.username}</div>
                             )}
                           </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <span className="text-xs text-slate-500">{new Date(c.createdAt).toLocaleString("ru-RU")}</span>
-                            {canEditTask && (<>
-                              <button onClick={() => handleReply(c)} className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors text-xs">Ответить</button>
-                              <button onClick={() => handleDeleteComment(c.id)} className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"><Trash2 size={12} /></button>
-                            </>)}
+                          <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-3 gap-y-1 text-xs text-slate-500 leading-none">
+                            <span className="tabular-nums text-xs text-slate-500">{new Date(c.createdAt).toLocaleString("ru-RU")}</span>
+                            {canEditTask && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleReply(c)}
+                                  className="px-1 py-1 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                >
+                                  Ответить
+                                </button>
+                                {/* Три иконки с узким gap; до «Ответить» — как у остальной строки (gap-x-3) */}
+                                <div className="flex items-center gap-x-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartEditComment(c)}
+                                    className="p-1 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                    title="Редактировать комментарий"
+                                    aria-label="Редактировать комментарий"
+                                  >
+                                    <Pencil size={16} strokeWidth={2} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAttachToExistingComment(c)}
+                                    className="p-1 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                    title="Вложение к комментарию"
+                                    aria-label="Вложение к комментарию"
+                                  >
+                                    <Paperclip size={16} strokeWidth={2} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteComment(c.id)}
+                                    className="p-1 text-slate-600 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                    aria-label="Удалить комментарий"
+                                  >
+                                    <Trash2 size={16} strokeWidth={2} />
+                                  </button>
+                                </div>
+                              </>
+                            )}
                           </div>
                         </div>
                         {parentComment && (
@@ -1684,9 +1799,75 @@ export default function TaskDetail() {
                             {parentAuthor?.fullName || "Пользователь"}: {parentComment.content.slice(0, 100)}{parentComment.content.length > 100 ? "..." : ""}
                           </button>
                         )}
-                        <p className="text-sm whitespace-pre-wrap">{c.content.split(/(@[^\s@]+)/g).map((part, i) =>
-                          part.startsWith("@") ? <span key={i} className="text-blue-600 font-medium">{part}</span> : part
-                        )}</p>
+                        {isEditing ? (
+                          <div className="space-y-2">
+                            <textarea
+                              value={editingCommentText}
+                              onChange={(e) => setEditingCommentText(e.target.value)}
+                              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                              rows={3}
+                            />
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                onClick={() => handleSaveEditComment(c.id)}
+                                disabled={!editingCommentText.trim()}
+                                className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                              >
+                                Сохранить
+                              </button>
+                              <button
+                                onClick={handleCancelEditComment}
+                                className="px-3 py-1.5 text-xs border border-slate-300 rounded hover:bg-slate-100"
+                              >
+                                Отмена
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setEditingCommentUploadTargetId(c.id);
+                                  editCommentFileInputRef.current?.click();
+                                }}
+                                className="px-3 py-1.5 text-xs text-blue-700 border border-blue-200 rounded hover:bg-blue-50 flex items-center gap-1"
+                              >
+                                <Paperclip size={12} /> Добавить файл
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-sm whitespace-pre-wrap">{c.content.split(/(@[^\s@]+)/g).map((part, i) =>
+                            part.startsWith("@") ? <span key={i} className="text-blue-600 font-medium">{part}</span> : part
+                          )}</p>
+                        )}
+                        {commentAttachments.length > 0 && (
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            {commentAttachments.map((att) => (
+                              <span
+                                key={att.id}
+                                className="inline-flex items-center gap-1 max-w-full px-2 py-1 text-xs bg-slate-100 rounded text-slate-800"
+                              >
+                                <Paperclip size={12} className="shrink-0 text-slate-600" />
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadAttachment(att)}
+                                  className="min-w-0 truncate text-left hover:underline hover:text-blue-700"
+                                  title={att.fileName}
+                                >
+                                  {att.fileName}
+                                </button>
+                                {canEditTask && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteCommentAttachment(c.id, att.id)}
+                                    className="shrink-0 text-slate-500 hover:text-red-600 rounded p-0.5 hover:bg-white/70"
+                                    title="Убрать вложение"
+                                    aria-label="Убрать вложение"
+                                  >
+                                    <X size={12} />
+                                  </button>
+                                )}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1716,7 +1897,16 @@ export default function TaskDetail() {
                 <textarea ref={commentTextareaRef} value={commentText} onChange={handleCommentInput}
                   onKeyDown={e => { if (e.key === "Escape") setShowMentionDropdown(false); if (e.key === "Enter" && !e.shiftKey && !showMentionDropdown) { e.preventDefault(); handleAddComment(); } }}
                   placeholder="Добавить комментарий... (@ для упоминания)"
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" rows={3} />
+                  className="w-full pl-4 pr-12 pt-2 pb-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" rows={3} />
+                <button
+                  type="button"
+                  onClick={() => commentFileInputRef.current?.click()}
+                  className="absolute bottom-3 right-2 p-2 text-blue-700 hover:bg-blue-50 rounded-md border border-transparent hover:border-blue-200"
+                  title="Прикрепить файл"
+                  aria-label="Прикрепить файл"
+                >
+                  <Paperclip size={18} />
+                </button>
 
                 {/* Mention dropdown */}
                 {showMentionDropdown && (
@@ -1741,12 +1931,45 @@ export default function TaskDetail() {
                 )}
               </div>
 
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                {commentDraftFiles.map((file, idx) => (
+                  <span key={`${file.name}-${idx}`} className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-slate-100 rounded">
+                    <Paperclip size={12} />
+                    {file.name}
+                    <button onClick={() => setCommentDraftFiles((prev) => prev.filter((_, i) => i !== idx))} className="text-slate-500 hover:text-red-600">
+                      <X size={12} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+
               <div className="flex items-center gap-2 mt-2">
                 <button onClick={handleAddComment} disabled={!commentText.trim()}
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
                   <Send size={16} /> Отправить
                 </button>
               </div>
+              <input
+                ref={commentFileInputRef}
+                type="file"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) setCommentDraftFiles((prev) => [...prev, file]);
+                  e.currentTarget.value = "";
+                }}
+              />
+              <input
+                ref={editCommentFileInputRef}
+                type="file"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  const targetCommentId = editingCommentUploadTargetId;
+                  if (file && targetCommentId) handleUploadCommentAttachment(targetCommentId, file);
+                  e.currentTarget.value = "";
+                }}
+              />
               </>)}
             </div>
             );

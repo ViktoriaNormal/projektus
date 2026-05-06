@@ -21,6 +21,13 @@ export function createComment(taskId: string, data: { content: string; parentCom
   });
 }
 
+export function updateComment(commentId: string, data: { content: string }) {
+  return apiRequest<CommentResponse>(`/tasks/comments/${commentId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
 export function deleteComment(commentId: string) {
   return apiRequest<null>(`/tasks/comments/${commentId}`, {
     method: 'DELETE',
