@@ -2499,7 +2499,9 @@ function ProjectParamsSection({ templateId, isScrum, refs, params, onReload }: {
               <span>·</span>
               <span className="inline-flex items-center gap-1">Story Points <TermTooltip term="storyPoints" /></span>
               <span>·</span>
-              <span className="inline-flex items-center gap-1">Burndown-диаграмма <TermTooltip term="burndown" /></span>
+              <span>график скорости команды</span>
+              <span>·</span>
+              <span>диаграмма сгорания задач</span>
             </div>
           ) : (
             <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm text-blue-800">
@@ -2507,7 +2509,7 @@ function ProjectParamsSection({ templateId, isScrum, refs, params, onReload }: {
               <span>·</span>
               <span className="inline-flex items-center gap-1">классы обслуживания <TermTooltip term="serviceClass" /></span>
               <span>·</span>
-              <span className="inline-flex items-center gap-1">Throughput и Cycle Time <TermTooltip term="throughput" /> <TermTooltip term="cycleTime" /></span>
+              <span className="inline-flex items-center gap-1">метрики потока <TermTooltip term="kanbanFlowMetrics" /></span>
               <span>·</span>
               <span className="inline-flex items-center gap-1">прогнозирование Монте-Карло <TermTooltip term="monteCarlo" /></span>
             </div>

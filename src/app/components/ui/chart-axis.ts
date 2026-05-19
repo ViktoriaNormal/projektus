@@ -96,6 +96,10 @@ export function xAxisDefaults(opts?: {
   } else {
     /* Резерв под подписи делений (тот же кегль, что и у Y). */
     base.height = 56;
+    /* Отступы по краям, чтобы первая/последняя подпись не обрезались. */
+    if (count >= 2) {
+      base.padding = { left: 16, right: 28 };
+    }
   }
 
   if (opts?.datePreset) {

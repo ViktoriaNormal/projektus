@@ -285,6 +285,31 @@ function CopyKeyButton({ text }: { text: string }) {
   );
 }
 
+/** После переноса задача должна оказаться последней в целевой ячейке (колонка + дорожка). */
+function insertTaskAtColumnEnd(
+  tasks: TaskResponse[],
+  moved: TaskResponse,
+  columnId: string,
+  swimlaneTaskIds?: Set<string>,
+): TaskResponse[] {
+  const rest = tasks.filter((t) => t.id !== moved.id);
+  const inCell = (t: TaskResponse) => {
+    if (t.columnId !== columnId) return false;
+    if (swimlaneTaskIds) return swimlaneTaskIds.has(t.id);
+    return true;
+  };
+  let insertAt = rest.length;
+  for (let i = rest.length - 1; i >= 0; i--) {
+    if (inCell(rest[i])) {
+      insertAt = i + 1;
+      break;
+    }
+  }
+  const next = [...rest];
+  next.splice(insertAt, 0, moved);
+  return next;
+}
+
 function TaskCard({ task, userCache, moveTask, returnUrl, canDrag = true, isBlocked = false }: {
   task: TaskResponse;
   userCache: Map<string, UserProfileResponse>;
@@ -390,10 +415,10 @@ function DropZone({
   return (
     <div
       ref={drop}
-      className={`min-h-[200px] p-2 rounded-lg transition-colors ${isOver ? "bg-blue-50 ring-2 ring-blue-300" : ""}`}
+      className={`h-full min-h-[8rem] flex flex-col p-2 rounded-lg transition-colors ${isOver ? "bg-blue-50 ring-2 ring-blue-300" : ""}`}
     >
       {canAddTask && (
-        <div className="mb-3">
+        <div className="mb-3 shrink-0">
           <button
             onClick={onAddTask}
             className="w-full py-2.5 border-2 border-dashed border-slate-300 rounded-lg hover:border-blue-400 hover:bg-blue-50 hover:text-blue-600 transition-all text-slate-600 flex items-center justify-center gap-2"
@@ -405,7 +430,8 @@ function DropZone({
           )}
         </div>
       )}
-      <div className="grid grid-cols-2 gap-3">{children}</div>
+      <div className="grid grid-cols-2 gap-3 shrink-0">{children}</div>
+      <div className="flex-1 min-h-4" aria-hidden />
     </div>
   );
 }
@@ -669,7 +695,7 @@ function SwimlaneRow({
   }
 
   return (
-    <tr ref={(node) => drag(drop(node))} className={`border-b border-slate-200 ${isDragging ? "opacity-50" : ""}`}>
+    <tr ref={(node) => drag(drop(node))} className={`h-full border-b border-slate-200 ${isDragging ? "opacity-50" : ""}`}>
       <td className={`${collapsed ? "p-2" : "p-4"} font-semibold align-top md:sticky md:left-0 z-10 border-r-2 border-slate-300 bg-slate-100 w-40 md:w-auto`}>
         <div className="flex items-start gap-2">
           <GripVertical size={18} className={`flex-shrink-0 mt-1 ${canDrag ? "text-slate-400 cursor-move" : "text-slate-200 cursor-default"}`} />
@@ -717,7 +743,7 @@ function SwimlaneRow({
         }
         const cellTasks = tasks.filter((t) => t.columnId === column.id && swimlane.taskIds.has(t.id));
         return (
-          <td key={column.id} className="p-4 align-top bg-slate-50 border-r border-r-slate-200 last:border-r-0">
+          <td key={column.id} className="p-4 align-top h-full bg-slate-50 border-r border-r-slate-200 last:border-r-0">
             <DropZone columnId={column.id} swimlaneId={swimlane.backendId ?? null} moveTask={moveTask}
               onAddTask={() => onAddTask(column.id, swimlane.backendId ?? null)}
               canAddTask={canAddTaskInColumn ? canAddTaskInColumn(column) : true}
@@ -1246,7 +1272,23 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
     if (!canEditTasks) return;
     const targetCol = columns.find(c => c.id === columnId);
     const targetSystemType = targetCol?.systemType ?? null;
-    setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, columnId, columnSystemType: targetSystemType } : t));
+
+    const targetLane = swimlaneId ? computedSwimlanes.find(s => s.backendId === swimlaneId) : null;
+    const targetCellTaskIds = targetLane
+      ? new Set([...targetLane.taskIds, taskId])
+      : undefined;
+
+    setTasks((prev) => {
+      const task = prev.find((t) => t.id === taskId);
+      if (!task) return prev;
+      const updated = {
+        ...task,
+        columnId,
+        columnSystemType: targetSystemType,
+        swimlaneId: swimlaneId ?? task.swimlaneId ?? null,
+      };
+      return insertTaskAtColumnEnd(prev, updated, columnId, targetCellTaskIds);
+    });
     setProjectTaskStatus((prev) => {
       const next = new Map(prev);
       next.set(taskId, targetSystemType);
@@ -1254,7 +1296,6 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
     });
 
     // Find if task moved to a different swimlane and determine the target field value
-    const targetLane = swimlaneId ? computedSwimlanes.find(s => s.backendId === swimlaneId) : null;
     const currentLane = swimlaneId ? computedSwimlanes.find(s => s.taskIds.has(taskId)) : null;
     const swimlaneChanged = targetLane && currentLane && targetLane.backendId !== currentLane.backendId;
 
@@ -1707,11 +1748,11 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
         )}
 
         {/* Board */}
-        <div className="w-full overflow-x-auto">
-          <div className="bg-white rounded-xl shadow-md border border-slate-100">
-            <table className="border-collapse">
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-50">
+        {/* ~header + add-task btn + 3 rows of cards (2-col grid) */}
+        <div className="w-full max-h-[36rem] overflow-auto rounded-xl border border-slate-100 bg-white shadow-md overscroll-contain">
+            <table className="border-collapse h-full min-h-[28rem] w-full">
+              <thead className="sticky top-0 z-20">
+                <tr className="border-b border-slate-200 bg-slate-50 shadow-sm">
                   {computedSwimlanes.length > 0 && (
                     <th className="p-4 text-left font-semibold text-slate-700 w-40 md:w-48 md:sticky md:left-0 bg-slate-50 z-10" />
                   )}
@@ -1736,7 +1777,7 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
                   ))}
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="h-full">
                 {computedSwimlanes.length > 0 ? (
                   (() => {
                     const canDrag = computedSwimlanes.length > 1 && computedSwimlanes.every(s => !!s.backendId);
@@ -1771,14 +1812,14 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
                     });
                   })()
                 ) : (
-                  <tr>
+                  <tr className="h-full">
                     {columns.map((column) => {
                       if (collapsedCols.has(column.id)) {
                         return <td key={column.id} className="bg-slate-50 w-14 min-w-[56px] border-r border-r-slate-200 last:border-r-0" />;
                       }
                       const cellTasks = getFilteredTasks(column.id);
                       return (
-                        <td key={column.id} className="p-4 align-top bg-slate-50 border-r border-r-slate-200 last:border-r-0">
+                        <td key={column.id} className="p-4 align-top h-full bg-slate-50 border-r border-r-slate-200 last:border-r-0">
                           <DropZone
                             columnId={column.id}
                             swimlaneId={null}
@@ -1798,7 +1839,6 @@ export default function Board({ boardId, projectId, projectType, onBoardChanged,
                 )}
               </tbody>
             </table>
-          </div>
         </div>
       </div>
     </DndProvider>

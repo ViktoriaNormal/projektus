@@ -69,6 +69,19 @@ const tooltipStyle = CHART_TOOLTIP_STYLE;
 const chartTooltipLabelStyle = { color: "#0f172a", fontWeight: 600 as const, marginBottom: 6 };
 const chartTooltipItemStyle = { padding: "3px 0" as const };
 
+/** Бэкенд может отдавать переносы как литерал `\n` в строке; подряд идущие схлопываем в один. */
+function formatInterpretationText(text: string): string {
+  return text.replace(/\\n/g, "\n").replace(/\n{2,}/g, "\n");
+}
+
+function InterpretationText({ text, className }: { text: string; className?: string }) {
+  return (
+    <p className={`whitespace-pre-wrap ${className ?? ""}`}>
+      {formatInterpretationText(text)}
+    </p>
+  );
+}
+
 interface AnalyticsProps {
   projectId: string;
   projectType: string;
@@ -349,7 +362,7 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {[
             {
-              label: "Средняя скорость команды (Velocity)",
+              label: "Средняя скорость команды",
               description: `Среднее количество работы, которое команда выполняет за один спринт. Рассчитывается по всем завершённым спринтам как среднее значение выполненных ${metricUnit}.`,
               value: `${metrics.averageVelocity} ${metricUnit}`,
               change: metrics.velocityTrend > 0 ? `+${metrics.velocityTrend}%` : `${metrics.velocityTrend}%`,
@@ -423,7 +436,7 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
               <h2 className="text-xl font-bold flex items-center gap-2">
                 <TrendingUp className="text-blue-600" size={24} />
                 <span className="inline-flex items-center gap-1.5">
-                  График скорости команды (Velocity)
+                  График скорости команды
                   <TermTooltip term="velocity" iconSize={16} />
                 </span>
               </h2>
@@ -475,7 +488,7 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
             {velocityData?.interpretation && (
               <div className="mt-4 p-4 bg-blue-50 rounded-lg">
                 <h3 className="font-semibold text-blue-900 mb-2">Интерпретация данных</h3>
-                <p className="text-sm text-blue-800">{velocityData.interpretation}</p>
+                <InterpretationText text={velocityData.interpretation} className="text-sm text-blue-800" />
               </div>
             )}
           </div>
@@ -486,7 +499,7 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
               <h2 className="text-xl font-bold flex items-center gap-2">
                 <Activity className="text-green-600" size={24} />
                 <span className="inline-flex items-center gap-1.5">
-                  Диаграмма сгорания задач (Burndown)
+                  Диаграмма сгорания задач
                   <TermTooltip term="burndown" iconSize={16} />
                 </span>
               </h2>
@@ -512,9 +525,10 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
                 <ChartContainer
                   height={400}
                   scrollableOnMobile
-                  minWidthOnMobile={Math.max(560, burndownData.data.length * 45)}
+                  minWidth={Math.max(560, burndownData.data.length * 80)}
+                  minWidthOnMobile={Math.max(560, burndownData.data.length * 80)}
                 >
-                  <LineChart data={burndownData.data} margin={{ ...RECHARTS_MARGIN_DEFAULT, left: 44, bottom: 76 }}>
+                  <LineChart data={burndownData.data} margin={{ ...RECHARTS_MARGIN_DEFAULT, left: 44, right: 40, bottom: 76 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                     <XAxis
                       dataKey="day"
@@ -554,7 +568,7 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
             {burndownData?.interpretation && (
               <div className="mt-4 p-4 bg-green-50 rounded-lg">
                 <h3 className="font-semibold text-green-900 mb-2">Интерпретация данных</h3>
-                <p className="text-sm text-green-800">{burndownData.interpretation}</p>
+                <InterpretationText text={burndownData.interpretation} className="text-sm text-green-800" />
               </div>
             )}
           </div>
@@ -631,7 +645,7 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
                 />
               </ComposedChart>
             )},
-            { title: "Распределение скорости поставки", term: "throughput" as const, icon: Activity, iconColor: "text-amber-600", bgColor: "bg-amber-50", textColor: "text-amber-800", titleColor: "text-amber-900", data: throughputDist, render: (d: DistributionResponse) => (
+            { title: "Распределение скорости поставки", term: "throughputDistribution" as const, icon: Activity, iconColor: "text-amber-600", bgColor: "bg-amber-50", textColor: "text-amber-800", titleColor: "text-amber-900", data: throughputDist, render: (d: DistributionResponse) => (
               <BarChart data={d.data} margin={{ ...RECHARTS_MARGIN_HISTOGRAM }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="range" {...xAxisDefaults({ count: d.data.length })} label={axisTitleXBottom("Диапазон (задач/нед.)")} />
@@ -666,7 +680,7 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
                 <Scatter data={d.data} fill="#3b82f6" />
               </ScatterChart>
             )},
-            { title: "Распределение времени производства", term: "cycleTime" as const, icon: Activity, iconColor: "text-violet-600", bgColor: "bg-violet-50", textColor: "text-violet-800", titleColor: "text-violet-900", data: cycleTimeDist, render: (d: DistributionResponse) => (
+            { title: "Распределение времени производства", term: "cycleTimeDistribution" as const, icon: Activity, iconColor: "text-violet-600", bgColor: "bg-violet-50", textColor: "text-violet-800", titleColor: "text-violet-900", data: cycleTimeDist, render: (d: DistributionResponse) => (
               <BarChart data={d.data} margin={{ ...RECHARTS_MARGIN_HISTOGRAM }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="range" {...xAxisDefaults({ count: d.data.length })} label={axisTitleXBottom("Диапазон (дни)")} />
@@ -679,7 +693,7 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
                 <Bar dataKey="count" fill="#8b5cf6" name="Задач" radius={[8, 8, 0, 0]} />
               </BarChart>
             )},
-            { title: "Возраст задач в работе (WIP Age)", term: "wipLimit" as const, icon: Hourglass, iconColor: "text-rose-600", bgColor: "bg-rose-50", textColor: "text-rose-800", titleColor: "text-rose-900", data: wipAge, scrollableOnMobile: true, render: (d: WipAgeResponse) => {
+            { title: "Возраст задач в работе (WIP Age)", term: "wipAgeChart" as const, icon: Hourglass, iconColor: "text-rose-600", bgColor: "bg-rose-50", textColor: "text-rose-800", titleColor: "text-rose-900", data: wipAge, scrollableOnMobile: true, render: (d: WipAgeResponse) => {
               const sorted = [...d.data].sort((a, b) => b.ageDays - a.ageDays);
               const oldestAccent = ["#dc2626", "#ea580c", "#f97316"] as const;
               const fillByKey = new Map<string, string>();
@@ -732,7 +746,7 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
                 </BarChart>
               );
             }},
-            { title: "Незавершённая работа (WIP)", term: "wipLimit" as const, icon: Activity, iconColor: "text-cyan-600", bgColor: "bg-cyan-50", textColor: "text-cyan-800", titleColor: "text-cyan-900", data: wipHistory, render: (d: WipHistoryResponse) => (
+            { title: "Незавершённая работа в сравнении с WIP-лимитами", term: "wipHistoryChart" as const, icon: Activity, iconColor: "text-cyan-600", bgColor: "bg-cyan-50", textColor: "text-cyan-800", titleColor: "text-cyan-900", data: wipHistory, render: (d: WipHistoryResponse) => (
               <ComposedChart data={d.data} margin={{ ...RECHARTS_MARGIN_DEFAULT, left: 44, bottom: 76 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="date" {...xAxisDefaults({ count: d.data.length })} label={axisTitleXBottom("Дата")} />
@@ -781,7 +795,7 @@ export default function Analytics({ projectId, projectType }: AnalyticsProps) {
                 {chart.data?.interpretation && (
                   <div className={`mt-4 p-4 ${chart.bgColor} rounded-lg`}>
                     <h3 className={`font-semibold ${chart.titleColor} mb-2`}>Интерпретация данных</h3>
-                    <p className={`text-sm ${chart.textColor}`}>{chart.data.interpretation}</p>
+                    <InterpretationText text={chart.data.interpretation} className={`text-sm ${chart.textColor}`} />
                   </div>
                 )}
               </div>

@@ -36,6 +36,11 @@ interface ChartContainerProps {
    */
   scrollableOnMobile?: boolean;
   minWidthOnMobile?: number;
+  /**
+   * Минимальная ширина графика на всех экранах. Если шире контейнера —
+   * включается горизонтальная прокрутка.
+   */
+  minWidth?: number;
   className?: string;
   header?: ReactNode;
 }
@@ -51,12 +56,19 @@ export function ChartContainer({
   mobileHeight,
   scrollableOnMobile,
   minWidthOnMobile = 480,
+  minWidth,
   className,
   header,
 }: ChartContainerProps) {
   const mh = mobileHeight ?? Math.round(height * 0.88);
   const ref = useRef<HTMLDivElement>(null);
   const [cw, setCw] = useState(0);
+
+  const resolveWidth = (floor?: number) => {
+    if (cw <= 0) return 0;
+    if (!floor) return cw;
+    return Math.max(cw, floor);
+  };
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -76,32 +88,49 @@ export function ChartContainer({
     return cloneElement(children as ReactElement<ChartSizeable>, { width: w, height: h });
   };
 
-  const mobileW = scrollableOnMobile ? Math.max(cw, minWidthOnMobile) : cw;
+  const mobileFloor = scrollableOnMobile
+    ? Math.max(minWidth ?? 0, minWidthOnMobile)
+    : minWidth;
+  const mobileW = resolveWidth(mobileFloor);
+  const desktopW = resolveWidth(minWidth);
+  const desktopScroll = minWidth != null && desktopW > cw && cw > 0;
+  const mobileScroll = mobileFloor != null && mobileW > cw && cw > 0;
+
+  const renderChart = (w: number, h: number, scroll: boolean) => (
+    <div
+      className={cn(scroll && "overflow-x-auto overflow-y-visible")}
+      style={{ minHeight: h }}
+    >
+      <div className="overflow-visible" style={{ width: scroll ? w : "100%", minHeight: h }}>
+        {w > 0 ? injectSize(w, h) : <div style={{ minHeight: h }} aria-hidden className="w-full" />}
+      </div>
+    </div>
+  );
 
   return (
     <div ref={ref} className={cn("w-full", className)}>
       {header}
       {scrollableOnMobile ? (
         <>
-          <div className="md:hidden -mx-4 overflow-x-auto overflow-y-visible px-4">
-            <div className="overflow-visible" style={{ width: mobileW || "100%", minHeight: mh }}>
-              {cw > 0 ? injectSize(mobileW, mh) : <div style={{ minHeight: mh }} aria-hidden className="w-full" />}
-            </div>
+          <div className="md:hidden -mx-4 px-4">
+            {renderChart(mobileW, mh, mobileScroll)}
           </div>
-          <div className="hidden min-h-0 overflow-visible md:block" style={{ minHeight: height }}>
-            {cw > 0 ? injectSize(cw, height) : <div style={{ minHeight: height }} aria-hidden className="w-full" />}
+          <div className="hidden md:block">
+            {renderChart(desktopW, height, desktopScroll)}
           </div>
         </>
       ) : (
         <>
-          <div className="md:hidden overflow-visible" style={{ minHeight: mh }}>
-            {cw > 0 ? injectSize(cw, mh) : <div style={{ minHeight: mh }} aria-hidden className="w-full" />}
+          <div className="md:hidden">
+            {renderChart(resolveWidth(minWidth), mh, minWidth != null && mobileW > cw && cw > 0)}
           </div>
-          <div className="hidden min-h-0 overflow-visible md:block" style={{ minHeight: height }}>
-            {cw > 0 ? injectSize(cw, height) : <div style={{ minHeight: height }} aria-hidden className="w-full" />}
+          <div className="hidden md:block">
+            {renderChart(desktopW, height, desktopScroll)}
           </div>
         </>
       )}
     </div>
   );
 }
+
+
